@@ -1,0 +1,39 @@
+const express = require('express');
+const db = require('../db');
+const { requireAuth, requireRole } = require('../middleware/auth');
+const { resolveOrganization } = require('../services/tenant');
+
+const router = express.Router();
+
+router.get('/', requireAuth, requireRole(['super_admin', 'owner', 'admin', 'member', 'viewer']), async (req, res, next) => {
+  try {
+    const organization = await resolveOrganization(req);
+    const { q = '', limit = 100, offset = 0 } = req.query;
+    const safeLimit = Math.min(Math.max(Number(limit) || 100, 1), 200);
+    const safeOffset = Math.max(Number(offset) || 0, 0);
+    const result = await db.query(
+      `select
+        c.id,
+        c.name,
+        c.email,
+        c.phone,
+        c.address,
+        c.created_at,
+        count(o.id)::int as orders,
+        coalesce(sum(o.total), 0)::numeric(12,2) as total
+       from customers c
+       left join orders o on o.customer_id = c.id and o.organization_id = c.organization_id and o.status <> 'cancelled'
+       where c.organization_id = $1 and (c.name ilike $2 or c.email ilike $2 or c.phone ilike $2)
+       group by c.id
+       order by c.created_at desc
+       limit $3 offset $4`,
+      [organization.id, `%${String(q).slice(0, 120)}%`, safeLimit, safeOffset]
+    );
+
+    res.json(result.rows);
+  } catch (err) {
+    next(err);
+  }
+});
+
+module.exports = router;

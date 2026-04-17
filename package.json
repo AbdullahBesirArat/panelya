@@ -1,0 +1,25 @@
+{
+  "name": "maveran-platform",
+  "version": "2.0.0",
+  "private": true,
+  "workspaces": [
+    "apps/web",
+    "maveran-api"
+  ],
+  "scripts": {
+    "dev:web": "npm --prefix apps/web run dev",
+    "build:web": "npm --prefix apps/web run build",
+    "lint:web": "npm --prefix apps/web run lint",
+    "typecheck:web": "npm --prefix apps/web run typecheck",
+    "dev:api": "npm --prefix maveran-api run dev",
+    "start:api": "npm --prefix maveran-api run start",
+    "check:api": "npm --prefix maveran-api run check:syntax",
+    "db:migrate": "npm --prefix maveran-api run db:migrate",
+    "db:setup": "npm --prefix maveran-api run db:setup",
+    "demo:seed": "npm --prefix maveran-api run demo:seed",
+    "smoke:auth": "npm --prefix maveran-api run smoke:auth",
+    "smoke:payment": "npm --prefix maveran-api run smoke:payment",
+    "check:production": "npm --prefix maveran-api run production:check",
+    "secrets:generate": "npm --prefix maveran-api run secrets:generate"
+  }
+}

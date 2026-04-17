@@ -1,0 +1,64 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: maveran
+      POSTGRES_USER: maveran_user
+      POSTGRES_PASSWORD: maveran_dev_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U maveran_user -d maveran"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: ./maveran-api
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      DATABASE_URL: postgresql://maveran_user:maveran_dev_password@postgres:5432/maveran
+      JWT_SECRET: 7a9f9b3c6d8e4f1a2b5c7d9e0f3a4b6c8d1e2f4a6b8c0d2e4f6a8b0c2d4e6f8
+      JWT_EXPIRES_IN: 2h
+      CORS_ORIGIN: http://localhost:3001
+      API_RATE_LIMIT: 600
+      LOGIN_RATE_LIMIT: 10
+      UPLOAD_RATE_LIMIT: 40
+      UPLOAD_DIR: /app/uploads
+      PAYMENT_PROVIDER: mock
+      PAYMENT_MOCK_AUTO_PAY: "false"
+      PAYMENT_CALLBACK_SECRET_REQUIRED: "false"
+      PUBLIC_SITE_URL: http://localhost:3001
+      PUBLIC_API_URL: http://localhost:3000
+      PAYMENT_CALLBACK_URL: http://localhost:3000/api/payment/callback
+      DEFAULT_ORGANIZATION_SLUG: maveran
+    ports:
+      - "3000:3000"
+    command: >
+      sh -c "npm run db:schema &&
+      npm run db:seed &&
+      npm run db:migrate &&
+      npm start"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - api_uploads:/app/uploads
+
+  web:
+    build:
+      context: ./apps/web
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:3000/api
+    ports:
+      - "3001:3001"
+    depends_on:
+      - api
+
+volumes:
+  postgres_data:
+  api_uploads:
