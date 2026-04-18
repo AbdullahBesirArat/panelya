@@ -79,6 +79,32 @@ export type ApiOrder = {
   updated_at: string;
 };
 
+export type ApiSlide = {
+  id: string;
+  organization_id: string;
+  tag: string;
+  title: string;
+  sub: string;
+  btn: string;
+  image_url: string;
+  active: boolean;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ApiCampaign = {
+  id: string;
+  organization_id: string;
+  name: string;
+  type: string;
+  value: string;
+  end_date: string | null;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
 export type OrganizationSummary = {
   organization: {
     id: string;
@@ -417,6 +443,110 @@ export async function updateOrderStatus(id: string, status: OrderStatus) {
   return authenticatedRequest<ApiOrder>(`/orders/${id}/status`, {
     method: "PUT",
     body: JSON.stringify({ status }),
+  });
+}
+
+export async function fetchSlides() {
+  return authenticatedRequest<ApiSlide[]>("/slider/admin/all");
+}
+
+export async function createSlide(payload: {
+  tag?: string;
+  title: string;
+  sub?: string;
+  btn?: string;
+  imageUrl?: string;
+  active: boolean;
+  sortOrder: number;
+}) {
+  return authenticatedRequest<ApiSlide>("/slider", {
+    method: "POST",
+    body: JSON.stringify({
+      tag: payload.tag || "",
+      title: payload.title,
+      sub: payload.sub || "",
+      btn: payload.btn || "Kesfet",
+      image_url: payload.imageUrl || "",
+      active: payload.active,
+      sort_order: payload.sortOrder,
+    }),
+  });
+}
+
+export async function updateSlide(id: string, payload: {
+  tag?: string;
+  title: string;
+  sub?: string;
+  btn?: string;
+  imageUrl?: string;
+  active: boolean;
+  sortOrder: number;
+}) {
+  return authenticatedRequest<ApiSlide>(`/slider/${id}`, {
+    method: "PUT",
+    body: JSON.stringify({
+      tag: payload.tag || "",
+      title: payload.title,
+      sub: payload.sub || "",
+      btn: payload.btn || "Kesfet",
+      image_url: payload.imageUrl || "",
+      active: payload.active,
+      sort_order: payload.sortOrder,
+    }),
+  });
+}
+
+export async function deleteSlide(id: string) {
+  return authenticatedRequest<void>(`/slider/${id}`, {
+    method: "DELETE",
+  });
+}
+
+export async function fetchCampaigns() {
+  return authenticatedRequest<ApiCampaign[]>("/campaigns/admin/all");
+}
+
+export async function createCampaign(payload: {
+  name: string;
+  type: string;
+  value: number;
+  endDate?: string | null;
+  active: boolean;
+}) {
+  return authenticatedRequest<ApiCampaign>("/campaigns", {
+    method: "POST",
+    body: JSON.stringify({
+      name: payload.name,
+      type: payload.type,
+      value: payload.value,
+      end_date: payload.endDate || null,
+      active: payload.active,
+    }),
+  });
+}
+
+export async function updateCampaign(id: string, payload: {
+  name: string;
+  type: string;
+  value: number;
+  endDate?: string | null;
+  active: boolean;
+}) {
+  return authenticatedRequest<ApiCampaign>(`/campaigns/${id}`, {
+    method: "PUT",
+    body: JSON.stringify({
+      name: payload.name,
+      type: payload.type,
+      value: payload.value,
+      end_date: payload.endDate || null,
+      active: payload.active,
+    }),
+  });
+}
+
+export async function deleteCampaign(id: string) {
+  return authenticatedRequest<void>(`/campaigns/${id}`, {
+    method: "DELETE",
   });
 }
 

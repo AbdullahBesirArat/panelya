@@ -24,7 +24,7 @@ Beklenen sonuc:
 
 - Auth smoke register, me, refresh ve logout adimlarini OK yazar.
 - Payment smoke mock provider ile initialize, wrong callback secret reject, paid callback ve failure callback adimlarini OK yazar.
-- Web build ciktisinda `/dashboard`, `/products`, `/orders`, `/customers`, `/analytics`, `/settings` route'lari uretilir.
+- Web build ciktisinda `/dashboard`, `/products`, `/orders`, `/customers`, `/content`, `/analytics`, `/settings` route'lari uretilir.
 
 ## Product Demo Acceptance
 
@@ -43,7 +43,8 @@ Browser kabul adimlari:
 - `/dashboard` dolu metrikler, recent orders ve low stock verisi gosterir.
 - `/products` urun listeler, kategori ekler, urun olusturur, mevcut urunu duzenler ve owner rolunde siler.
 - `/orders` siparisleri listeler ve admin/owner rolunde status gunceller.
-- `/customers`, `/analytics`, `/settings` sayfalari ayni workspace verisiyle acilir.
+- `/customers`, `/content`, `/analytics`, `/settings` sayfalari ayni workspace verisiyle acilir.
+- `/content` slayt ve kampanya listeler; owner/admin rolunde olusturma ve guncelleme akislari calisir.
 - Logout sonrasi korumali sayfalar `/login` adresine yonlenir.
 
 ## Iyzico Sandbox E2E

@@ -15,6 +15,10 @@ const CustomersSection = dynamic(
   () => import("@/components/sections/customers-section").then((mod) => mod.CustomersSection),
   { loading }
 );
+const ContentSection = dynamic(
+  () => import("@/components/sections/content-section").then((mod) => mod.ContentSection),
+  { loading }
+);
 const DashboardSection = dynamic(
   () => import("@/components/sections/dashboard-section").then((mod) => mod.DashboardSection),
   { loading }
@@ -50,6 +54,8 @@ export function OperationsContent({ sectionKey }: { sectionKey: string }) {
       return <OrdersSection currentRole={currentRole} organizationSlug={activeOrganizationSlug} />;
     case "customers":
       return <CustomersSection organizationSlug={activeOrganizationSlug} />;
+    case "content":
+      return <ContentSection currentRole={currentRole} organizationSlug={activeOrganizationSlug} />;
     case "analytics":
       return <AnalyticsSection organizationSlug={activeOrganizationSlug} />;
     case "settings":

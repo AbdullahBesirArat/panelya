@@ -93,6 +93,60 @@ const products = [
   },
 ];
 
+const slides = [
+  {
+    tag: 'Panelya Operations',
+    title: 'Mavera vitrin akisi',
+    sub: 'Tek workspace icinde siparis, stok ve kampanya yonetimi.',
+    btn: 'Katalogu ac',
+    imageUrl: 'https://images.unsplash.com/photo-1523381294911-8d3cead13475?auto=format&fit=crop&w=1200&q=80',
+    sortOrder: 1,
+    active: true,
+  },
+  {
+    tag: 'Fulfillment',
+    title: 'Stok ve operasyon kontrolu',
+    sub: 'Azalan urunleri, siparis durumlarini ve ekip aksiyonlarini ayni panelde izle.',
+    btn: 'Operasyonu izle',
+    imageUrl: 'https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?auto=format&fit=crop&w=1200&q=80',
+    sortOrder: 2,
+    active: true,
+  },
+  {
+    tag: 'Demo',
+    title: 'Yeni kampanya hazirligi',
+    sub: 'Pasif slaytlar yayin oncesi duzenlenebilir.',
+    btn: 'Taslagi ac',
+    imageUrl: '',
+    sortOrder: 3,
+    active: false,
+  },
+];
+
+const campaigns = [
+  {
+    name: 'Showcase Launch',
+    type: 'percentage',
+    value: 15,
+    endDate: '2026-05-15',
+    active: true,
+  },
+  {
+    name: 'Fulfillment Bundle',
+    type: 'bundle',
+    value: 0,
+    endDate: null,
+    active: true,
+  },
+  {
+    name: 'Archived Spring Promo',
+    type: 'percentage',
+    value: 10,
+    endDate: '2026-04-10',
+    active: false,
+  },
+];
+
 const customers = [
   {
     key: 'northstar',
@@ -246,6 +300,8 @@ async function upsertUser(client, passwordHash) {
 
 async function resetWorkspaceData(client, organizationId) {
   await client.query('delete from activity_logs where organization_id = $1', [organizationId]);
+  await client.query('delete from campaigns where organization_id = $1', [organizationId]);
+  await client.query('delete from slider_items where organization_id = $1', [organizationId]);
   await client.query(
     `delete from order_items
      where order_id in (select id from orders where organization_id = $1)`,
@@ -301,6 +357,43 @@ async function seedProducts(client, organizationId, categoryIds) {
   }
 
   return map;
+}
+
+async function seedSlides(client, organizationId) {
+  for (const slide of slides) {
+    await client.query(
+      `insert into slider_items
+       (organization_id, tag, title, sub, btn, image_url, active, sort_order)
+       values ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [
+        organizationId,
+        slide.tag,
+        slide.title,
+        slide.sub,
+        slide.btn,
+        slide.imageUrl,
+        slide.active,
+        slide.sortOrder,
+      ]
+    );
+  }
+}
+
+async function seedCampaigns(client, organizationId) {
+  for (const campaign of campaigns) {
+    await client.query(
+      `insert into campaigns (organization_id, name, type, value, end_date, active)
+       values ($1, $2, $3, $4, $5, $6)`,
+      [
+        organizationId,
+        campaign.name,
+        campaign.type,
+        campaign.value,
+        campaign.endDate,
+        campaign.active,
+      ]
+    );
+  }
 }
 
 async function seedCustomers(client, organizationId) {
@@ -418,6 +511,8 @@ async function main() {
 
     const categoryIds = await seedCategories(client, organization.id);
     const productIds = await seedProducts(client, organization.id, categoryIds);
+    await seedSlides(client, organization.id);
+    await seedCampaigns(client, organization.id);
     const customerIds = await seedCustomers(client, organization.id);
 
     await seedOrders(client, organization.id, customerIds, productIds);

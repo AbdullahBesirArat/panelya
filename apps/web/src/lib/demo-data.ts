@@ -3,6 +3,7 @@ export const navigationItems = [
   { key: "products", label: "Products" },
   { key: "orders", label: "Orders" },
   { key: "customers", label: "Customers" },
+  { key: "content", label: "Content" },
   { key: "analytics", label: "Analytics" },
   { key: "settings", label: "Settings" },
 ] as const;
@@ -38,6 +39,12 @@ export const sectionMeta: Record<string, {
     title: "Musteri gorunumu",
     description: "Siparis gecmisi ve toplam harcamayi tek akista izle.",
     image: "https://images.unsplash.com/photo-1556745757-8d76bdb6984b?auto=format&fit=crop&w=900&q=80",
+  },
+  content: {
+    kicker: "Content",
+    title: "Vitrin ve kampanya yonetimi",
+    description: "Her workspace kendi ana sayfa slaytlarini ve promosyon akislarini yonetir.",
+    image: "https://images.unsplash.com/photo-1516321497487-e288fb19713f?auto=format&fit=crop&w=900&q=80",
   },
   analytics: {
     kicker: "Analytics",

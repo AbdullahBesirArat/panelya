@@ -119,7 +119,7 @@ Admin panelde:
 6. Siparis olustur.
 7. Siparisi admin panelde gor.
 8. Iyzico odeme yarida kalirsa bekleyen siparisin zaman asimi goreviyle iptal oldugunu ve stogun geri geldigini kontrol et.
-9. Staging demo linki varsa `maveran-demo` workspace'inin dolu dashboard ile acildigini kontrol et.
+9. Staging demo linki varsa `mavera` workspace'inin dolu dashboard ile acildigini kontrol et.
 
 ## 8. Maveran 2.0 Showcase Gate
 
@@ -127,10 +127,11 @@ Public demo linkini paylasmadan once `docs/SHOWCASE-VERIFICATION.md` dosyasindak
 
 1. README Live Demo alanina deploy URL'sini yaz.
 2. Demo kullanicisi ile login ol.
-3. Dashboard, products, orders, customers, analytics ve settings sayfalarini gez.
+3. Dashboard, products, orders, customers, content, analytics ve settings sayfalarini gez.
 4. Products ekraninda urun olustur, duzenle ve owner rolunde sil.
-5. Orders ekraninda status guncelle.
-6. Logout sonrasi korumali route'larin `/login` adresine dondugunu dogrula.
-7. Iyzico sandbox credential'i varsa basarili ve basarisiz odeme akislarini tamamla.
+5. Content ekraninda slayt ve kampanya olusturup guncelle.
+6. Orders ekraninda status guncelle.
+7. Logout sonrasi korumali route'larin `/login` adresine dondugunu dogrula.
+8. Iyzico sandbox credential'i varsa basarili ve basarisiz odeme akislarini tamamla.
 
 Demo deploy notu: `NODE_ENV=staging` ile mock payment kullanilabilir. `NODE_ENV=production` ortaminda `PAYMENT_PROVIDER=mock` kullanma; production icin iyzico env degerleri zorunludur.

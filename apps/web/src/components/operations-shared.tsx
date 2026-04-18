@@ -2,6 +2,8 @@
 
 import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { fetchOrganizationSummary, type ApiCategory, type OrganizationSummary } from "@/lib/api";
 import { displayBrandName } from "@/lib/branding";
 
@@ -57,16 +59,16 @@ export function Panel({
   children: ReactNode;
 }) {
   return (
-    <section className="overflow-hidden rounded-lg border border-line bg-white shadow-panel">
-      <div className="flex flex-col gap-3 border-b border-line px-4 py-4 sm:px-5 lg:flex-row lg:items-center lg:justify-between">
+    <Card className="overflow-hidden">
+      <CardHeader>
         <div>
-          <h2 className="text-lg font-bold">{title}</h2>
-          {description ? <p className="mt-1 text-sm text-zinc-500">{description}</p> : null}
+          <CardTitle>{title}</CardTitle>
+          {description ? <CardDescription>{description}</CardDescription> : null}
         </div>
         {actions}
-      </div>
-      <div className="p-4 sm:p-5">{children}</div>
-    </section>
+      </CardHeader>
+      <CardContent>{children}</CardContent>
+    </Card>
   );
 }
 
@@ -129,18 +131,7 @@ export function StatusPill({
   tone: "mint" | "coral" | "leaf" | "sun";
   children: ReactNode;
 }) {
-  const toneClass = {
-    mint: "border-mint/30 bg-mint/10 text-mint",
-    coral: "border-coral/30 bg-coral/10 text-coral",
-    leaf: "border-leaf/30 bg-leaf/10 text-leaf",
-    sun: "border-sun/30 bg-sun/10 text-zinc-700",
-  }[tone];
-
-  return (
-    <span className={`inline-flex min-h-8 items-center rounded-lg border px-2.5 py-1 text-xs font-semibold ${toneClass}`}>
-      {children}
-    </span>
-  );
+  return <Badge tone={tone}>{children}</Badge>;
 }
 
 export function FieldLabel({
@@ -286,6 +277,10 @@ function entityLabel(entity: string) {
       return "musteri";
     case "organization":
       return "workspace";
+    case "slider":
+      return "slayt";
+    case "campaign":
+      return "kampanya";
     default:
       return entity;
   }

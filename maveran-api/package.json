@@ -20,6 +20,7 @@
     "production:check": "node scripts/production-check.js",
     "check:syntax": "node scripts/check-syntax.js",
     "smoke:auth": "powershell -ExecutionPolicy Bypass -File scripts/smoke-auth.ps1",
+    "smoke:auth:bash": "bash scripts/smoke-auth.sh",
     "smoke:payment": "powershell -ExecutionPolicy Bypass -File scripts/smoke-payment.ps1",
     "smoke:payment:bash": "bash scripts/smoke-payment.sh",
     "secrets:generate": "node scripts/generate-secrets.js"

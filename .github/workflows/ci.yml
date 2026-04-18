@@ -1,4 +1,4 @@
-name: Maveran CI
+name: Panelya CI
 
 on:
   push:
@@ -83,4 +83,5 @@ jobs:
           done
           cat api.log
           exit 1
+      - run: npm run smoke:auth:bash
       - run: npm run smoke:payment:bash

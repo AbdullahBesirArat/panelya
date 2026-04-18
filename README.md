@@ -39,9 +39,11 @@ Recruiter flow:
 - Product and category management, including create, update and delete flows
 - Order listing and status updates
 - Customer list and spend view
-- Analytics summary
+- Content management for workspace storefront slides and campaigns
+- Analytics summary with order status chart
 - Settings summary for plan, subscription and team footprint
 - Toast feedback, retry actions, empty states and mobile-friendly navigation polish
+- Swagger UI and JSON spec under the API deploy
 
 ## Architecture
 
@@ -128,8 +130,10 @@ npm run secrets:generate
 Railway demo start command:
 
 ```bash
-npm run start:api
+npm run deploy:staging
 ```
+
+For real production use `npm run deploy:production` and set `PAYMENT_PROVIDER=iyzico`.
 
 Vercel web env:
 
@@ -147,6 +151,6 @@ Detailed infra notes live in:
 
 ## Roadmap
 
-- Tenant-safe slider and campaign modules
 - Team invite and role management
-- Swagger docs, email flows and Redis cache
+- Email flows and Redis cache
+- Production iyzico E2E sign-off

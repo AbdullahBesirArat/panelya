@@ -22,6 +22,7 @@
     "deploy:api:staging": "npm --prefix maveran-api run deploy:staging",
     "deploy:api:production": "npm --prefix maveran-api run deploy:production",
     "smoke:auth": "npm --prefix maveran-api run smoke:auth",
+    "smoke:auth:bash": "npm --prefix maveran-api run smoke:auth:bash",
     "smoke:payment": "npm --prefix maveran-api run smoke:payment",
     "smoke:payment:bash": "npm --prefix maveran-api run smoke:payment:bash",
     "check:production": "npm --prefix maveran-api run production:check",

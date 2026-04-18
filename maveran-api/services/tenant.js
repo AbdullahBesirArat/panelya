@@ -18,6 +18,7 @@ function requestedOrganizationSlug(req) {
 
   return slugify(
     req.get('x-organization-slug')
+    || req.query.organizationSlug
     || req.query.organization
     || req.body.organizationSlug
     || process.env.DEFAULT_ORGANIZATION_SLUG

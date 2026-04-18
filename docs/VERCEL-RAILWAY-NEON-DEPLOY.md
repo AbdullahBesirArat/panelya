@@ -16,7 +16,7 @@ Railway projesinde GitHub reposunu import et.
 Service ayarları:
 
 - Root Directory: `maveran-api`
-- Start Command: `npm run start:api`
+- Start Command: `npm run deploy:staging`
 - Healthcheck Path: `/api/health`
 
 Demo/staging variables:
@@ -122,8 +122,9 @@ npm run production:check
 
 - `/login` açılır.
 - Demo kullanıcı login olur.
-- `/dashboard`, `/products`, `/orders`, `/customers`, `/analytics`, `/settings` veri gösterir.
+- `/dashboard`, `/products`, `/orders`, `/customers`, `/content`, `/analytics`, `/settings` veri gösterir.
 - `/analytics` durum grafiği ve tabloyu gösterir.
+- `/content` slayt ve kampanya listelerini gösterir; owner/admin rolünde kayıt oluşturur ve günceller.
 - Logout sonrası korumalı route `/login` adresine döner.
 
 README'deki Live Demo alanını yalnızca bu testler geçince güncelle.

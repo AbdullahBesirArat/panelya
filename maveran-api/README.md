@@ -6,7 +6,7 @@ Panelya operations platformunun production gecis API katmani.
 
 - Node.js + Express
 - PostgreSQL
-- JWT admin oturumu
+- JWT app session + admin oturumu
 - Multer + Sharp ile gorsel yukleme
 - iyzipay Checkout Form SDK
 - PM2/Nginx ile production calisma hedefi
@@ -84,6 +84,13 @@ Saglik kontrolu:
 curl http://localhost:3000/api/health
 ```
 
+Swagger dokumani:
+
+```bash
+http://localhost:3000/api/docs
+http://localhost:3000/api/docs-json
+```
+
 Smoke kontrolleri:
 
 ```bash
@@ -127,7 +134,15 @@ Public staging ortami icin `DEMO_OWNER_*` degiskenleriyle bu degerleri override 
 - `GET /api/organizations/current/summary`
 - `POST /api/upload`
 - `GET /api/slider`
+- `GET /api/slider/admin/all`
+- `POST /api/slider`
+- `PUT /api/slider/:id`
+- `DELETE /api/slider/:id`
 - `GET /api/campaigns`
+- `GET /api/campaigns/admin/all`
+- `POST /api/campaigns`
+- `PUT /api/campaigns/:id`
+- `DELETE /api/campaigns/:id`
 
 Admin korumali endpointler icin:
 
@@ -150,7 +165,7 @@ IYZICO_SECRET_KEY=...
 IYZICO_BASE_URL=https://api.iyzipay.com
 ```
 
-Production ortamda `PAYMENT_PROVIDER=mock` sadece test icin kullanilmalidir. Canli odemeye gecmeden once Iyzico panelindeki callback URL, `PAYMENT_CALLBACK_URL` degeriyle ayni olmalidir.
+Production ortamda `PAYMENT_PROVIDER=mock` kullanilmaz; canli odeme icin `PAYMENT_PROVIDER=iyzico` zorunludur. Canli odemeye gecmeden once Iyzico panelindeki callback URL, `PAYMENT_CALLBACK_URL` degeriyle ayni olmalidir.
 
 Mock flow icin callback guvenlik testi yapmak istersen:
 
