@@ -113,6 +113,9 @@ function corsOptions() {
     origin(origin, callback) {
       if (!origin && !isProduction()) return callback(null, true);
       if (allowedOrigins.includes(origin)) return callback(null, true);
+      if (!isProduction() && /^https:\/\/[a-z0-9-]+\.vercel\.app$/i.test(String(origin || ''))) {
+        return callback(null, true);
+      }
       return callback(new Error('CORS origin reddedildi'), false);
     },
   };
