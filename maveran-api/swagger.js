@@ -10,7 +10,7 @@ const options = {
       title: 'Panelya API',
       version: '2.0.0',
       description: 'Multi-tenant SaaS operations platform API. JWT Bearer token ile kimlik dogrulama yapilir.',
-      'x-panelya-release': 'content-analytics-2026-04-18',
+      'x-panelya-release': 'content-analytics-2026-04-18-r2',
     },
     servers: [
       {
