@@ -91,6 +91,8 @@ http://localhost:3000/api/docs
 http://localhost:3000/api/docs-json
 ```
 
+Swagger spec auth, catalog, order, customer, organization, payment and content endpointslerini kapsar.
+
 Smoke kontrolleri:
 
 ```bash
