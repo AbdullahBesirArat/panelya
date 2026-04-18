@@ -1,10 +1,10 @@
-# Maveran 2.0
+# Panelya Operations
 
 Multi-tenant SaaS operations platform built by evolving an existing commerce backend into a hiring-ready product demo.
 
 ## What It Does
 
-Maveran 2.0 gives each organization its own workspace, session context, operational dashboard, product catalog, order tracking, customer view and analytics surface.
+Panelya gives each organization its own workspace, session context, operational dashboard, product catalog, order tracking, customer view and analytics surface. Mavera is the first demo store/workspace on the platform.
 
 Recruiter flow:
 
@@ -17,8 +17,8 @@ Recruiter flow:
 
 - Local demo: `http://localhost:3001`
 - Public demo: add the Vercel URL after the Neon + Railway + Vercel deployment passes the showcase checklist.
-- Demo email: `demo@maveran.dev`
-- Demo workspace: `maveran-demo`
+- Demo email: `demo@panelya.dev`
+- Demo workspace: `mavera`
 
 ## Stack
 
@@ -84,9 +84,9 @@ API health runs on `http://localhost:3000/api/health`.
 
 After `npm run demo:seed`, use this showcase workspace:
 
-- Organization slug: `maveran-demo`
-- Email: `demo@maveran.dev`
-- Password: `MaveranDemo!123`
+- Organization slug: `mavera`
+- Email: `demo@panelya.dev`
+- Password: `PanelyaDemo!123`
 
 Override them with `DEMO_OWNER_EMAIL`, `DEMO_OWNER_PASSWORD`, `DEMO_OWNER_NAME`, `DEMO_ORGANIZATION_NAME` and `DEMO_ORGANIZATION_SLUG` when preparing a staging demo.
 
@@ -126,7 +126,7 @@ npm run secrets:generate
 Railway demo start command:
 
 ```bash
-npm run deploy:staging
+npm run start:api
 ```
 
 Vercel web env:

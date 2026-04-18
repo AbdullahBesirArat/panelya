@@ -5,6 +5,7 @@ import Image from "next/image";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { loginSession, registerWorkspace } from "@/lib/api";
+import { PLATFORM_NAME } from "@/lib/branding";
 import { useSessionStore } from "@/store/session";
 import { useToastStore } from "@/store/toast";
 
@@ -96,7 +97,7 @@ export default function LoginPage() {
     <main className="grid min-h-screen grid-cols-1 bg-paper text-ink lg:grid-cols-[1.05fr_0.95fr]">
       <section className="flex items-center px-6 py-10 sm:px-10 lg:px-16">
         <div className="w-full max-w-md">
-          <p className="text-sm font-semibold uppercase text-mint">Maveran</p>
+          <p className="text-sm font-semibold uppercase text-mint">{PLATFORM_NAME}</p>
           <h1 className="mt-3 text-4xl font-bold leading-tight">Operasyonlar tek merkezde.</h1>
           <p className="mt-4 text-base leading-7 text-zinc-600">
             Workspace kur, ekibini davet et, siparis ve stok akislarini tek panelden yonet.
@@ -126,7 +127,7 @@ export default function LoginPage() {
                 <input
                   className="focus-ring mt-2 h-12 w-full rounded-lg border border-line bg-white px-4"
                   onChange={(event) => setLoginForm((state) => ({ ...state, email: event.target.value }))}
-                  placeholder="owner@maveran.com"
+                  placeholder="owner@panelya.com"
                   type="email"
                   value={loginForm.email}
                 />
@@ -146,7 +147,7 @@ export default function LoginPage() {
                 <input
                   className="focus-ring mt-2 h-12 w-full rounded-lg border border-line bg-white px-4"
                   onChange={(event) => setLoginForm((state) => ({ ...state, organizationSlug: event.target.value }))}
-                  placeholder="maveran"
+                  placeholder="mavera"
                   type="text"
                   value={loginForm.organizationSlug}
                 />
@@ -192,7 +193,7 @@ export default function LoginPage() {
                 <input
                   className="focus-ring mt-2 h-12 w-full rounded-lg border border-line bg-white px-4"
                   onChange={(event) => setRegisterForm((state) => ({ ...state, organizationName: event.target.value }))}
-                  placeholder="Maveran Labs"
+                  placeholder="Mavera"
                   type="text"
                   value={registerForm.organizationName}
                 />
@@ -202,7 +203,7 @@ export default function LoginPage() {
                 <input
                   className="focus-ring mt-2 h-12 w-full rounded-lg border border-line bg-white px-4"
                   onChange={(event) => setRegisterForm((state) => ({ ...state, organizationSlug: event.target.value }))}
-                  placeholder="maveran-labs"
+                  placeholder="mavera"
                   type="text"
                   value={registerForm.organizationSlug}
                 />

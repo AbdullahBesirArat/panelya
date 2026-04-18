@@ -1,6 +1,6 @@
-# Maveran 2.0 Uygulama Notlari
+# Panelya Operations Uygulama Notlari
 
-Maveran 2.0 hedefi mevcut e-ticaret cekirdegini cok kiracili bir SaaS operations platformuna tasimaktir.
+Panelya Operations hedefi mevcut e-ticaret cekirdegini cok kiracili bir SaaS operations platformuna tasimaktir. Mavera bu platformdaki ilk magazadir.
 
 ## Baslatilan Degisimler
 
@@ -56,12 +56,12 @@ Recruiter demo verisi:
 npm run demo:seed
 ```
 
-Bu komut `maveran-demo` slug'i altinda dolu dashboard, urunler, musteriler, siparisler ve aktivite kayitlari olusturur.
+Bu komut `mavera` slug'i altinda dolu dashboard, urunler, musteriler, siparisler ve aktivite kayitlari olusturur.
 
 Railway public demo start command:
 
 ```bash
-npm run deploy:staging
+npm run start:api
 ```
 
 ## Siradaki Faz

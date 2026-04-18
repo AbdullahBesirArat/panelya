@@ -16,7 +16,7 @@ Railway projesinde GitHub reposunu import et.
 Service ayarları:
 
 - Root Directory: `maveran-api`
-- Start Command: `npm run deploy:staging`
+- Start Command: `npm run start:api`
 - Healthcheck Path: `/api/health`
 
 Demo/staging variables:
@@ -49,10 +49,11 @@ PUBLIC_SITE_URL=<VERCEL_URL>
 PAYMENT_CALLBACK_URL=<RAILWAY_URL>/api/payment/callback
 PAYMENT_SUCCESS_URL=<VERCEL_URL>/?payment=success
 PAYMENT_FAILURE_URL=<VERCEL_URL>/orders?payment=failed
-DEFAULT_ORGANIZATION_SLUG=maveran-demo
-DEMO_OWNER_EMAIL=demo@maveran.dev
+DEFAULT_ORGANIZATION_SLUG=mavera
+DEMO_OWNER_EMAIL=demo@panelya.dev
 DEMO_OWNER_PASSWORD=<paylasmadan once degistir>
-DEMO_ORGANIZATION_SLUG=maveran-demo
+DEMO_ORGANIZATION_NAME=Mavera
+DEMO_ORGANIZATION_SLUG=mavera
 ```
 
 `JWT_SECRET` ve `PAYMENT_CALLBACK_SECRET` için:

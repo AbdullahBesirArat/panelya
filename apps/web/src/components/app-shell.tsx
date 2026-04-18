@@ -6,6 +6,7 @@ import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchMe, logoutSession, switchOrganizationSession } from "@/lib/api";
+import { displayBrandName, PLATFORM_NAME } from "@/lib/branding";
 import { navigationItems } from "@/lib/demo-data";
 import { useSessionStore } from "@/store/session";
 import { useToastStore } from "@/store/toast";
@@ -122,7 +123,7 @@ export function AppShell({
     return (
       <div className="flex min-h-screen items-center justify-center bg-paper px-6">
         <div className="w-full max-w-md rounded-lg border border-line bg-white p-6 text-center shadow-panel">
-          <p className="text-sm font-semibold uppercase text-mint">Maveran</p>
+          <p className="text-sm font-semibold uppercase text-mint">{PLATFORM_NAME}</p>
           <p className="mt-3 text-lg font-bold">Oturum hazirlaniyor</p>
         </div>
       </div>
@@ -133,7 +134,7 @@ export function AppShell({
     <div className="min-h-screen bg-paper text-ink">
       <aside className="fixed inset-y-0 left-0 z-20 hidden w-64 border-r border-line bg-white px-5 py-6 lg:block">
         <Link className="focus-ring block rounded-lg" href="/dashboard">
-          <p className="text-sm font-semibold uppercase text-mint">Maveran</p>
+          <p className="text-sm font-semibold uppercase text-mint">{PLATFORM_NAME}</p>
           <p className="mt-1 text-xl font-bold">Operations</p>
         </Link>
         <nav className="mt-8 space-y-2">
@@ -159,8 +160,8 @@ export function AppShell({
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
               <p className="text-xs font-semibold uppercase text-zinc-500">Workspace</p>
-              <p className="text-lg font-bold">{displayOrganization.name}</p>
-              <p className="text-sm text-zinc-500">{displayUser.name || displayUser.email}</p>
+              <p className="text-lg font-bold">{displayBrandName(displayOrganization.name)}</p>
+              <p className="text-sm text-zinc-500">{displayBrandName(displayUser.name) || displayUser.email}</p>
             </div>
             <div className="flex flex-col gap-2 sm:flex-row">
               <select
@@ -171,7 +172,7 @@ export function AppShell({
               >
                 {displayOrganizations.map((organization) => (
                   <option key={organization.slug} value={organization.slug}>
-                    {organization.name} ({organization.role})
+                    {displayBrandName(organization.name)} ({organization.role})
                   </option>
                 ))}
               </select>

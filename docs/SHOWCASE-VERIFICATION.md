@@ -1,4 +1,4 @@
-# Maveran Showcase Verification
+# Panelya Showcase Verification
 
 Bu dosya Wellfound-ready demo icin son kabul kapisidir. Kodda desteklenen akislari, dis ortamda manuel dogrulanmasi gereken deploy/secret/iyzico adimlarindan ayirir.
 

@@ -9,7 +9,7 @@ function main() {
   const callbackSecret = secret(32);
   const adminBootstrapPassword = secret(18);
 
-  console.log('Maveran secret seti hazir.');
+  console.log('Panelya secret seti hazir.');
   console.log('');
   console.log(`JWT_SECRET=${jwtSecret}`);
   console.log(`PAYMENT_CALLBACK_SECRET=${callbackSecret}`);

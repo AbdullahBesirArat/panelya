@@ -1,6 +1,6 @@
-# Maveran API
+# Panelya API
 
-Maveran e-ticaret platformunun production gecis API katmani.
+Panelya operations platformunun production gecis API katmani.
 
 ## Teknoloji
 
@@ -95,9 +95,9 @@ npm run secrets:generate
 
 Demo login bilgileri:
 
-- Organization slug: `maveran-demo`
-- Email: `demo@maveran.dev`
-- Password: `MaveranDemo!123`
+- Organization slug: `mavera`
+- Email: `demo@panelya.dev`
+- Password: `PanelyaDemo!123`
 
 Public staging ortami icin `DEMO_OWNER_*` degiskenleriyle bu degerleri override et.
 

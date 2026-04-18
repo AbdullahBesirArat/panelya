@@ -1,7 +1,7 @@
 {
   "name": "maveran-api",
   "version": "1.0.0",
-  "description": "Maveran e-ticaret platformu REST API",
+  "description": "Panelya operations platform REST API",
   "main": "server.js",
   "scripts": {
     "dev": "node --watch server.js",

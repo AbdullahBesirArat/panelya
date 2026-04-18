@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchOrganizationSummary, type ApiCategory, type OrganizationSummary } from "@/lib/api";
+import { displayBrandName } from "@/lib/branding";
 
 const currencyFormatter = new Intl.NumberFormat("tr-TR", {
   style: "currency",
@@ -251,7 +252,7 @@ export function describeActivity(activity: OrganizationSummary["recentActivity"]
   const action = activityActionLabel(activity.action);
   const entity = entityLabel(activity.entity_type);
   const suffix = name ? `: ${name}` : "";
-  return `${activity.actor_name} ${action} ${entity}${suffix}`;
+  return `${displayBrandName(activity.actor_name)} ${action} ${entity}${suffix}`;
 }
 
 function activityActionLabel(action: string) {

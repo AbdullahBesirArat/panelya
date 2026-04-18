@@ -55,7 +55,7 @@ function buildBasketItems(order, items) {
   const basketItems = items.map((item, index) => ({
     id: String(item.product_id || `ITEM-${index + 1}`),
     name: item.name,
-    category1: 'Maveran',
+    category1: 'Panelya',
     itemType: Iyzipay.BASKET_ITEM_TYPE.PHYSICAL,
     price: toMoney(Number(item.unit_price || 0) * Number(item.quantity || 1)),
   }));

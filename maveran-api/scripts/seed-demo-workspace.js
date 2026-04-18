@@ -4,11 +4,11 @@ const bcrypt = require('bcryptjs');
 const db = require('../db');
 
 const DEMO = {
-  email: String(process.env.DEMO_OWNER_EMAIL || 'demo@maveran.dev').trim().toLowerCase(),
-  password: String(process.env.DEMO_OWNER_PASSWORD || 'MaveranDemo!123'),
-  name: String(process.env.DEMO_OWNER_NAME || 'Maveran Demo Owner').trim().slice(0, 160),
-  organizationName: String(process.env.DEMO_ORGANIZATION_NAME || 'Maveran Demo').trim().slice(0, 160),
-  organizationSlug: String(process.env.DEMO_ORGANIZATION_SLUG || 'maveran-demo').trim().toLowerCase(),
+  email: String(process.env.DEMO_OWNER_EMAIL || 'demo@panelya.dev').trim().toLowerCase(),
+  password: String(process.env.DEMO_OWNER_PASSWORD || 'PanelyaDemo!123'),
+  name: String(process.env.DEMO_OWNER_NAME || 'Mavera Owner').trim().slice(0, 160),
+  organizationName: String(process.env.DEMO_ORGANIZATION_NAME || 'Mavera').trim().slice(0, 160),
+  organizationSlug: String(process.env.DEMO_ORGANIZATION_SLUG || 'mavera').trim().toLowerCase(),
 };
 
 const categories = [

@@ -2,9 +2,10 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import "./globals.css";
 import { Providers } from "./providers";
+import { PLATFORM_PRODUCT_NAME } from "@/lib/branding";
 
 export const metadata: Metadata = {
-  title: "Maveran Operations",
+  title: PLATFORM_PRODUCT_NAME,
   description: "Business operations dashboard"
 };
 

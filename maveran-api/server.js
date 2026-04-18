@@ -101,5 +101,5 @@ app.use((err, req, res, next) => {
 });
 
 app.listen(port, () => {
-  console.log(`Maveran API ${port} portunda calisiyor`);
+  console.log(`Panelya API ${port} portunda calisiyor`);
 });
