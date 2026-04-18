@@ -21,6 +21,8 @@
     "db:seed-demo": "npm --prefix maveran-api run db:seed-demo",
     "deploy:api:staging": "npm --prefix maveran-api run deploy:staging",
     "deploy:api:production": "npm --prefix maveran-api run deploy:production",
+    "deploy:staging": "npm run deploy:api:staging",
+    "deploy:production": "npm run deploy:api:production",
     "smoke:auth": "npm --prefix maveran-api run smoke:auth",
     "smoke:auth:bash": "npm --prefix maveran-api run smoke:auth:bash",
     "smoke:payment": "npm --prefix maveran-api run smoke:payment",
