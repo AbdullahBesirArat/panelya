@@ -12,6 +12,7 @@
     "lint:web": "npm --prefix apps/web run lint",
     "typecheck:web": "npm --prefix apps/web run typecheck",
     "dev:api": "npm --prefix maveran-api run dev",
+    "start": "npm run start:api",
     "start:api": "npm --prefix maveran-api run start",
     "check:api": "npm --prefix maveran-api run check:syntax",
     "db:migrate": "npm --prefix maveran-api run db:migrate",
