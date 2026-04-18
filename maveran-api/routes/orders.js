@@ -26,6 +26,77 @@ function safePaging(limit, offset, defaultLimit = 100) {
   };
 }
 
+/**
+ * @swagger
+ * /api/orders:
+ *   get:
+ *     summary: Siparis listesi
+ *     tags: [Orders]
+ *     parameters:
+ *       - in: query
+ *         name: status
+ *         schema:
+ *           type: string
+ *           enum: [new, payment_pending, processing, shipped, delivered, cancelled, paid]
+ *       - in: query
+ *         name: q
+ *         schema: { type: string }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 100 }
+ *       - in: query
+ *         name: offset
+ *         schema: { type: integer, default: 0 }
+ *     responses:
+ *       200:
+ *         description: Siparis dizisi
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 $ref: '#/components/schemas/Order'
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *   post:
+ *     summary: Public siparis olusturur
+ *     tags: [Orders]
+ *     security: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [customer, items]
+ *             properties:
+ *               organizationSlug:
+ *                 type: string
+ *                 example: mavera
+ *               customer:
+ *                 type: object
+ *                 required: [name, email, phone]
+ *                 properties:
+ *                   name: { type: string, example: Northstar Labs }
+ *                   email: { type: string, format: email, example: ops@northstarlabs.co }
+ *                   phone: { type: string, example: '+90 212 555 0101' }
+ *                   address: { type: string, example: Maslak, Istanbul }
+ *               items:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *                   required: [product_id, quantity]
+ *                   properties:
+ *                     product_id: { type: integer, example: 1 }
+ *                     quantity: { type: integer, example: 1 }
+ *     responses:
+ *       201:
+ *         description: Siparis olusturuldu
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Order'
+ */
 router.get('/', requireAuth, requireRole(['super_admin', 'owner', 'admin', 'member', 'viewer']), async (req, res, next) => {
   try {
     const organization = await resolveOrganization(req);
@@ -129,6 +200,41 @@ router.post('/', createOrderLimiter, async (req, res, next) => {
   }
 });
 
+/**
+ * @swagger
+ * /api/orders/{id}/status:
+ *   put:
+ *     summary: Siparis durumunu gunceller
+ *     tags: [Orders]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: integer }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [status]
+ *             properties:
+ *               status:
+ *                 type: string
+ *                 enum: [new, payment_pending, processing, shipped, delivered, cancelled, paid]
+ *                 example: shipped
+ *     responses:
+ *       200:
+ *         description: Durum guncellendi
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Order'
+ *       400:
+ *         $ref: '#/components/responses/ValidationError'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ */
 router.put('/:id/status', requireAuth, requireRole(['super_admin', 'owner', 'admin']), async (req, res, next) => {
   const client = await db.pool.connect();
 

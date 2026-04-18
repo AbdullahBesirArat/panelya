@@ -24,6 +24,22 @@ router.get('/current', async (req, res, next) => {
   }
 });
 
+/**
+ * @swagger
+ * /api/organizations/current/summary:
+ *   get:
+ *     summary: Aktif workspace dashboard ozetini dondurur
+ *     tags: [Organizations]
+ *     responses:
+ *       200:
+ *         description: Dashboard, analytics ve settings icin workspace ozeti
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/OrganizationSummary'
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ */
 router.get('/current/summary', requireAuth, async (req, res, next) => {
   try {
     const organization = await resolveOrganization(req);

@@ -6,6 +6,55 @@ const { resolveOrganization, slugify } = require('../services/tenant');
 
 const router = express.Router();
 
+/**
+ * @swagger
+ * /api/categories:
+ *   get:
+ *     summary: Kategori listesi
+ *     tags: [Categories]
+ *     security: []
+ *     parameters:
+ *       - in: query
+ *         name: organizationSlug
+ *         schema: { type: string, example: mavera }
+ *     responses:
+ *       200:
+ *         description: Kategori dizisi
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 $ref: '#/components/schemas/Category'
+ *   post:
+ *     summary: Yeni kategori olusturur
+ *     tags: [Categories]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [name]
+ *             properties:
+ *               name:
+ *                 type: string
+ *                 example: Fulfillment
+ *               slug:
+ *                 type: string
+ *                 example: fulfillment
+ *     responses:
+ *       201:
+ *         description: Kategori olusturuldu
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Category'
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ */
 router.get('/', async (req, res, next) => {
   try {
     const organization = await resolveOrganization(req);

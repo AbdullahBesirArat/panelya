@@ -27,6 +27,50 @@ function mockAutoPayEnabled() {
   return !isProduction() && process.env.PAYMENT_MOCK_AUTO_PAY === 'true';
 }
 
+/**
+ * @swagger
+ * /api/payment/initialize:
+ *   post:
+ *     summary: Odeme akisini baslatir ve payment pending siparis olusturur
+ *     tags: [Payment]
+ *     security: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [customer, items]
+ *             properties:
+ *               organizationSlug:
+ *                 type: string
+ *                 example: mavera
+ *               customer:
+ *                 type: object
+ *                 required: [name, email, phone]
+ *                 properties:
+ *                   name: { type: string, example: Northstar Labs }
+ *                   email: { type: string, format: email, example: ops@northstarlabs.co }
+ *                   phone: { type: string, example: '+90 212 555 0101' }
+ *                   address: { type: string, example: Maslak, Istanbul }
+ *               items:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *                   required: [product_id, quantity]
+ *                   properties:
+ *                     product_id: { type: integer, example: 1 }
+ *                     quantity: { type: integer, example: 1 }
+ *     responses:
+ *       201:
+ *         description: Odeme baslatildi
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/PaymentInitializeResponse'
+ *       400:
+ *         $ref: '#/components/responses/ValidationError'
+ */
 router.post('/initialize', paymentInitLimiter, async (req, res, next) => {
   const client = await db.pool.connect();
 
@@ -103,6 +147,59 @@ router.post('/initialize', paymentInitLimiter, async (req, res, next) => {
   }
 });
 
+/**
+ * @swagger
+ * /api/payment/callback:
+ *   post:
+ *     summary: Odeme saglayici callback'ini isler
+ *     tags: [Payment]
+ *     security: []
+ *     parameters:
+ *       - in: header
+ *         name: x-payment-callback-secret
+ *         required: false
+ *         schema: { type: string }
+ *         description: Mock/manual provider icin zorunlu callback secret
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               orderCode:
+ *                 type: string
+ *                 example: '#2401'
+ *               token:
+ *                 type: string
+ *                 nullable: true
+ *               status:
+ *                 type: string
+ *                 enum: [paid, cancelled]
+ *                 example: paid
+ *         application/x-www-form-urlencoded:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               token:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Callback islendi
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 ok:
+ *                   type: boolean
+ *                 order:
+ *                   $ref: '#/components/schemas/Order'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ */
 router.post('/callback', async (req, res, next) => {
   let client;
   let transactionStarted = false;

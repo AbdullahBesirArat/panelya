@@ -16,7 +16,9 @@ Recruiter flow:
 ## Live Demo
 
 - Local demo: `http://localhost:3001`
-- Public demo: add the Vercel URL after the Neon + Railway + Vercel deployment passes the showcase checklist.
+- Public dashboard: `https://maveran-web.vercel.app`
+- API docs: `https://maveran-api-production.up.railway.app/api/docs`
+- API spec: `https://maveran-api-production.up.railway.app/api/docs-json`
 - Demo email: `demo@panelya.dev`
 - Demo workspace: `mavera`
 

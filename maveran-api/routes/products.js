@@ -41,6 +41,103 @@ function productParams(body) {
   ];
 }
 
+/**
+ * @swagger
+ * /api/products:
+ *   get:
+ *     summary: Urun listesi
+ *     tags: [Products]
+ *     security: []
+ *     parameters:
+ *       - in: query
+ *         name: organizationSlug
+ *         schema: { type: string, example: mavera }
+ *         description: Public storefront icin workspace slug
+ *       - in: query
+ *         name: q
+ *         schema: { type: string }
+ *       - in: query
+ *         name: category_id
+ *         schema: { type: integer }
+ *       - in: query
+ *         name: status
+ *         schema: { type: string, enum: [active, draft, out] }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 50 }
+ *       - in: query
+ *         name: offset
+ *         schema: { type: integer, default: 0 }
+ *     responses:
+ *       200:
+ *         description: Urun dizisi
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 $ref: '#/components/schemas/Product'
+ *       400:
+ *         $ref: '#/components/responses/ValidationError'
+ *   post:
+ *     summary: Yeni urun olusturur
+ *     tags: [Products]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [name, price]
+ *             properties:
+ *               name:
+ *                 type: string
+ *                 example: Inventory Control Pack
+ *               category_id:
+ *                 type: integer
+ *                 nullable: true
+ *               price:
+ *                 type: number
+ *                 example: 3290
+ *               sale_price:
+ *                 type: number
+ *                 nullable: true
+ *               stock:
+ *                 type: integer
+ *                 example: 10
+ *               status:
+ *                 type: string
+ *                 enum: [active, draft, out]
+ *                 default: draft
+ *               colors:
+ *                 type: array
+ *                 items: { type: string }
+ *               sizes:
+ *                 type: array
+ *                 items: { type: string }
+ *               images:
+ *                 type: array
+ *                 items: { type: string }
+ *               tags:
+ *                 type: string
+ *               description:
+ *                 type: string
+ *               emoji:
+ *                 type: string
+ *     responses:
+ *       201:
+ *         description: Urun olusturuldu
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Product'
+ *       400:
+ *         $ref: '#/components/responses/ValidationError'
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ */
 router.get('/', async (req, res, next) => {
   try {
     const organization = await resolveOrganization(req);
@@ -135,6 +232,68 @@ router.post('/', requireAuth, requireRole(['super_admin', 'owner', 'admin']), as
   }
 });
 
+/**
+ * @swagger
+ * /api/products/{id}:
+ *   put:
+ *     summary: Urunu gunceller
+ *     tags: [Products]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: integer }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [name, price]
+ *             properties:
+ *               name: { type: string, example: Inventory Control Pack }
+ *               category_id: { type: integer, nullable: true }
+ *               price: { type: number, example: 3290 }
+ *               sale_price: { type: number, nullable: true }
+ *               stock: { type: integer, example: 12 }
+ *               status: { type: string, enum: [active, draft, out] }
+ *               colors:
+ *                 type: array
+ *                 items: { type: string }
+ *               sizes:
+ *                 type: array
+ *                 items: { type: string }
+ *               images:
+ *                 type: array
+ *                 items: { type: string }
+ *               tags: { type: string }
+ *               description: { type: string }
+ *               emoji: { type: string }
+ *     responses:
+ *       200:
+ *         description: Urun guncellendi
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Product'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *   delete:
+ *     summary: Urunu siler
+ *     tags: [Products]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: integer }
+ *     responses:
+ *       204:
+ *         description: Urun silindi
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ */
 router.put('/:id', requireAuth, requireRole(['super_admin', 'owner', 'admin']), async (req, res, next) => {
   try {
     const organization = await resolveOrganization(req);

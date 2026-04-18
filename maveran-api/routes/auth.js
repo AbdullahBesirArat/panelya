@@ -177,6 +177,50 @@ async function handleAdminLogin(req, res, next) {
 router.post('/login', loginLimiter, handleAdminLogin);
 router.post('/admin/login', loginLimiter, handleAdminLogin);
 
+/**
+ * @swagger
+ * /api/auth/register:
+ *   post:
+ *     summary: Yeni workspace ve owner kullanici olusturur
+ *     tags: [Auth]
+ *     security: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [name, email, password, organizationName]
+ *             properties:
+ *               name:
+ *                 type: string
+ *                 example: Arat
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 example: owner@panelya.com
+ *               password:
+ *                 type: string
+ *                 minLength: 12
+ *                 example: StrongDemo!123
+ *               organizationName:
+ *                 type: string
+ *                 example: Mavera
+ *               organizationSlug:
+ *                 type: string
+ *                 example: mavera
+ *     responses:
+ *       201:
+ *         description: Workspace olusturuldu ve oturum acildi
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Session'
+ *       400:
+ *         $ref: '#/components/responses/ValidationError'
+ *       409:
+ *         description: Email veya workspace slug zaten kullaniliyor
+ */
 router.post('/register', registerLimiter, async (req, res, next) => {
   const client = await db.pool.connect();
 
@@ -274,6 +318,47 @@ router.post('/register', registerLimiter, async (req, res, next) => {
   }
 });
 
+/**
+ * @swagger
+ * /api/auth/session/login:
+ *   post:
+ *     summary: Workspace kullanicisi ile oturum acar
+ *     tags: [Auth]
+ *     security: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [email, password]
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 example: demo@panelya.dev
+ *               password:
+ *                 type: string
+ *                 example: PanelyaDemo!123
+ *               organizationSlug:
+ *                 type: string
+ *                 example: mavera
+ *     responses:
+ *       200:
+ *         description: Oturum acildi
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Session'
+ *       400:
+ *         $ref: '#/components/responses/ValidationError'
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       429:
+ *         description: Cok fazla giris denemesi
+ */
 router.post('/session/login', loginLimiter, async (req, res, next) => {
   const client = await db.pool.connect();
 
@@ -348,6 +433,36 @@ router.post('/session/login', loginLimiter, async (req, res, next) => {
   }
 });
 
+/**
+ * @swagger
+ * /api/auth/session/refresh:
+ *   post:
+ *     summary: Refresh token ile yeni access token uretir
+ *     tags: [Auth]
+ *     security: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [refreshToken]
+ *             properties:
+ *               refreshToken:
+ *                 type: string
+ *               organizationSlug:
+ *                 type: string
+ *                 example: mavera
+ *     responses:
+ *       200:
+ *         description: Oturum yenilendi
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Session'
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ */
 router.post('/session/refresh', async (req, res, next) => {
   const client = await db.pool.connect();
 
@@ -392,6 +507,34 @@ router.post('/session/refresh', async (req, res, next) => {
   }
 });
 
+/**
+ * @swagger
+ * /api/auth/session/logout:
+ *   post:
+ *     summary: Refresh token'i iptal edip oturumu kapatir
+ *     tags: [Auth]
+ *     security: []
+ *     requestBody:
+ *       required: false
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               refreshToken:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Oturum kapatildi
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 ok:
+ *                   type: boolean
+ *                   example: true
+ */
 router.post('/session/logout', async (req, res, next) => {
   const client = await db.pool.connect();
 
@@ -453,6 +596,36 @@ router.post('/session/switch-organization', requireAuth, requireActorType(['app'
   }
 });
 
+/**
+ * @swagger
+ * /api/auth/me:
+ *   get:
+ *     summary: Aktif kullanici ve workspace bilgisini dondurur
+ *     tags: [Auth]
+ *     responses:
+ *       200:
+ *         description: Profil bilgisi
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 actorType:
+ *                   type: string
+ *                   enum: [app, admin]
+ *                 user:
+ *                   $ref: '#/components/schemas/User'
+ *                 currentOrganization:
+ *                   $ref: '#/components/schemas/Organization'
+ *                 role:
+ *                   type: string
+ *                 organizations:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/Organization'
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ */
 router.get('/me', requireAuth, async (req, res, next) => {
   try {
     if (req.auth.actorType === 'admin') {

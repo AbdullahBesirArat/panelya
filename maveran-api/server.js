@@ -4,6 +4,8 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const path = require('path');
+const swaggerUi = require('swagger-ui-express');
+const swaggerSpec = require('./swagger');
 const {
   corsOptions,
   enforceHttps,
@@ -36,6 +38,11 @@ app.disable('x-powered-by');
 app.use(requestId);
 app.use(enforceHttps);
 app.use(handleCorsPreflight);
+app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
+  customSiteTitle: 'Panelya API Docs',
+  swaggerOptions: { persistAuthorization: true },
+}));
+app.get('/api/docs-json', (req, res) => res.json(swaggerSpec));
 app.use(helmet({
   hsts: process.env.NODE_ENV === 'production'
     ? { maxAge: 31536000, includeSubDomains: true, preload: true }
@@ -60,6 +67,31 @@ app.use('/uploads', express.static(uploadDir, {
   },
 }));
 
+/**
+ * @swagger
+ * /api/health:
+ *   get:
+ *     summary: API saglik kontrolu
+ *     tags: [Health]
+ *     security: []
+ *     responses:
+ *       200:
+ *         description: Servis calisiyor
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 ok:
+ *                   type: boolean
+ *                   example: true
+ *                 service:
+ *                   type: string
+ *                   example: maveran-api
+ *                 env:
+ *                   type: string
+ *                   example: staging
+ */
 app.get('/api/health', (req, res) => {
   res.json({
     ok: true,

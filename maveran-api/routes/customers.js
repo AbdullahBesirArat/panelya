@@ -5,6 +5,34 @@ const { resolveOrganization } = require('../services/tenant');
 
 const router = express.Router();
 
+/**
+ * @swagger
+ * /api/customers:
+ *   get:
+ *     summary: Musteri listesi ve harcama ozeti
+ *     tags: [Customers]
+ *     parameters:
+ *       - in: query
+ *         name: q
+ *         schema: { type: string }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 100 }
+ *       - in: query
+ *         name: offset
+ *         schema: { type: integer, default: 0 }
+ *     responses:
+ *       200:
+ *         description: Musteri dizisi
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 $ref: '#/components/schemas/Customer'
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ */
 router.get('/', requireAuth, requireRole(['super_admin', 'owner', 'admin', 'member', 'viewer']), async (req, res, next) => {
   try {
     const organization = await resolveOrganization(req);
