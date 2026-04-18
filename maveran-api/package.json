@@ -11,13 +11,17 @@
     "db:migrate": "node scripts/run-migrations.js",
     "db:seed": "psql \"$DATABASE_URL\" -f db/seed.sql",
     "demo:seed": "node scripts/seed-demo-workspace.js",
+    "db:seed-demo": "npm run demo:seed",
     "db:setup": "npm run db:schema && npm run db:seed && npm run db:migrate",
+    "deploy:staging": "npm run db:schema && npm run db:migrate && npm run db:seed-demo && npm start",
+    "deploy:production": "npm run db:schema && npm run db:migrate && npm start",
     "admin:create": "node scripts/create-admin.js",
     "orders:expire-pending": "node scripts/expire-pending-orders.js",
     "production:check": "node scripts/production-check.js",
     "check:syntax": "node scripts/check-syntax.js",
     "smoke:auth": "powershell -ExecutionPolicy Bypass -File scripts/smoke-auth.ps1",
     "smoke:payment": "powershell -ExecutionPolicy Bypass -File scripts/smoke-payment.ps1",
+    "smoke:payment:bash": "bash scripts/smoke-payment.sh",
     "secrets:generate": "node scripts/generate-secrets.js"
   },
   "dependencies": {

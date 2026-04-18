@@ -1,9 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { MetricGrid } from "@/components/page-kit";
 import { fetchOrders, type OrderStatus, updateOrderStatus } from "@/lib/api";
+import { useDebouncedValue } from "@/lib/use-debounced-value";
 import {
   ActivityPanel,
   DataCell,
@@ -36,10 +37,13 @@ export function OrdersSection({
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<OrderStatus | "">("");
   const [statusDrafts, setStatusDrafts] = useState<Record<string, OrderStatus>>({});
+  const debouncedSearch = useDebouncedValue(search);
 
   const ordersQuery = useQuery({
-    queryKey: ["orders", organizationSlug, search, status],
-    queryFn: () => fetchOrders({ q: search, status, limit: 50 }),
+    queryKey: ["orders", organizationSlug, debouncedSearch, status],
+    queryFn: () => fetchOrders({ q: debouncedSearch, status, limit: 50 }),
+    staleTime: 15_000,
+    placeholderData: keepPreviousData,
   });
 
   const statusMutation = useMutation({
@@ -59,8 +63,8 @@ export function OrdersSection({
 
   const canManageOrders = currentRole === "owner" || currentRole === "admin";
 
-  if (summaryQuery.isLoading || ordersQuery.isLoading) return <SectionLoading />;
-  if (summaryQuery.isError || ordersQuery.isError || !summaryQuery.data || !ordersQuery.data) {
+  if (summaryQuery.isLoading || (ordersQuery.isLoading && !ordersQuery.data)) return <SectionLoading />;
+  if (summaryQuery.isError || (ordersQuery.isError && !ordersQuery.data) || !summaryQuery.data || !ordersQuery.data) {
     return (
       <SectionError
         message="Siparis verisi yuklenemedi."
@@ -107,6 +111,11 @@ export function OrdersSection({
                   <option key={option} value={option}>{orderStatusLabels[option]}</option>
                 ))}
               </select>
+              {ordersQuery.isFetching ? (
+                <span className="inline-flex h-10 items-center rounded-lg border border-line px-3 text-xs font-semibold text-zinc-500">
+                  Guncelleniyor
+                </span>
+              ) : null}
             </div>
           )}
         >

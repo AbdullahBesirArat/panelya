@@ -227,6 +227,7 @@ export default function LoginPage() {
           className="h-[72vh] w-full rounded-lg object-cover"
           height={1440}
           priority
+          sizes="(min-width: 1024px) 50vw, 0px"
           src="https://images.unsplash.com/photo-1556761175-5973dc0f32e7?auto=format&fit=crop&w=1200&q=80"
           width={1200}
         />

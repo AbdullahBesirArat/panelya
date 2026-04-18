@@ -10,6 +10,7 @@ uploads/
 api.err.log
 api.out.log
 .next/
+*.tsbuildinfo
 out/
 coverage/
 .DS_Store
@@ -49,4 +50,3 @@ Thumbs.db
 
 # Sensitive files (auto-detected)
 node_modules
-

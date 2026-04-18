@@ -44,7 +44,7 @@ export const useSessionStore = create<SessionState>()(
       refreshToken: null,
       user: null,
       organizations: [],
-      organizationSlug: "maveran",
+      organizationSlug: "",
       hydrated: false,
       applySession: (payload) => set({
         accessToken: payload.accessToken,
@@ -65,7 +65,7 @@ export const useSessionStore = create<SessionState>()(
         refreshToken: null,
         user: null,
         organizations: [],
-        organizationSlug: "maveran",
+        organizationSlug: "",
       }),
       setHydrated: (hydrated) => set({ hydrated }),
     }),

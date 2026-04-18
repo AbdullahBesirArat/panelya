@@ -42,6 +42,7 @@ services:
       sh -c "npm run db:schema &&
       npm run db:seed &&
       npm run db:migrate &&
+      npm run demo:seed &&
       npm start"
     depends_on:
       postgres:

@@ -91,7 +91,11 @@ function ensureProductionReady() {
     }
   }
 
-  const callbackSecret = envValue('PAYMENT_CALLBACK_SECRET');
+  const callbackSecretRequired = envValue('PAYMENT_CALLBACK_SECRET_REQUIRED') === 'true';
+  const callbackSecret = callbackSecretRequired
+    ? requireConfiguredEnv('PAYMENT_CALLBACK_SECRET', { minLength: 32 })
+    : envValue('PAYMENT_CALLBACK_SECRET');
+
   if (callbackSecret && (callbackSecret.length < 32 || hasWeakMarker(callbackSecret))) {
     throw new Error('PAYMENT_CALLBACK_SECRET en az 32 karakterlik random deger olmali');
   }

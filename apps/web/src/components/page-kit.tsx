@@ -6,8 +6,6 @@ type Metric = {
   tone: "mint" | "coral" | "leaf" | "sun";
 };
 
-type Row = Record<string, string>;
-
 const toneClass: Record<Metric["tone"], string> = {
   mint: "border-mint text-mint",
   coral: "border-coral text-coral",
@@ -37,6 +35,7 @@ export function SectionHeader({
         alt=""
         className="h-56 w-full rounded-lg object-cover shadow-panel lg:h-full"
         height={720}
+        sizes="(min-width: 1024px) 340px, 100vw"
         src={image}
         width={960}
       />
@@ -53,65 +52,6 @@ export function MetricGrid({ metrics }: { metrics: Metric[] }) {
           <p className="mt-3 text-3xl font-bold text-ink">{metric.value}</p>
         </article>
       ))}
-    </section>
-  );
-}
-
-export function DataTable({
-  title,
-  columns,
-  rows
-}: {
-  title: string;
-  columns: string[];
-  rows: Row[];
-}) {
-  return (
-    <section className="overflow-hidden rounded-lg border border-line bg-white shadow-panel">
-      <div className="border-b border-line px-5 py-4">
-        <h2 className="text-lg font-bold">{title}</h2>
-      </div>
-      <div className="overflow-x-auto">
-        <table className="min-w-full table-fixed text-left text-sm">
-          <thead className="bg-zinc-50 text-xs uppercase text-zinc-500">
-            <tr>
-              {columns.map((column) => (
-                <th className="w-1/4 px-5 py-3 font-semibold" key={column}>{column}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-line">
-            {rows.map((row, index) => (
-              <tr key={`${row[columns[0]]}-${index}`}>
-                {columns.map((column) => (
-                  <td className="truncate px-5 py-4 text-zinc-700" key={column}>{row[column]}</td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  );
-}
-
-export function ActivityList({
-  title,
-  items
-}: {
-  title: string;
-  items: string[];
-}) {
-  return (
-    <section className="rounded-lg border border-line bg-white p-5 shadow-panel">
-      <h2 className="text-lg font-bold">{title}</h2>
-      <div className="mt-4 space-y-3">
-        {items.map((item) => (
-          <div className="rounded-lg border border-line px-4 py-3 text-sm text-zinc-700" key={item}>
-            {item}
-          </div>
-        ))}
-      </div>
     </section>
   );
 }

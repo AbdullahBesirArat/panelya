@@ -15,6 +15,10 @@ const percentFormatter = new Intl.NumberFormat("tr-TR", {
   style: "percent",
   maximumFractionDigits: 1,
 });
+const dateTimeFormatter = new Intl.DateTimeFormat("tr-TR", {
+  dateStyle: "medium",
+  timeStyle: "short",
+});
 
 export const orderStatusLabels = {
   new: "Yeni",
@@ -36,6 +40,7 @@ export function useSummaryQuery(organizationSlug: string) {
   return useQuery({
     queryKey: ["summary", organizationSlug],
     queryFn: fetchOrganizationSummary,
+    staleTime: 30_000,
   });
 }
 
@@ -212,10 +217,7 @@ export function formatCount(value: number | string | null | undefined) {
 export function formatDateTime(value: string | null | undefined) {
   if (!value) return "-";
 
-  return new Intl.DateTimeFormat("tr-TR", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(value));
+  return dateTimeFormatter.format(new Date(value));
 }
 
 export function formatPercent(value: number) {

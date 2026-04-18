@@ -21,6 +21,8 @@ export function AppShell({
   const queryClient = useQueryClient();
   const accessToken = useSessionStore((state) => state.accessToken);
   const hydrated = useSessionStore((state) => state.hydrated);
+  const user = useSessionStore((state) => state.user);
+  const organizations = useSessionStore((state) => state.organizations);
   const organizationSlug = useSessionStore((state) => state.organizationSlug);
   const syncProfile = useSessionStore((state) => state.syncProfile);
   const clearSession = useSessionStore((state) => state.clearSession);
@@ -28,13 +30,19 @@ export function AppShell({
   const [switching, setSwitching] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
 
-  const { data, isLoading, isError } = useQuery({
+  const { data, isError } = useQuery({
     queryKey: ["me", accessToken, organizationSlug],
     queryFn: fetchMe,
     enabled: hydrated && Boolean(accessToken),
     retry: false,
-    staleTime: 0,
+    staleTime: 60_000,
   });
+  const currentOrganization = organizations.find((organization) => organization.slug === organizationSlug) || organizations[0];
+  const profile = data?.actorType === "app" ? data : null;
+  const displayUser = profile?.user || user;
+  const displayOrganization = profile?.currentOrganization || currentOrganization;
+  const displayOrganizations = profile?.organizations || organizations;
+  const activeOrganizationSlug = displayOrganization?.slug || organizationSlug;
 
   useEffect(() => {
     if (hydrated && !accessToken) {
@@ -63,8 +71,15 @@ export function AppShell({
     }
   }, [isError, hydrated, clearSession, router]);
 
+  useEffect(() => {
+    if (data && data.actorType !== "app") {
+      clearSession();
+      router.replace("/login");
+    }
+  }, [data, clearSession, router]);
+
   async function handleOrganizationChange(nextSlug: string) {
-    if (!nextSlug || nextSlug === organizationSlug) return;
+    if (!nextSlug || nextSlug === activeOrganizationSlug) return;
 
     try {
       setSwitching(true);
@@ -103,7 +118,7 @@ export function AppShell({
     }
   }
 
-  if (!hydrated || !accessToken || isLoading || !data || data.actorType !== "app" || !data.user || !data.currentOrganization || !data.organizations) {
+  if (!hydrated || !accessToken || !displayUser || !displayOrganization || displayOrganizations.length === 0 || data?.actorType === "admin") {
     return (
       <div className="flex min-h-screen items-center justify-center bg-paper px-6">
         <div className="w-full max-w-md rounded-lg border border-line bg-white p-6 text-center shadow-panel">
@@ -144,17 +159,17 @@ export function AppShell({
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
               <p className="text-xs font-semibold uppercase text-zinc-500">Workspace</p>
-              <p className="text-lg font-bold">{data.currentOrganization.name}</p>
-              <p className="text-sm text-zinc-500">{data.user.name || data.user.email}</p>
+              <p className="text-lg font-bold">{displayOrganization.name}</p>
+              <p className="text-sm text-zinc-500">{displayUser.name || displayUser.email}</p>
             </div>
             <div className="flex flex-col gap-2 sm:flex-row">
               <select
                 className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
                 disabled={switching}
                 onChange={(event) => void handleOrganizationChange(event.target.value)}
-                value={organizationSlug}
+                value={activeOrganizationSlug}
               >
-                {data.organizations.map((organization) => (
+                {displayOrganizations.map((organization) => (
                   <option key={organization.slug} value={organization.slug}>
                     {organization.name} ({organization.role})
                   </option>

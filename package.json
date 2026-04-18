@@ -17,8 +17,12 @@
     "db:migrate": "npm --prefix maveran-api run db:migrate",
     "db:setup": "npm --prefix maveran-api run db:setup",
     "demo:seed": "npm --prefix maveran-api run demo:seed",
+    "db:seed-demo": "npm --prefix maveran-api run db:seed-demo",
+    "deploy:api:staging": "npm --prefix maveran-api run deploy:staging",
+    "deploy:api:production": "npm --prefix maveran-api run deploy:production",
     "smoke:auth": "npm --prefix maveran-api run smoke:auth",
     "smoke:payment": "npm --prefix maveran-api run smoke:payment",
+    "smoke:payment:bash": "npm --prefix maveran-api run smoke:payment:bash",
     "check:production": "npm --prefix maveran-api run production:check",
     "secrets:generate": "npm --prefix maveran-api run secrets:generate"
   }

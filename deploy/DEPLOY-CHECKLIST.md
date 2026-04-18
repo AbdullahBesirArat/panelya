@@ -32,6 +32,8 @@ DEMO_OWNER_PASSWORD='replace-this-before-sharing' \
 npm run demo:seed
 ```
 
+Neon + Railway + Vercel public demo akisi icin ayrica `docs/VERCEL-RAILWAY-NEON-DEPLOY.md` dosyasini takip et.
+
 ## 3. API
 
 1. `/var/www/maveran-api/.env` dosyasini `.env.production.example` uzerinden olustur.
@@ -70,6 +72,12 @@ npm run orders:expire-pending
 4. Maveran 2.0 Next.js uygulamasi icin `apps/web` klasorunu Vercel'e bagla veya Docker image olarak deploy et.
 5. `NEXT_PUBLIC_API_BASE_URL` degerini production API adresine ayarla.
 
+Vercel public demo icin:
+
+1. Root Directory: `apps/web`
+2. Environment variable: `NEXT_PUBLIC_API_BASE_URL=<RAILWAY_URL>/api`
+3. Deploy sonrasi Railway `CORS_ORIGIN` ve `PUBLIC_SITE_URL` degerlerini Vercel URL'i ile guncelle.
+
 ## 5. Nginx
 
 1. `deploy/nginx/maveran.conf` icindeki domainleri gercek domainle degistir.
@@ -93,6 +101,9 @@ sudo certbot renew --dry-run
 ## 7. Smoke Test
 
 ```bash
+npm run check:production
+npm run smoke:auth
+npm run smoke:payment
 curl https://maveran.com.tr/api/health
 curl -I https://maveran.com.tr/
 pm2 logs maveran-api
@@ -109,3 +120,17 @@ Admin panelde:
 7. Siparisi admin panelde gor.
 8. Iyzico odeme yarida kalirsa bekleyen siparisin zaman asimi goreviyle iptal oldugunu ve stogun geri geldigini kontrol et.
 9. Staging demo linki varsa `maveran-demo` workspace'inin dolu dashboard ile acildigini kontrol et.
+
+## 8. Maveran 2.0 Showcase Gate
+
+Public demo linkini paylasmadan once `docs/SHOWCASE-VERIFICATION.md` dosyasindaki checklist'i tamamla:
+
+1. README Live Demo alanina deploy URL'sini yaz.
+2. Demo kullanicisi ile login ol.
+3. Dashboard, products, orders, customers, analytics ve settings sayfalarini gez.
+4. Products ekraninda urun olustur, duzenle ve owner rolunde sil.
+5. Orders ekraninda status guncelle.
+6. Logout sonrasi korumali route'larin `/login` adresine dondugunu dogrula.
+7. Iyzico sandbox credential'i varsa basarili ve basarisiz odeme akislarini tamamla.
+
+Demo deploy notu: `NODE_ENV=staging` ile mock payment kullanilabilir. `NODE_ENV=production` ortaminda `PAYMENT_PROVIDER=mock` kullanma; production icin iyzico env degerleri zorunludur.

@@ -21,6 +21,13 @@ function stockError(message) {
   return err;
 }
 
+function stockPayload(items) {
+  return JSON.stringify(items.map((item) => ({
+    product_id: item.product_id,
+    quantity: item.quantity,
+  })));
+}
+
 async function reserveStock(client, items) {
   const grouped = groupOrderItems(items);
   if (!grouped.length) return;
@@ -40,31 +47,38 @@ async function reserveStock(client, items) {
     }
   }
 
-  for (const item of grouped) {
-    await client.query(
-      `update products
-       set stock = stock - $1,
-           status = case when stock - $1 <= 0 then 'out' else status end,
-           updated_at = now()
-       where id = $2`,
-      [item.quantity, item.product_id]
-    );
-  }
+  await client.query(
+    `with requested as (
+       select product_id, quantity
+       from jsonb_to_recordset($1::jsonb) as item(product_id bigint, quantity int)
+     )
+     update products p
+     set stock = p.stock - requested.quantity,
+         status = case when p.stock - requested.quantity <= 0 then 'out' else p.status end,
+         updated_at = now()
+     from requested
+     where p.id = requested.product_id`,
+    [stockPayload(grouped)]
+  );
 }
 
 async function restoreStock(client, items) {
   const grouped = groupOrderItems(items);
+  if (!grouped.length) return;
 
-  for (const item of grouped) {
-    await client.query(
-      `update products
-       set stock = stock + $1,
-           status = case when status = 'out' and stock + $1 > 0 then 'active' else status end,
-           updated_at = now()
-       where id = $2`,
-      [item.quantity, item.product_id]
-    );
-  }
+  await client.query(
+    `with requested as (
+       select product_id, quantity
+       from jsonb_to_recordset($1::jsonb) as item(product_id bigint, quantity int)
+     )
+     update products p
+     set stock = p.stock + requested.quantity,
+         status = case when p.status = 'out' and p.stock + requested.quantity > 0 then 'active' else p.status end,
+         updated_at = now()
+     from requested
+     where p.id = requested.product_id`,
+    [stockPayload(grouped)]
+  );
 }
 
 async function orderItems(client, orderId) {

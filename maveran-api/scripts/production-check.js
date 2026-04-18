@@ -36,6 +36,15 @@ async function main() {
     issues.push(`Session tablolari eksik gorunuyor: ${err.message}`);
   }
 
+  try {
+    const sequenceResult = await db.query("select to_regclass('public.order_code_seq') as sequence_name");
+    if (!sequenceResult.rows[0].sequence_name) {
+      issues.push('Order code sequence eksik gorunuyor: order_code_seq bulunamadi.');
+    }
+  } catch (err) {
+    issues.push(`Order code sequence eksik gorunuyor: ${err.message}`);
+  }
+
   if (process.env.NODE_ENV === 'production' && process.env.ALLOW_ENV_ADMIN_LOGIN === 'true') {
     issues.push('ALLOW_ENV_ADMIN_LOGIN production ortaminda true olamaz.');
   }

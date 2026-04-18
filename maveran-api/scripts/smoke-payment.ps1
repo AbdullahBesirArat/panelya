@@ -107,6 +107,26 @@ if (-not $paid.ok -or $paid.order.status -ne 'paid') {
   throw 'Paid callback siparisi paid durumuna cekmedi'
 }
 
+$paidAgain = Invoke-RestMethod -Method Post -Headers $paidHeaders -Uri "$apiBaseUrl/api/payment/callback" -ContentType 'application/json' -Body (@{
+  orderCode = $firstOrder.order.order_code
+  token = $firstOrder.order.payment_token
+  status = 'paid'
+} | ConvertTo-Json)
+
+if (-not $paidAgain.ok -or $paidAgain.order.status -ne 'paid') {
+  throw 'Duplicate paid callback idempotent kalmadi'
+}
+
+$paidThenFailed = Invoke-RestMethod -Method Post -Headers $paidHeaders -Uri "$apiBaseUrl/api/payment/callback" -ContentType 'application/json' -Body (@{
+  orderCode = $firstOrder.order.order_code
+  token = $firstOrder.order.payment_token
+  status = 'failed'
+} | ConvertTo-Json)
+
+if (-not $paidThenFailed.ok -or $paidThenFailed.order.status -ne 'paid') {
+  throw 'Paid siparis failure callback ile geri dusmemeli'
+}
+
 $secondOrder = Initialize-SmokeOrder -OrganizationSlug $organizationSlug -ProductId $product.id
 $failed = Invoke-RestMethod -Method Post -Headers $paidHeaders -Uri "$apiBaseUrl/api/payment/callback" -ContentType 'application/json' -Body (@{
   orderCode = $secondOrder.order.order_code
@@ -118,8 +138,29 @@ if ($failed.ok -or $failed.order.status -ne 'cancelled') {
   throw 'Failure callback siparisi cancelled durumuna cekmedi'
 }
 
+$failedAgain = Invoke-RestMethod -Method Post -Headers $paidHeaders -Uri "$apiBaseUrl/api/payment/callback" -ContentType 'application/json' -Body (@{
+  orderCode = $secondOrder.order.order_code
+  token = $secondOrder.order.payment_token
+  status = 'failed'
+} | ConvertTo-Json)
+
+if ($failedAgain.ok -or $failedAgain.order.status -ne 'cancelled') {
+  throw 'Duplicate failure callback idempotent kalmadi'
+}
+
+$failedThenPaid = Invoke-RestMethod -Method Post -Headers $paidHeaders -Uri "$apiBaseUrl/api/payment/callback" -ContentType 'application/json' -Body (@{
+  orderCode = $secondOrder.order.order_code
+  token = $secondOrder.order.payment_token
+  status = 'paid'
+} | ConvertTo-Json)
+
+if ($failedThenPaid.ok -or $failedThenPaid.order.status -ne 'cancelled') {
+  throw 'Cancelled siparis paid callback ile geri donmemeli'
+}
+
 Write-Host 'Payment smoke basarili.'
 Write-Host "- initialize: ok ($($firstOrder.order.order_code))"
 Write-Host '- callback reject: ok veya skip'
 Write-Host '- paid callback: ok'
 Write-Host '- failure callback: ok'
+Write-Host '- callback idempotency: ok'

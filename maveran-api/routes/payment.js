@@ -10,24 +10,24 @@ const {
 const { reserveStock, syncStockForStatusChange } = require('../services/inventory');
 const { cartTotal, priceCartItems } = require('../services/cartPricing');
 const { auditLog } = require('../services/audit');
-const { isProduction } = require('../middleware/security');
+const { isProduction, rateLimit } = require('../middleware/security');
 const { requireCallbackSecret, sanitizeCustomer } = require('../services/validation');
 const { resolveOrganization } = require('../services/tenant');
+const { nextOrderCode } = require('../services/orderCodes');
+const { insertOrderItems } = require('../services/orderItems');
 
 const router = express.Router();
+const paymentInitLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: Number(process.env.PAYMENT_INIT_RATE_LIMIT || 40),
+  message: 'Cok fazla odeme denemesi. Lutfen biraz sonra tekrar deneyin.',
+});
 
 function mockAutoPayEnabled() {
   return !isProduction() && process.env.PAYMENT_MOCK_AUTO_PAY === 'true';
 }
 
-async function nextOrderCode(client) {
-  const result = await client.query(
-    "select coalesce(max(nullif(regexp_replace(order_code, '\\D', '', 'g'), '')::int), 1000) + 1 as next from orders"
-  );
-  return `#${result.rows[0].next}`;
-}
-
-router.post('/initialize', async (req, res, next) => {
+router.post('/initialize', paymentInitLimiter, async (req, res, next) => {
   const client = await db.pool.connect();
 
   try {
@@ -60,19 +60,7 @@ router.post('/initialize', async (req, res, next) => {
       [organization.id, orderCode, customerResult.rows[0].id, calculatedTotal, provider]
     );
 
-    for (const item of items) {
-      await client.query(
-        `insert into order_items (order_id, product_id, product_name, quantity, unit_price)
-         values ($1, $2, $3, $4, $5)`,
-        [
-          orderResult.rows[0].id,
-          item.product_id,
-          item.name,
-          item.quantity,
-          item.unit_price,
-        ]
-      );
-    }
+    await insertOrderItems(client, orderResult.rows[0].id, items);
 
     await reserveStock(client, items);
 
@@ -116,8 +104,8 @@ router.post('/initialize', async (req, res, next) => {
 });
 
 router.post('/callback', async (req, res, next) => {
-  const client = await db.pool.connect();
-
+  let client;
+  let transactionStarted = false;
   try {
     const { orderCode, token, status = 'paid' } = req.body;
     if (!orderCode && !token) return res.status(400).json({ error: 'orderCode veya token zorunlu' });
@@ -133,9 +121,33 @@ router.post('/callback', async (req, res, next) => {
       return res.status(400).json({ error: 'Iyzico callback icin token zorunlu' });
     }
 
-    await client.query('begin');
+    let nextStatus = provider === 'mock' && status === 'paid' ? 'paid' : 'cancelled';
+    let paymentId = null;
+    let paymentError = null;
 
-    let orderResult = token
+    if (token && provider === 'iyzico') {
+      const orderPreview = await db.query(
+        'select order_code from orders where payment_token = $1 limit 1',
+        [token]
+      );
+      if (!orderPreview.rows[0]) {
+        return res.status(404).json({ error: 'Siparis bulunamadi' });
+      }
+
+      const payment = await retrievePayment({
+        token,
+        conversationId: orderPreview.rows[0].order_code,
+      });
+      nextStatus = payment.status === 'success' && payment.paymentStatus === 'SUCCESS' ? 'paid' : 'cancelled';
+      paymentId = payment.paymentId || null;
+      paymentError = payment.errorMessage || null;
+    }
+
+    client = await db.pool.connect();
+    await client.query('begin');
+    transactionStarted = true;
+
+    const orderResult = token
       ? await client.query('select * from orders where payment_token = $1 limit 1 for update', [token])
       : await client.query('select * from orders where order_code = $1 limit 1 for update', [orderCode]);
 
@@ -144,24 +156,16 @@ router.post('/callback', async (req, res, next) => {
       return res.status(404).json({ error: 'Siparis bulunamadi' });
     }
 
-    let nextStatus = provider === 'mock' && status === 'paid' ? 'paid' : 'cancelled';
-    let paymentId = null;
-    let paymentError = null;
-
-    if (token && provider === 'iyzico') {
-      const payment = await retrievePayment({
-        token,
-        conversationId: orderResult.rows[0].order_code,
-      });
-      nextStatus = payment.status === 'success' && payment.paymentStatus === 'SUCCESS' ? 'paid' : 'cancelled';
-      paymentId = payment.paymentId || null;
-      paymentError = payment.errorMessage || null;
+    const currentStatus = orderResult.rows[0].status;
+    if (['paid', 'cancelled'].includes(currentStatus) && currentStatus !== nextStatus) {
+      nextStatus = currentStatus;
+      paymentError = paymentError || `Final durum korunuyor: ${currentStatus}`;
     }
 
     await syncStockForStatusChange(
       client,
       orderResult.rows[0].id,
-      orderResult.rows[0].status,
+      currentStatus,
       nextStatus
     );
 
@@ -186,6 +190,7 @@ router.post('/callback', async (req, res, next) => {
       errorMessage: paymentError,
     });
     await client.query('commit');
+    transactionStarted = false;
 
     if (req.is('application/x-www-form-urlencoded')) {
       return res.redirect(nextStatus === 'paid'
@@ -195,10 +200,14 @@ router.post('/callback', async (req, res, next) => {
 
     res.json({ ok: nextStatus === 'paid', order: result.rows[0] });
   } catch (err) {
-    await client.query('rollback');
+    if (transactionStarted && client) {
+      await client.query('rollback');
+    }
     next(err);
   } finally {
-    client.release();
+    if (client) {
+      client.release();
+    }
   }
 });
 

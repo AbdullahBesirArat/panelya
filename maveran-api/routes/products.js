@@ -65,7 +65,21 @@ router.get('/', async (req, res, next) => {
     params.push(paging.limit, paging.offset);
 
     const result = await db.query(
-      `select p.*, c.name as category_name
+      `select
+        p.id,
+        p.name,
+        p.category_id,
+        c.name as category_name,
+        p.price,
+        p.sale_price,
+        p.stock,
+        p.status,
+        p.colors,
+        p.images,
+        p.tags,
+        p.emoji,
+        p.created_at,
+        p.updated_at
        from products p
        left join categories c on c.id = p.category_id and c.organization_id = p.organization_id
        where ${filters.join(' and ')}

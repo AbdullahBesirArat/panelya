@@ -1,9 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { MetricGrid } from "@/components/page-kit";
 import { fetchCustomers } from "@/lib/api";
+import { useDebouncedValue } from "@/lib/use-debounced-value";
 import {
   ActivityPanel,
   DataCell,
@@ -20,14 +21,17 @@ import {
 export function CustomersSection({ organizationSlug }: { organizationSlug: string }) {
   const summaryQuery = useSummaryQuery(organizationSlug);
   const [search, setSearch] = useState("");
+  const debouncedSearch = useDebouncedValue(search);
 
   const customersQuery = useQuery({
-    queryKey: ["customers", organizationSlug, search],
-    queryFn: () => fetchCustomers({ q: search, limit: 50 }),
+    queryKey: ["customers", organizationSlug, debouncedSearch],
+    queryFn: () => fetchCustomers({ q: debouncedSearch, limit: 50 }),
+    staleTime: 15_000,
+    placeholderData: keepPreviousData,
   });
 
-  if (summaryQuery.isLoading || customersQuery.isLoading) return <SectionLoading />;
-  if (summaryQuery.isError || customersQuery.isError || !summaryQuery.data || !customersQuery.data) {
+  if (summaryQuery.isLoading || (customersQuery.isLoading && !customersQuery.data)) return <SectionLoading />;
+  if (summaryQuery.isError || (customersQuery.isError && !customersQuery.data) || !summaryQuery.data || !customersQuery.data) {
     return (
       <SectionError
         message="Musteri verisi yuklenemedi."
@@ -61,12 +65,19 @@ export function CustomersSection({ organizationSlug }: { organizationSlug: strin
           title="Musteriler"
           description="Siparis ve toplam harcama"
           actions={(
-            <input
-              className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Isim, e-posta veya telefon ara"
-              value={search}
-            />
+            <div className="flex flex-wrap gap-2">
+              <input
+                className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Isim, e-posta veya telefon ara"
+                value={search}
+              />
+              {customersQuery.isFetching ? (
+                <span className="inline-flex h-10 items-center rounded-lg border border-line px-3 text-xs font-semibold text-zinc-500">
+                  Guncelleniyor
+                </span>
+              ) : null}
+            </div>
           )}
         >
           <DataGrid

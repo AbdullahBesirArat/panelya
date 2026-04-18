@@ -13,6 +13,13 @@ Recruiter flow:
 3. Land on a live dashboard backed by organization-scoped data.
 4. Explore products, orders, customers, analytics and settings.
 
+## Live Demo
+
+- Local demo: `http://localhost:3001`
+- Public demo: add the Vercel URL after the Neon + Railway + Vercel deployment passes the showcase checklist.
+- Demo email: `demo@maveran.dev`
+- Demo workspace: `maveran-demo`
+
 ## Stack
 
 - Frontend: Next.js, TypeScript, React Query, Zustand, Tailwind
@@ -27,7 +34,7 @@ Recruiter flow:
 - Workspace registration and login
 - Organization switching
 - Tenant-aware dashboard summary
-- Product and category management
+- Product and category management, including create, update and delete flows
 - Order listing and status updates
 - Customer list and spend view
 - Analytics summary
@@ -91,6 +98,9 @@ npm run lint:web
 npm run typecheck:web
 npm run build:web
 npm run demo:seed
+npm run db:seed-demo
+npm run deploy:api:staging
+npm run deploy:api:production
 npm run smoke:auth
 npm run smoke:payment
 npm run check:production
@@ -105,16 +115,31 @@ npm run secrets:generate
 - Admin bootstrap is available through `npm --prefix maveran-api run admin:create`.
 - Demo seed is idempotent for local or staging showcase use; change demo credentials before sharing a public staging link.
 - GitHub Actions CI now runs API syntax, web lint, web typecheck and web build from the root workspace lockfile.
+- Public demo deploy uses `NODE_ENV=staging` with the mock provider; real production must use `PAYMENT_PROVIDER=iyzico`.
 
 ## Deployment Direction
 
 - Frontend: Vercel
-- Backend: Railway or Render
-- Database: Neon or Supabase
+- Backend: Railway
+- Database: Neon
+
+Railway demo start command:
+
+```bash
+npm run deploy:staging
+```
+
+Vercel web env:
+
+```text
+NEXT_PUBLIC_API_BASE_URL=<RAILWAY_URL>/api
+```
 
 Detailed infra notes live in:
 
 - `deploy/DEPLOY-CHECKLIST.md`
+- `docs/VERCEL-RAILWAY-NEON-DEPLOY.md`
+- `docs/SHOWCASE-VERIFICATION.md`
 - `PRODUCTION-GECIS.md`
 - `MAVERAN-2.0.md`
 
@@ -122,5 +147,4 @@ Detailed infra notes live in:
 
 - Tenant-safe slider and campaign modules
 - Team invite and role management
-- iyzico sandbox end-to-end verification
 - Swagger docs, email flows and Redis cache

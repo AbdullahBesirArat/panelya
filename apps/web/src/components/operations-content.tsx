@@ -1,35 +1,59 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useMemo } from "react";
 import { useSessionStore } from "@/store/session";
-import { AnalyticsSection } from "@/components/sections/analytics-section";
-import { CustomersSection } from "@/components/sections/customers-section";
-import { DashboardSection } from "@/components/sections/dashboard-section";
-import { OrdersSection } from "@/components/sections/orders-section";
-import { ProductsSection } from "@/components/sections/products-section";
-import { SettingsSection } from "@/components/sections/settings-section";
+import { SectionLoading } from "@/components/operations-shared";
+
+const loading = () => <SectionLoading />;
+
+const AnalyticsSection = dynamic(
+  () => import("@/components/sections/analytics-section").then((mod) => mod.AnalyticsSection),
+  { loading }
+);
+const CustomersSection = dynamic(
+  () => import("@/components/sections/customers-section").then((mod) => mod.CustomersSection),
+  { loading }
+);
+const DashboardSection = dynamic(
+  () => import("@/components/sections/dashboard-section").then((mod) => mod.DashboardSection),
+  { loading }
+);
+const OrdersSection = dynamic(
+  () => import("@/components/sections/orders-section").then((mod) => mod.OrdersSection),
+  { loading }
+);
+const ProductsSection = dynamic(
+  () => import("@/components/sections/products-section").then((mod) => mod.ProductsSection),
+  { loading }
+);
+const SettingsSection = dynamic(
+  () => import("@/components/sections/settings-section").then((mod) => mod.SettingsSection),
+  { loading }
+);
 
 export function OperationsContent({ sectionKey }: { sectionKey: string }) {
   const organizationSlug = useSessionStore((state) => state.organizationSlug);
   const organizations = useSessionStore((state) => state.organizations);
+  const activeOrganizationSlug = organizationSlug || organizations[0]?.slug || "";
   const currentRole = useMemo(
-    () => organizations.find((organization) => organization.slug === organizationSlug)?.role || "viewer",
-    [organizationSlug, organizations]
+    () => organizations.find((organization) => organization.slug === activeOrganizationSlug)?.role || "viewer",
+    [activeOrganizationSlug, organizations]
   );
 
   switch (sectionKey) {
     case "dashboard":
-      return <DashboardSection organizationSlug={organizationSlug} />;
+      return <DashboardSection organizationSlug={activeOrganizationSlug} />;
     case "products":
-      return <ProductsSection currentRole={currentRole} organizationSlug={organizationSlug} />;
+      return <ProductsSection currentRole={currentRole} organizationSlug={activeOrganizationSlug} />;
     case "orders":
-      return <OrdersSection currentRole={currentRole} organizationSlug={organizationSlug} />;
+      return <OrdersSection currentRole={currentRole} organizationSlug={activeOrganizationSlug} />;
     case "customers":
-      return <CustomersSection organizationSlug={organizationSlug} />;
+      return <CustomersSection organizationSlug={activeOrganizationSlug} />;
     case "analytics":
-      return <AnalyticsSection organizationSlug={organizationSlug} />;
+      return <AnalyticsSection organizationSlug={activeOrganizationSlug} />;
     case "settings":
-      return <SettingsSection currentRole={currentRole} organizationSlug={organizationSlug} />;
+      return <SettingsSection currentRole={currentRole} organizationSlug={activeOrganizationSlug} />;
     default:
       return null;
   }

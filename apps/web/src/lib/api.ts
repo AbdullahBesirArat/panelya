@@ -360,6 +360,27 @@ export async function createProduct(payload: {
   });
 }
 
+export async function updateProduct(id: string, payload: {
+  name: string;
+  categoryId?: string;
+  price: number;
+  salePrice?: number | null;
+  stock: number;
+  status: ProductStatus;
+}) {
+  return authenticatedRequest<ApiProduct>(`/products/${id}`, {
+    method: "PUT",
+    body: JSON.stringify({
+      name: payload.name,
+      category_id: payload.categoryId || null,
+      price: payload.price,
+      sale_price: payload.salePrice ?? null,
+      stock: payload.stock,
+      status: payload.status,
+    }),
+  });
+}
+
 export async function deleteProduct(id: string) {
   return authenticatedRequest<void>(`/products/${id}`, {
     method: "DELETE",

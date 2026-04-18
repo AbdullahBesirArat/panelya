@@ -15,12 +15,15 @@ Maveran 2.0 hedefi mevcut e-ticaret cekirdegini cok kiracili bir SaaS operations
 - Next.js login ekrani gercek auth endpointlerine baglandi.
 - Next.js + TypeScript + Tailwind + React Query + Zustand tabanli dashboard iskeleti `apps/web` altinda baslatildi.
 - Dashboard, products, orders, customers, analytics ve settings ekranlari gercek API verisi ve mutasyonlariyla canli hale getirildi.
+- Products ekraninda kategori/urun olusturma, urun duzenleme ve owner rolunde silme akisi tamamlandi.
 - `smoke:auth`, `smoke:payment`, `check:production` ve `secrets:generate` komutlari eklendi.
 - Koken `README.md` ve API README'si hiring-ready / operator-friendly komutlarla guncellendi.
 - Web tarafina toast feedback, retry butonlari, daha iyi loading skeleton ve mobil navigation polish eklendi.
 - Tek komutla recruiter demo workspace'i kuran `demo:seed` akisi eklendi.
 - Docker Compose ve GitHub Actions CI eklendi.
 - CI hattina web lint, typecheck ve build quality gate'leri eklendi.
+- `docs/SHOWCASE-VERIFICATION.md` ile local kalite kapisi, payment sandbox E2E, secret rotation ve live demo kabul kriterleri yazildi.
+- Neon + Railway + Vercel public demo akisi icin `deploy:staging`, `deploy:production`, Railway/Vercel config ve `docs/VERCEL-RAILWAY-NEON-DEPLOY.md` eklendi.
 
 ## Yerel Calisma
 
@@ -55,9 +58,14 @@ npm run demo:seed
 
 Bu komut `maveran-demo` slug'i altinda dolu dashboard, urunler, musteriler, siparisler ve aktivite kayitlari olusturur.
 
+Railway public demo start command:
+
+```bash
+npm run deploy:staging
+```
+
 ## Siradaki Faz
 
 - Slider ve campaign modullerini tenant-safe endpoint ve UI akisina tasima.
 - Membership, invite ve rol yonetimini settings alanina ekleme.
-- Iyzico sandbox end-to-end testini tamamlayip production secret rotasyonunu yapma.
 - Swagger/OpenAPI, e-posta bildirimleri ve Redis cache ekleme.

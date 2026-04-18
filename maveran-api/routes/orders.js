@@ -1,22 +1,23 @@
 const express = require('express');
 const db = require('../db');
 const { requireAuth, requireRole } = require('../middleware/auth');
+const { rateLimit } = require('../middleware/security');
 const { reserveStock, syncStockForStatusChange } = require('../services/inventory');
 const { expirePendingOrders } = require('../services/pendingOrders');
 const { cartTotal, priceCartItems } = require('../services/cartPricing');
 const { auditLog } = require('../services/audit');
 const { sanitizeCustomer } = require('../services/validation');
 const { resolveOrganization } = require('../services/tenant');
+const { nextOrderCode } = require('../services/orderCodes');
+const { insertOrderItems } = require('../services/orderItems');
 
 const router = express.Router();
 const ORDER_STATUSES = ['new', 'payment_pending', 'processing', 'shipped', 'delivered', 'cancelled', 'paid'];
-
-async function nextOrderCode(client) {
-  const result = await client.query(
-    "select coalesce(max(nullif(regexp_replace(order_code, '\\D', '', 'g'), '')::int), 1000) + 1 as next from orders"
-  );
-  return `#${result.rows[0].next}`;
-}
+const createOrderLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: Number(process.env.ORDER_CREATE_RATE_LIMIT || 60),
+  message: 'Cok fazla siparis denemesi. Lutfen biraz sonra tekrar deneyin.',
+});
 
 function safePaging(limit, offset, defaultLimit = 100) {
   return {
@@ -82,7 +83,7 @@ router.post('/expire-pending', requireAuth, requireRole(['super_admin', 'owner',
   }
 });
 
-router.post('/', async (req, res, next) => {
+router.post('/', createOrderLimiter, async (req, res, next) => {
   const client = await db.pool.connect();
 
   try {
@@ -114,19 +115,7 @@ router.post('/', async (req, res, next) => {
       [organization.id, orderCode, customerResult.rows[0].id, total]
     );
 
-    for (const item of items) {
-      await client.query(
-        `insert into order_items (order_id, product_id, product_name, quantity, unit_price)
-         values ($1, $2, $3, $4, $5)`,
-        [
-          orderResult.rows[0].id,
-          item.product_id,
-          item.name,
-          item.quantity,
-          item.unit_price,
-        ]
-      );
-    }
+    await insertOrderItems(client, orderResult.rows[0].id, items);
 
     await reserveStock(client, items);
 

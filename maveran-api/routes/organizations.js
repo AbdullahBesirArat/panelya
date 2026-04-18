@@ -30,7 +30,11 @@ router.get('/current/summary', requireAuth, async (req, res, next) => {
     const organizationId = organization.id;
 
     const [
-      metricsResult,
+      productMetricsResult,
+      categoryMetricsResult,
+      customerMetricsResult,
+      orderMetricsResult,
+      memberMetricsResult,
       recentOrdersResult,
       lowStockResult,
       recentActivityResult,
@@ -40,48 +44,59 @@ router.get('/current/summary', requireAuth, async (req, res, next) => {
     ] = await Promise.all([
       db.query(
         `select
-          (select count(*)::int from products where organization_id = $1) as product_count,
-          (select count(*)::int from products where organization_id = $1 and status = 'active') as active_products,
-          (select count(*)::int from products where organization_id = $1 and status = 'draft') as draft_products,
-          (select count(*)::int from products where organization_id = $1 and stock = 0) as out_of_stock_products,
-          (select count(*)::int from products where organization_id = $1 and stock between 1 and 5) as low_stock_products,
-          (select count(*)::int from categories where organization_id = $1) as category_count,
-          (select count(*)::int from customers where organization_id = $1) as customer_count,
-          (
-            select count(*)::int
-            from (
-              select c.id
-              from customers c
-              left join orders o
-                on o.customer_id = c.id
-               and o.organization_id = c.organization_id
-               and o.status <> 'cancelled'
-              where c.organization_id = $1
-              group by c.id
-              having count(o.id) > 1
-            ) repeaters
-          ) as repeat_customers,
-          (select count(*)::int from customers where organization_id = $1 and created_at >= date_trunc('month', now())) as new_customers_this_month,
-          (select count(*)::int from orders where organization_id = $1) as order_count,
-          (select count(*)::int from orders where organization_id = $1 and created_at >= date_trunc('day', now())) as today_orders,
-          (select count(*)::int from orders where organization_id = $1 and status = 'payment_pending') as pending_orders,
-          (select count(*)::int from orders where organization_id = $1 and status = 'shipped') as shipped_orders,
-          (select count(*)::int from orders where organization_id = $1 and status = 'delivered') as delivered_orders,
-          (select count(*)::int from orders where organization_id = $1 and status = 'cancelled') as cancelled_orders,
-          (
-            select coalesce(sum(total), 0)::numeric(12,2)
-            from orders
-            where organization_id = $1
+          count(*)::int as product_count,
+          (count(*) filter (where status = 'active'))::int as active_products,
+          (count(*) filter (where status = 'draft'))::int as draft_products,
+          (count(*) filter (where stock = 0))::int as out_of_stock_products,
+          (count(*) filter (where stock between 1 and 5))::int as low_stock_products
+         from products
+         where organization_id = $1`,
+        [organizationId]
+      ),
+      db.query(
+        `select count(*)::int as category_count
+         from categories
+         where organization_id = $1`,
+        [organizationId]
+      ),
+      db.query(
+        `select
+          count(*)::int as customer_count,
+          (count(*) filter (where created_at >= date_trunc('month', now())))::int as new_customers_this_month,
+          (count(*) filter (where order_count > 1))::int as repeat_customers
+         from (
+          select c.id, c.created_at, count(o.id)::int as order_count
+          from customers c
+          left join orders o
+            on o.customer_id = c.id
+           and o.organization_id = c.organization_id
+           and o.status <> 'cancelled'
+          where c.organization_id = $1
+          group by c.id, c.created_at
+         ) customer_orders`,
+        [organizationId]
+      ),
+      db.query(
+        `select
+          count(*)::int as order_count,
+          (count(*) filter (where created_at >= date_trunc('day', now())))::int as today_orders,
+          (count(*) filter (where status = 'payment_pending'))::int as pending_orders,
+          (count(*) filter (where status = 'shipped'))::int as shipped_orders,
+          (count(*) filter (where status = 'delivered'))::int as delivered_orders,
+          (count(*) filter (where status = 'cancelled'))::int as cancelled_orders,
+          coalesce(sum(total) filter (where status in ('paid', 'processing', 'shipped', 'delivered')), 0)::numeric(12,2) as gross_revenue,
+          coalesce(sum(total) filter (
+            where created_at >= date_trunc('month', now())
               and status in ('paid', 'processing', 'shipped', 'delivered')
-          ) as gross_revenue,
-          (
-            select coalesce(sum(total), 0)::numeric(12,2)
-            from orders
-            where organization_id = $1
-              and created_at >= date_trunc('month', now())
-              and status in ('paid', 'processing', 'shipped', 'delivered')
-          ) as month_revenue,
-          (select count(*)::int from memberships where organization_id = $1 and status = 'active') as active_members`,
+          ), 0)::numeric(12,2) as month_revenue
+         from orders
+         where organization_id = $1`,
+        [organizationId]
+      ),
+      db.query(
+        `select count(*)::int as active_members
+         from memberships
+         where organization_id = $1 and status = 'active'`,
         [organizationId]
       ),
       db.query(
@@ -167,7 +182,13 @@ router.get('/current/summary', requireAuth, async (req, res, next) => {
 
     res.json({
       organization,
-      metrics: metricsResult.rows[0],
+      metrics: {
+        ...productMetricsResult.rows[0],
+        ...categoryMetricsResult.rows[0],
+        ...customerMetricsResult.rows[0],
+        ...orderMetricsResult.rows[0],
+        ...memberMetricsResult.rows[0],
+      },
       recentOrders: recentOrdersResult.rows,
       lowStockProducts: lowStockResult.rows,
       recentActivity: recentActivityResult.rows,
