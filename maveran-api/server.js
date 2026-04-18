@@ -11,6 +11,7 @@ const {
   requestId,
   rateLimit,
   safeErrorMessage,
+  handleCorsPreflight,
 } = require('./middleware/security');
 
 const authRoutes = require('./routes/auth');
@@ -34,6 +35,7 @@ app.set('trust proxy', 1);
 app.disable('x-powered-by');
 app.use(requestId);
 app.use(enforceHttps);
+app.use(handleCorsPreflight);
 app.use(helmet({
   hsts: process.env.NODE_ENV === 'production'
     ? { maxAge: 31536000, includeSubDomains: true, preload: true }

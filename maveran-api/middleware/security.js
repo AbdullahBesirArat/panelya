@@ -121,6 +121,24 @@ function corsOptions() {
   };
 }
 
+function isCorsOriginAllowed(origin) {
+  if (!origin && !isProduction()) return true;
+  if (parseCsv(process.env.CORS_ORIGIN).includes(origin)) return true;
+  return !isProduction() && /^https:\/\/[a-z0-9-]+\.vercel\.app$/i.test(String(origin || ''));
+}
+
+function handleCorsPreflight(req, res, next) {
+  const origin = req.get('origin');
+  if (req.method !== 'OPTIONS' || !isCorsOriginAllowed(origin)) return next();
+
+  res.set('Access-Control-Allow-Origin', origin || '*');
+  res.set('Access-Control-Allow-Credentials', 'true');
+  res.set('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+  res.set('Access-Control-Allow-Headers', req.get('access-control-request-headers') || 'Content-Type,Authorization');
+  res.set('Vary', 'Origin');
+  return res.sendStatus(204);
+}
+
 function rateLimit({ windowMs, max, message }) {
   const hits = new Map();
 
@@ -187,6 +205,7 @@ function randomToken(bytes = 32) {
 module.exports = {
   corsOptions,
   enforceHttps,
+  handleCorsPreflight,
   ensureProductionReady,
   ensureJwtSecret,
   isProduction,
