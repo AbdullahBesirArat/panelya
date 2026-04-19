@@ -1,33 +1,33 @@
 {
-  "name": "maveran-platform",
+  "name": "panelya-platform",
   "version": "2.0.0",
   "private": true,
   "workspaces": [
     "apps/web",
-    "maveran-api"
+    "panelya-api"
   ],
   "scripts": {
     "dev:web": "npm --prefix apps/web run dev",
     "build:web": "npm --prefix apps/web run build",
     "lint:web": "npm --prefix apps/web run lint",
     "typecheck:web": "npm --prefix apps/web run typecheck",
-    "dev:api": "npm --prefix maveran-api run dev",
+    "dev:api": "npm --prefix panelya-api run dev",
     "start": "npm run start:api",
-    "start:api": "npm --prefix maveran-api run start",
-    "check:api": "npm --prefix maveran-api run check:syntax",
-    "db:migrate": "npm --prefix maveran-api run db:migrate",
-    "db:setup": "npm --prefix maveran-api run db:setup",
-    "demo:seed": "npm --prefix maveran-api run demo:seed",
-    "db:seed-demo": "npm --prefix maveran-api run db:seed-demo",
-    "deploy:api:staging": "npm --prefix maveran-api run deploy:staging",
-    "deploy:api:production": "npm --prefix maveran-api run deploy:production",
+    "start:api": "npm --prefix panelya-api run start",
+    "check:api": "npm --prefix panelya-api run check:syntax",
+    "db:migrate": "npm --prefix panelya-api run db:migrate",
+    "db:setup": "npm --prefix panelya-api run db:setup",
+    "demo:seed": "npm --prefix panelya-api run demo:seed",
+    "db:seed-demo": "npm --prefix panelya-api run db:seed-demo",
+    "deploy:api:staging": "npm --prefix panelya-api run deploy:staging",
+    "deploy:api:production": "npm --prefix panelya-api run deploy:production",
     "deploy:staging": "npm run start:api",
     "deploy:production": "npm run start:api",
-    "smoke:auth": "npm --prefix maveran-api run smoke:auth",
-    "smoke:auth:bash": "npm --prefix maveran-api run smoke:auth:bash",
-    "smoke:payment": "npm --prefix maveran-api run smoke:payment",
-    "smoke:payment:bash": "npm --prefix maveran-api run smoke:payment:bash",
-    "check:production": "npm --prefix maveran-api run production:check",
-    "secrets:generate": "npm --prefix maveran-api run secrets:generate"
+    "smoke:auth": "npm --prefix panelya-api run smoke:auth",
+    "smoke:auth:bash": "npm --prefix panelya-api run smoke:auth:bash",
+    "smoke:payment": "npm --prefix panelya-api run smoke:payment",
+    "smoke:payment:bash": "npm --prefix panelya-api run smoke:payment:bash",
+    "check:production": "npm --prefix panelya-api run production:check",
+    "secrets:generate": "npm --prefix panelya-api run secrets:generate"
   }
 }

@@ -21,11 +21,11 @@
 
 ## Repo-specific conventions
 
-- Root npm workspace owns `apps/web` and `maveran-api`; prefer root scripts over entering package folders.
+- Root npm workspace owns `apps/web` and `panelya-api`; prefer root scripts over entering package folders.
 - Next.js dashboard routes are generated through `apps/web/src/app/[section]/page.tsx`; keep section keys aligned with `apps/web/src/lib/demo-data.ts`.
 - DB migrations run inside a transaction; do not use `CREATE INDEX CONCURRENTLY` in migration files.
 - Demo workspace data is created with `npm run demo:seed`; README demo credentials must stay aligned with that script.
-- Production readiness gates live in `maveran-api/scripts/production-check.js` and `docs/SHOWCASE-VERIFICATION.md`.
+- Production readiness gates live in `panelya-api/scripts/production-check.js` and `docs/SHOWCASE-VERIFICATION.md`.
 
 ## Change safety rules
 

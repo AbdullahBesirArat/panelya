@@ -31,20 +31,20 @@ jobs:
       postgres:
         image: postgres:16-alpine
         env:
-          POSTGRES_DB: maveran
-          POSTGRES_USER: maveran_user
-          POSTGRES_PASSWORD: maveran_ci_password
+          POSTGRES_DB: panelya
+          POSTGRES_USER: panelya_user
+          POSTGRES_PASSWORD: panelya_ci_password
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U maveran_user -d maveran"
+          --health-cmd "pg_isready -U panelya_user -d panelya"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
     env:
       NODE_ENV: development
       PORT: 3000
-      DATABASE_URL: postgresql://maveran_user:maveran_ci_password@localhost:5432/maveran
+      DATABASE_URL: postgresql://panelya_user:panelya_ci_password@localhost:5432/panelya
       JWT_SECRET: ci_payment_smoke_secret_64_chars_minimum_change_only_in_ci_2026
       JWT_EXPIRES_IN: 2h
       ACCESS_TOKEN_EXPIRES_IN: 15m

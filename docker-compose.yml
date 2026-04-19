@@ -2,26 +2,26 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_DB: maveran
-      POSTGRES_USER: maveran_user
-      POSTGRES_PASSWORD: maveran_dev_password
+      POSTGRES_DB: panelya
+      POSTGRES_USER: panelya_user
+      POSTGRES_PASSWORD: panelya_dev_password
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U maveran_user -d maveran"]
+      test: ["CMD-SHELL", "pg_isready -U panelya_user -d panelya"]
       interval: 10s
       timeout: 5s
       retries: 5
 
   api:
     build:
-      context: ./maveran-api
+      context: ./panelya-api
     environment:
       NODE_ENV: development
       PORT: 3000
-      DATABASE_URL: postgresql://maveran_user:maveran_dev_password@postgres:5432/maveran
+      DATABASE_URL: postgresql://panelya_user:panelya_dev_password@postgres:5432/panelya
       JWT_SECRET: 7a9f9b3c6d8e4f1a2b5c7d9e0f3a4b6c8d1e2f4a6b8c0d2e4f6a8b0c2d4e6f8
       JWT_EXPIRES_IN: 2h
       CORS_ORIGIN: http://localhost:3001

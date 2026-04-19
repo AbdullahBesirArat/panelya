@@ -4,7 +4,7 @@ Multi-tenant SaaS operations platform built by evolving an existing commerce bac
 
 ## What It Does
 
-Panelya gives each organization its own workspace, session context, operational dashboard, product catalog, order tracking, customer view and analytics surface. Mavera is the first demo store/workspace on the platform.
+Panelya gives each organization its own workspace, session context, operational dashboard, product catalog, order tracking, customer view and analytics surface. Maveran is the first demo store/workspace managed from the platform.
 
 Recruiter flow:
 
@@ -16,11 +16,11 @@ Recruiter flow:
 ## Live Demo
 
 - Local demo: `http://localhost:3001`
-- Public dashboard: `https://maveran-web.vercel.app`
-- API docs: `https://maveran-api-production.up.railway.app/api/docs`
-- API spec: `https://maveran-api-production.up.railway.app/api/docs-json`
+- Public dashboard: add the Panelya Vercel URL after deployment
+- API docs: add the Panelya Railway URL after deployment, then open `/api/docs`
+- API spec: add the Panelya Railway URL after deployment, then open `/api/docs-json`
 - Demo email: `demo@panelya.dev`
-- Demo workspace: `mavera`
+- Demo workspace: `maveran`
 
 ## Stack
 
@@ -48,8 +48,9 @@ Recruiter flow:
 ## Architecture
 
 ```text
-apps/web        -> Next.js SaaS dashboard
-maveran-api     -> Express API + auth + payment + tenant filtering
+apps/web        -> Panelya Next.js SaaS dashboard
+panelya-api     -> Panelya Express API + auth + payment + tenant filtering
+maveran-storefront -> Maveran public e-commerce storefront
 PostgreSQL      -> products, orders, customers, organizations, memberships, sessions
 ```
 
@@ -88,7 +89,7 @@ API health runs on `http://localhost:3000/api/health`.
 
 After `npm run demo:seed`, use this showcase workspace:
 
-- Organization slug: `mavera`
+- Organization slug: `maveran`
 - Email: `demo@panelya.dev`
 - Password: `PanelyaDemo!123`
 
@@ -116,7 +117,7 @@ npm run secrets:generate
 - `PAYMENT_PROVIDER=mock` is blocked in production.
 - Callback secret validation is available for protected payment flows.
 - Production env validation checks JWT strength, CORS, public URLs, payment configuration and admin bootstrap.
-- Admin bootstrap is available through `npm --prefix maveran-api run admin:create`.
+- Admin bootstrap is available through `npm --prefix panelya-api run admin:create`.
 - Demo seed is idempotent for local or staging showcase use; change demo credentials before sharing a public staging link.
 - GitHub Actions CI now runs API syntax, web lint, web typecheck and web build from the root workspace lockfile.
 - Public demo deploy uses `NODE_ENV=staging` with the mock provider; real production must use `PAYMENT_PROVIDER=iyzico`.
@@ -144,10 +145,12 @@ NEXT_PUBLIC_API_BASE_URL=<RAILWAY_URL>/api
 Detailed infra notes live in:
 
 - `deploy/DEPLOY-CHECKLIST.md`
+- `docs/DEPLOY-PROJECTS.md`
+- `docs/PROJECT-SPLIT.md`
 - `docs/VERCEL-RAILWAY-NEON-DEPLOY.md`
 - `docs/SHOWCASE-VERIFICATION.md`
 - `PRODUCTION-GECIS.md`
-- `MAVERAN-2.0.md`
+- `PANELYA-OPERATIONS.md`
 
 ## Roadmap
 

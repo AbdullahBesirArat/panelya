@@ -15,7 +15,7 @@ Railway projesinde GitHub reposunu import et.
 
 Service ayarları:
 
-- Root Directory: `maveran-api`
+- Root Directory: `panelya-api`
 - Start Command: `npm run deploy:staging`
 - Healthcheck Path: `/api/health`
 
@@ -32,7 +32,7 @@ REFRESH_TOKEN_EXPIRES_DAYS=30
 ADMIN_USERNAME=admin
 ADMIN_ROLE=super_admin
 ALLOW_ENV_ADMIN_LOGIN=false
-CORS_ORIGIN=<VERCEL_URL>
+CORS_ORIGIN=<PANELYA_VERCEL_URL>,<MAVERAN_STOREFRONT_URL>
 API_RATE_LIMIT=600
 LOGIN_RATE_LIMIT=10
 REGISTER_RATE_LIMIT=6
@@ -45,15 +45,15 @@ PAYMENT_MOCK_AUTO_PAY=false
 PAYMENT_CALLBACK_SECRET_REQUIRED=true
 PAYMENT_CALLBACK_SECRET=<64 hex karakter random secret>
 PUBLIC_API_URL=<RAILWAY_URL>
-PUBLIC_SITE_URL=<VERCEL_URL>
+PUBLIC_SITE_URL=<MAVERAN_STOREFRONT_URL>
 PAYMENT_CALLBACK_URL=<RAILWAY_URL>/api/payment/callback
-PAYMENT_SUCCESS_URL=<VERCEL_URL>/?payment=success
-PAYMENT_FAILURE_URL=<VERCEL_URL>/orders?payment=failed
-DEFAULT_ORGANIZATION_SLUG=mavera
+PAYMENT_SUCCESS_URL=<MAVERAN_STOREFRONT_URL>/index.html?payment=success
+PAYMENT_FAILURE_URL=<MAVERAN_STOREFRONT_URL>/siparis.html?payment=failed
+DEFAULT_ORGANIZATION_SLUG=maveran
 DEMO_OWNER_EMAIL=demo@panelya.dev
 DEMO_OWNER_PASSWORD=<paylasmadan once degistir>
-DEMO_ORGANIZATION_NAME=Mavera
-DEMO_ORGANIZATION_SLUG=mavera
+DEMO_ORGANIZATION_NAME=Maveran
+DEMO_ORGANIZATION_SLUG=maveran
 ```
 
 `JWT_SECRET` ve `PAYMENT_CALLBACK_SECRET` için:
@@ -68,9 +68,9 @@ Deploy bitince kontrol et:
 curl <RAILWAY_URL>/api/health
 ```
 
-Beklenen cevapta `ok: true` ve `service: maveran-api` bulunur.
+Beklenen cevapta `ok: true` ve `service: panelya-api` bulunur.
 
-## 3. Vercel Web
+## 3. Vercel Panelya Dashboard
 
 Vercel'de aynı GitHub reposunu import et.
 
@@ -89,15 +89,37 @@ NEXT_PUBLIC_API_BASE_URL=<RAILWAY_URL>/api
 Deploy bitince Vercel URL'ini Railway'de güncelle:
 
 ```text
-CORS_ORIGIN=<VERCEL_URL>
-PUBLIC_SITE_URL=<VERCEL_URL>
-PAYMENT_SUCCESS_URL=<VERCEL_URL>/?payment=success
-PAYMENT_FAILURE_URL=<VERCEL_URL>/orders?payment=failed
+CORS_ORIGIN=<PANELYA_VERCEL_URL>,<MAVERAN_STOREFRONT_URL>
+PUBLIC_SITE_URL=<MAVERAN_STOREFRONT_URL>
+PAYMENT_SUCCESS_URL=<MAVERAN_STOREFRONT_URL>/index.html?payment=success
+PAYMENT_FAILURE_URL=<MAVERAN_STOREFRONT_URL>/siparis.html?payment=failed
 ```
 
 Railway redeploy sonrası web login akışını test et.
 
-## 4. Production Notu
+## 4. Vercel Maveran Storefront
+
+Vercel'de ayni GitHub reposunu ikinci kez import et.
+
+Project ayarlari:
+
+- Root Directory: `maveran-storefront`
+- Framework: Other
+- Build Command: bos birak
+- Output Directory: `.`
+
+`maveran-storefront/js/config.js` icinde Panelya API adresi dogru olmali:
+
+```js
+window.PANELYA_API_BASE = "https://api.panelya.com.tr/api";
+window.MAVERAN_API_BASE = window.PANELYA_API_BASE;
+```
+
+Vercel domain olarak `maveran.com.tr` ve `www.maveran.com.tr` bagla.
+
+Railway variables icindeki `CORS_ORIGIN`, `PUBLIC_SITE_URL`, `PAYMENT_SUCCESS_URL` ve `PAYMENT_FAILURE_URL` degerlerinde Maveran storefront URL'i bulunmali.
+
+## 5. Production Notu
 
 Gerçek production için bu farklar zorunludur:
 
@@ -118,7 +140,7 @@ ADMIN_BOOTSTRAP_PASSWORD=<tek-kullanimlik-guclu-sifre> npm run admin:create
 npm run production:check
 ```
 
-## 5. Uçtan Uca Demo Testi
+## 6. Uçtan Uca Demo Testi
 
 - `/login` açılır.
 - Demo kullanıcı login olur.

@@ -147,7 +147,7 @@ export default function LoginPage() {
                 <input
                   className="focus-ring mt-2 h-12 w-full rounded-lg border border-line bg-white px-4"
                   onChange={(event) => setLoginForm((state) => ({ ...state, organizationSlug: event.target.value }))}
-                  placeholder="mavera"
+                  placeholder="maveran"
                   type="text"
                   value={loginForm.organizationSlug}
                 />
@@ -193,7 +193,7 @@ export default function LoginPage() {
                 <input
                   className="focus-ring mt-2 h-12 w-full rounded-lg border border-line bg-white px-4"
                   onChange={(event) => setRegisterForm((state) => ({ ...state, organizationName: event.target.value }))}
-                  placeholder="Mavera"
+                  placeholder="Maveran"
                   type="text"
                   value={registerForm.organizationName}
                 />
@@ -203,7 +203,7 @@ export default function LoginPage() {
                 <input
                   className="focus-ring mt-2 h-12 w-full rounded-lg border border-line bg-white px-4"
                   onChange={(event) => setRegisterForm((state) => ({ ...state, organizationSlug: event.target.value }))}
-                  placeholder="mavera"
+                  placeholder="maveran"
                   type="text"
                   value={registerForm.organizationSlug}
                 />

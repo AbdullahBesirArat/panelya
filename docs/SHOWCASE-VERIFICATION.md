@@ -73,7 +73,7 @@ PAYMENT_CALLBACK_SECRET_REQUIRED=true
 6. Beklemede kalan siparis icin zaman asimi gorevini calistir:
 
 ```bash
-npm --prefix maveran-api run orders:expire-pending
+npm --prefix panelya-api run orders:expire-pending
 ```
 
 7. Stok geri yuklenmis ve order status `cancelled` olmus olmali.
@@ -81,7 +81,7 @@ npm --prefix maveran-api run orders:expire-pending
 Production'a gecmeden once `IYZICO_BASE_URL=https://api.iyzipay.com` yap ve production guard'i calistir:
 
 ```bash
-npm --prefix maveran-api run production:check
+npm --prefix panelya-api run production:check
 ```
 
 ## Secret Rotation Gate

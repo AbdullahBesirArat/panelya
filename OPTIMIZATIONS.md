@@ -17,7 +17,7 @@ Biggest risk if ignored: a public traffic spike or scripted checkout flow can st
 - **Category**: Security / Cost / DB
 - **Severity**: Medium
 - **Impact**: DB writes, stock reservation, operational cost, abuse resistance.
-- **Evidence**: `POST /api/payment/initialize` and `POST /api/orders` now have route-specific limiters, but `rateLimit` in `maveran-api/middleware/security.js` stores counters in an in-process `Map`.
+- **Evidence**: `POST /api/payment/initialize` and `POST /api/orders` now have route-specific limiters, but `rateLimit` in `panelya-api/middleware/security.js` stores counters in an in-process `Map`.
 - **Why it's bad**: Route-specific caps reduce casual abuse on one API process, but multi-instance deployments do not share counters. Restarts reset limits.
 - **Fix**: Use Redis-backed rate limiting in production and keep the current in-memory limiter for local/dev fallback.
 - **Tradeoffs**: Adds Redis dependency and network overhead.
@@ -30,7 +30,7 @@ Biggest risk if ignored: a public traffic spike or scripted checkout flow can st
 - **Category**: DB / Cost
 - **Severity**: Medium
 - **Impact**: Dashboard latency, DB CPU, throughput, infra cost.
-- **Evidence**: `maveran-api/routes/organizations.js` `/current/summary` now uses conditional aggregate queries, and the frontend has a 30s React Query stale time. There is still no API-side cache across clients.
+- **Evidence**: `panelya-api/routes/organizations.js` `/current/summary` now uses conditional aggregate queries, and the frontend has a 30s React Query stale time. There is still no API-side cache across clients.
 - **Why it's bad**: Multiple users in the same organization can still trigger identical summary queries. Frontend cache only helps one browser session.
 - **Fix**: Add a short per-organization API cache with explicit invalidation after product/order/customer/category mutations, or a 10-30s TTL cache if exact freshness is not required.
 - **Tradeoffs**: Cache invalidation responsibility. A TTL cache can show slightly stale metrics.
@@ -43,7 +43,7 @@ Biggest risk if ignored: a public traffic spike or scripted checkout flow can st
 - **Category**: DB / Network / Cost
 - **Severity**: Low
 - **Impact**: Payload size, serialization, DB I/O.
-- **Evidence**: `maveran-api/routes/products.js` list endpoint now selects only list/card fields, but still includes `colors`, `images`, `tags`, and `emoji` for legacy storefront cards.
+- **Evidence**: `panelya-api/routes/products.js` list endpoint now selects only list/card fields, but still includes `colors`, `images`, `tags`, and `emoji` for legacy storefront cards.
 - **Why it's bad**: This is much better than `select *`, but image/color metadata can still grow payloads if catalogs become media-heavy.
 - **Fix**: Keep the current projection for compatibility. Later, add explicit `view=card|admin` or a separate storefront list endpoint if card payload becomes large.
 - **Tradeoffs**: Splitting endpoints adds API surface and contract management.
@@ -56,7 +56,7 @@ Biggest risk if ignored: a public traffic spike or scripted checkout flow can st
 - **Category**: Memory / Security / Cost
 - **Severity**: Medium
 - **Impact**: Abuse resistance, multi-instance consistency, memory predictability.
-- **Evidence**: `maveran-api/middleware/security.js` stores rate-limit hits in an in-process `Map`, pruning only when size exceeds 10000.
+- **Evidence**: `panelya-api/middleware/security.js` stores rate-limit hits in an in-process `Map`, pruning only when size exceeds 10000.
 - **Why it's bad**: Limits reset per process and on restart. Multi-instance deployments do not share counters. High-cardinality IP/path traffic can still grow memory until pruning.
 - **Fix**: Use Redis-backed rate limiting in production. Keep the current in-memory limiter for local/dev fallback.
 - **Tradeoffs**: Adds Redis dependency and network overhead.
@@ -69,7 +69,7 @@ Biggest risk if ignored: a public traffic spike or scripted checkout flow can st
 - **Category**: DB / Reliability
 - **Severity**: Low
 - **Impact**: Deployment reliability.
-- **Evidence**: `maveran-api/services/orderCodes.js` calls `nextval('order_code_seq')`. Migration `009_add_order_code_sequence.sql` creates and seeds the sequence.
+- **Evidence**: `panelya-api/services/orderCodes.js` calls `nextval('order_code_seq')`. Migration `009_add_order_code_sequence.sql` creates and seeds the sequence.
 - **Why it's bad**: App code now requires migration 009 before order creation works. A deploy that updates code before DB migration will fail at checkout/payment initialize.
 - **Fix**: Run `npm run db:migrate` before deploying the API code, or make app startup production check validate `order_code_seq` exists.
 - **Tradeoffs**: Startup check adds one more DB dependency during deploy.
@@ -144,14 +144,14 @@ Risk Level: Medium
 ### Public Checkout Write Amplification
 
 - **Type**: Abuse / Cost amplification / Resource exhaustion
-- **Location**: `maveran-api/routes/payment.js`, `maveran-api/routes/orders.js`, `maveran-api/middleware/security.js`
+- **Location**: `panelya-api/routes/payment.js`, `panelya-api/routes/orders.js`, `panelya-api/middleware/security.js`
 - **Exploit scenario**: An attacker scripts public checkout requests with valid organization slug and active product IDs. Each request can create customer/order/order_items rows and reserve stock until expiry. The new route-specific limits slow this on one API process but are not distributed across instances.
 - **Fix**: Move checkout/payment creation limits to shared Redis-backed counters for production, add per-organization pending-order thresholds, and monitor pending-order growth. Consider bot challenge only if public abuse is observed.
 
 ### Payment Callback Final-State Ambiguity
 
 - **Type**: Logic flaw / Payment state integrity
-- **Location**: `maveran-api/routes/payment.js`
+- **Location**: `panelya-api/routes/payment.js`
 - **Exploit scenario**: Replayed callbacks or out-of-order status notifications can attempt to move an order between paid/cancelled states. The route now preserves existing final states, and `smoke:payment` includes duplicate/conflicting callback checks.
 - **Fix**: Keep final-state transition policy covered by smoke/integration tests. For production providers, log conflicting callbacks with enough metadata for reconciliation.
 
@@ -195,7 +195,7 @@ Risk Level: Medium
 
 ## Repo-specific conventions
 
-- Root npm workspace owns `apps/web` and `maveran-api`; prefer root scripts.
+- Root npm workspace owns `apps/web` and `panelya-api`; prefer root scripts.
 - Next.js dashboard routes are generated through `apps/web/src/app/[section]/page.tsx`; keep section keys aligned with `apps/web/src/lib/demo-data.ts`.
 - DB migrations run inside a transaction; do not use `CREATE INDEX CONCURRENTLY` in migration files.
 - Demo workspace data is created with `npm run demo:seed`; README demo credentials must stay aligned with that script.

@@ -70,7 +70,7 @@ export const useSessionStore = create<SessionState>()(
       setHydrated: (hydrated) => set({ hydrated }),
     }),
     {
-      name: "maveran-web-session",
+      name: "panelya-web-session",
       storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({
         accessToken: state.accessToken,

@@ -15,8 +15,8 @@ sudo ufw allow OpenSSH
 sudo ufw allow 'Nginx Full'
 sudo ufw --force enable
 
-sudo mkdir -p /var/www/maveran /var/www/maveran-api /var/www/maveran/uploads /var/log/pm2
-sudo chown -R "$USER":"$USER" /var/www/maveran /var/www/maveran-api /var/www/maveran/uploads /var/log/pm2
+sudo mkdir -p /var/www/maveran /var/www/panelya-api /var/www/maveran/uploads /var/log/pm2
+sudo chown -R "$USER":"$USER" /var/www/maveran /var/www/panelya-api /var/www/maveran/uploads /var/log/pm2
 
 echo "Base packages installed."
-echo "Next: copy frontend files to /var/www/maveran and API files to /var/www/maveran-api."
+echo "Next: copy frontend files to /var/www/maveran and API files to /var/www/panelya-api."

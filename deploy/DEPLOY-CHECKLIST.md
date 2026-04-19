@@ -1,4 +1,4 @@
-# Maveran Deploy Checklist
+# Panelya / Maveran Deploy Checklist
 
 ## 1. VPS
 
@@ -18,7 +18,7 @@ sudo -u postgres psql -f deploy/postgres-init.sql
 3. API sema ve seed dosyalarini calistir:
 
 ```bash
-cd /var/www/maveran-api
+cd /var/www/panelya-api
 psql "$DATABASE_URL" -f db/schema.sql
 psql "$DATABASE_URL" -f db/seed.sql
 npm run db:migrate
@@ -36,7 +36,7 @@ Neon + Railway + Vercel public demo akisi icin ayrica `docs/VERCEL-RAILWAY-NEON-
 
 ## 3. API
 
-1. `/var/www/maveran-api/.env` dosyasini `.env.production.example` uzerinden olustur.
+1. `/var/www/panelya-api/.env` dosyasini `.env.production.example` uzerinden olustur.
 2. Secret ve veritabani parolasini gercek degerlerle degistir.
 3. Paketleri kur:
 
@@ -55,8 +55,8 @@ pm2 startup
 
 `ecosystem.config.cjs` iki process baslatir:
 
-- `maveran-api`: REST API
-- `maveran-expire-pending-orders`: Her 10 dakikada odemesi beklemede kalmis eski siparisleri iptal edip stogu geri ekleyen gorev
+- `panelya-api`: REST API
+- `panelya-expire-pending-orders`: Her 10 dakikada odemesi beklemede kalmis eski siparisleri iptal edip stogu geri ekleyen gorev
 
 Elle kontrol icin:
 
@@ -69,7 +69,7 @@ npm run orders:expire-pending
 1. Legacy HTML/CSS/JS dosyalarini `/var/www/maveran` altina kopyala.
 2. `uploads` klasorunun `/var/www/maveran/uploads` oldugunu dogrula.
 3. Frontend production'da otomatik olarak `/api` adresini kullanir.
-4. Maveran 2.0 Next.js uygulamasi icin `apps/web` klasorunu Vercel'e bagla veya Docker image olarak deploy et.
+4. Panelya Next.js uygulamasi icin `apps/web` klasorunu Vercel'e bagla veya Docker image olarak deploy et.
 5. `NEXT_PUBLIC_API_BASE_URL` degerini production API adresine ayarla.
 
 Vercel public demo icin:
@@ -104,9 +104,9 @@ sudo certbot renew --dry-run
 npm run check:production
 npm run smoke:auth
 npm run smoke:payment
-curl https://maveran.com.tr/api/health
+curl https://api.panelya.com.tr/api/health
 curl -I https://maveran.com.tr/
-pm2 logs maveran-api
+pm2 logs panelya-api
 ```
 
 Admin panelde:
@@ -119,9 +119,9 @@ Admin panelde:
 6. Siparis olustur.
 7. Siparisi admin panelde gor.
 8. Iyzico odeme yarida kalirsa bekleyen siparisin zaman asimi goreviyle iptal oldugunu ve stogun geri geldigini kontrol et.
-9. Staging demo linki varsa `mavera` workspace'inin dolu dashboard ile acildigini kontrol et.
+9. Staging demo linki varsa `maveran` workspace'inin dolu dashboard ile acildigini kontrol et.
 
-## 8. Maveran 2.0 Showcase Gate
+## 8. Panelya Showcase Gate
 
 Public demo linkini paylasmadan once `docs/SHOWCASE-VERIFICATION.md` dosyasindaki checklist'i tamamla:
 

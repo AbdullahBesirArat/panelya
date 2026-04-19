@@ -1,4 +1,4 @@
-# Maveran Production Gecis Durumu
+# Panelya / Maveran Production Gecis Durumu
 
 Kaynak rapor: `C:\Users\Arat\Downloads\Maveran-Yol-Haritasi.docx`
 
@@ -6,14 +6,14 @@ Kaynak rapor: `C:\Users\Arat\Downloads\Maveran-Yol-Haritasi.docx`
 
 - Eski tek dosya yapisi arsize alindi, `suvera.html` ana sayfaya yonlendirme sayfasi oldu.
 - Admin panel CSS/JS dosyalari ayrildi.
-- `maveran-api` klasorunde Express API iskeleti kuruldu.
+- `panelya-api` klasorunde Express API iskeleti kuruldu.
 - PostgreSQL tablo semasi ve baslangic seed dosyasi eklendi.
 - Auth, products, categories, orders, upload, slider ve campaigns route dosyalari yazildi.
 - Frontend icin `js/api.js` eklendi.
 - `siparis.html` API varsa gercek siparis endpointine, yoksa localStorage yedegine kaydedecek hale getirildi.
 - Admin panelde login, urun, kategori, siparis ve musteri akislari API'ye baglanmaya baslandi.
 - Ana sayfa ve urun listeleme sayfasi API aciksa veritabanindaki aktif urunleri render edecek sekilde hazirlandi.
-- Yerel PostgreSQL icinde `maveran` veritabani ve `maveran_user` kullanicisi olusturuldu.
+- Yerel PostgreSQL icinde eski kurulumda `maveran` veritabani ve `maveran_user` kullanicisi kullanildi; yeni Panelya kurulumlari `panelya` ve `panelya_user` kullanir.
 - `schema.sql` ve `seed.sql` basariyla calistirildi.
 - API gercek PostgreSQL ile test edildi: login, products, categories, orders, customers ve order status endpointleri calisiyor.
 - Windows gelistirme icin `start-dev.ps1` eklendi; API ve statik siteyi birlikte baslatir.
