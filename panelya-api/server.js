@@ -35,37 +35,6 @@ const uploadDir = process.env.UPLOAD_DIR || path.join(__dirname, 'uploads');
 ensureProductionReady();
 app.set('trust proxy', 1);
 app.disable('x-powered-by');
-app.use(requestId);
-app.use(enforceHttps);
-app.use(handleCorsPreflight);
-app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
-  customSiteTitle: 'Panelya API Docs',
-  swaggerOptions: { persistAuthorization: true },
-}));
-app.get('/api/docs-json', (req, res) => res.json(swaggerSpec));
-app.use(helmet({
-  hsts: process.env.NODE_ENV === 'production'
-    ? { maxAge: 31536000, includeSubDomains: true, preload: true }
-    : false,
-  referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
-  crossOriginResourcePolicy: { policy: 'cross-origin' },
-}));
-app.use(cors(corsOptions()));
-app.use(rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: Number(process.env.API_RATE_LIMIT || 600),
-}));
-app.use(express.json({ limit: '2mb' }));
-app.use(express.urlencoded({ extended: false }));
-app.use('/uploads', express.static(uploadDir, {
-  dotfiles: 'deny',
-  index: false,
-  maxAge: process.env.NODE_ENV === 'production' ? '7d' : 0,
-  setHeaders(res) {
-    res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('Content-Disposition', 'inline');
-  },
-}));
 
 /**
  * @swagger
@@ -99,6 +68,38 @@ app.get('/api/health', (req, res) => {
     env: process.env.NODE_ENV || 'development',
   });
 });
+
+app.use(requestId);
+app.use(enforceHttps);
+app.use(handleCorsPreflight);
+app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
+  customSiteTitle: 'Panelya API Docs',
+  swaggerOptions: { persistAuthorization: true },
+}));
+app.get('/api/docs-json', (req, res) => res.json(swaggerSpec));
+app.use(helmet({
+  hsts: process.env.NODE_ENV === 'production'
+    ? { maxAge: 31536000, includeSubDomains: true, preload: true }
+    : false,
+  referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
+}));
+app.use(cors(corsOptions()));
+app.use(rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: Number(process.env.API_RATE_LIMIT || 600),
+}));
+app.use(express.json({ limit: '2mb' }));
+app.use(express.urlencoded({ extended: false }));
+app.use('/uploads', express.static(uploadDir, {
+  dotfiles: 'deny',
+  index: false,
+  maxAge: process.env.NODE_ENV === 'production' ? '7d' : 0,
+  setHeaders(res) {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Content-Disposition', 'inline');
+  },
+}));
 
 app.use('/api/auth', authRoutes);
 app.use('/api/products', productRoutes);
