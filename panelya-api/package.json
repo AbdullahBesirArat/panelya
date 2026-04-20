@@ -7,7 +7,7 @@
     "dev": "node --watch server.js",
     "start": "node server.js",
     "start:pm2": "pm2 start ecosystem.config.cjs",
-    "db:schema": "psql \"$DATABASE_URL\" -f db/schema.sql",
+    "db:schema": "node scripts/apply-schema.js",
     "db:migrate": "node scripts/run-migrations.js",
     "db:seed": "psql \"$DATABASE_URL\" -f db/seed.sql",
     "demo:seed": "node scripts/seed-demo-workspace.js",
