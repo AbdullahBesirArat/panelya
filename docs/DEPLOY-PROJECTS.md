@@ -59,6 +59,12 @@ Domain:
 api.panelya.com.tr
 ```
 
+After the first successful deploy, run the database preparation command once from a Railway shell or one-off command:
+
+```bash
+npm --prefix panelya-api run release:staging
+```
+
 ## 2. Panelya Dashboard - Vercel
 
 Vercel'de yeni project olustur.

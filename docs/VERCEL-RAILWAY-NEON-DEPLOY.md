@@ -70,6 +70,12 @@ curl <RAILWAY_URL>/api/health
 
 Beklenen cevapta `ok: true` ve `service: panelya-api` bulunur.
 
+Ilk basarili deploydan sonra Railway shell/one-off command ile DB hazirligini bir kez calistir:
+
+```bash
+npm --prefix panelya-api run release:staging
+```
+
 ## 3. Vercel Panelya Dashboard
 
 Vercel'de aynı GitHub reposunu import et.
