@@ -29,7 +29,9 @@ const auditRoutes = require('./routes/audit');
 const organizationRoutes = require('./routes/organizations');
 
 const app = express();
-const port = process.env.PORT || 3000;
+const port = Number(process.env.PORT || 3000);
+const fallbackPort = 3000;
+const host = process.env.HOST || '0.0.0.0';
 const uploadDir = process.env.UPLOAD_DIR || path.join(__dirname, 'uploads');
 let startupReadinessError = null;
 
@@ -148,6 +150,17 @@ app.use((err, req, res, next) => {
   });
 });
 
-app.listen(port, () => {
-  console.log(`Panelya API ${port} portunda calisiyor`);
-});
+function listen(portToBind) {
+  const server = app.listen(portToBind, host, () => {
+    console.log(`Panelya API ${host}:${portToBind} uzerinde calisiyor`);
+  });
+
+  server.on('error', (err) => {
+    console.error(`Panelya API ${portToBind} portunda baslatilamadi: ${err.message}`);
+  });
+}
+
+listen(port);
+if (port !== fallbackPort) {
+  listen(fallbackPort);
+}
