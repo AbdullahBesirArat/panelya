@@ -23,7 +23,6 @@ Demo/staging variables:
 
 ```text
 NODE_ENV=staging
-PORT=3000
 DATABASE_URL=<NEON_CONNECTION_STRING>
 JWT_SECRET=<64+ karakter random secret>
 JWT_EXPIRES_IN=2h
@@ -55,6 +54,8 @@ DEMO_OWNER_PASSWORD=<paylasmadan once degistir>
 DEMO_ORGANIZATION_NAME=Maveran
 DEMO_ORGANIZATION_SLUG=maveran
 ```
+
+Railway'de `PORT` degiskenini elle ekleme. Railway servis icin dogru portu kendisi verir.
 
 `JWT_SECRET` ve `PAYMENT_CALLBACK_SECRET` için:
 

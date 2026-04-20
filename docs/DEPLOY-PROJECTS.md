@@ -20,7 +20,6 @@ Environment variables:
 
 ```text
 NODE_ENV=staging
-PORT=3000
 DATABASE_URL=<NEON_CONNECTION_STRING>
 JWT_SECRET=<64+ chars random secret>
 JWT_EXPIRES_IN=2h
@@ -52,6 +51,8 @@ DEMO_OWNER_PASSWORD=<change before sharing>
 DEMO_ORGANIZATION_NAME=Maveran
 DEMO_ORGANIZATION_SLUG=maveran
 ```
+
+Do not set `PORT` manually on Railway. Railway injects the correct port for the service.
 
 Domain:
 
