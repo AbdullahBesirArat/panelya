@@ -31,8 +31,14 @@ const organizationRoutes = require('./routes/organizations');
 const app = express();
 const port = process.env.PORT || 3000;
 const uploadDir = process.env.UPLOAD_DIR || path.join(__dirname, 'uploads');
+let startupReadinessError = null;
 
-ensureProductionReady();
+try {
+  ensureProductionReady();
+} catch (err) {
+  startupReadinessError = err;
+  console.error(`Panelya API readiness failed: ${err.message}`);
+}
 app.set('trust proxy', 1);
 app.disable('x-powered-by');
 
@@ -64,6 +70,7 @@ app.disable('x-powered-by');
 app.get('/api/health', (req, res) => {
   res.json({
     ok: true,
+    ready: !startupReadinessError,
     service: 'panelya-api',
     env: process.env.NODE_ENV || 'development',
   });
@@ -72,6 +79,14 @@ app.get('/api/health', (req, res) => {
 app.use(requestId);
 app.use(enforceHttps);
 app.use(handleCorsPreflight);
+app.use((req, res, next) => {
+  if (!startupReadinessError) return next();
+
+  return res.status(503).json({
+    error: 'API konfigurasyonu tamamlanmadi',
+    requestId: req.id,
+  });
+});
 app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
   customSiteTitle: 'Panelya API Docs',
   swaggerOptions: { persistAuthorization: true },
