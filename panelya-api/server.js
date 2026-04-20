@@ -101,7 +101,9 @@ app.use(helmet({
   referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
   crossOriginResourcePolicy: { policy: 'cross-origin' },
 }));
-app.use(cors(corsOptions()));
+app.use(cors(startupReadinessError
+  ? { credentials: true, origin: true }
+  : corsOptions()));
 app.use(rateLimit({
   windowMs: 15 * 60 * 1000,
   max: Number(process.env.API_RATE_LIMIT || 600),

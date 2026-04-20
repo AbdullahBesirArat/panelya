@@ -4,8 +4,8 @@
     "buildCommand": "npm install"
   },
   "deploy": {
-    "startCommand": "npm --prefix panelya-api start",
-    "healthcheckPath": "/api/health",
+    "startCommand": "node panelya-api/server.js",
+    "healthcheckPath": null,
     "healthcheckTimeout": 300,
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 3
