@@ -13,6 +13,8 @@ const WEAK_SECRET_MARKERS = [
   'password',
 ];
 
+let ephemeralJwtSecret = null;
+
 function isProduction() {
   return process.env.NODE_ENV === 'production';
 }
@@ -25,11 +27,18 @@ function parseCsv(value) {
 }
 
 function ensureJwtSecret() {
-  const secret = process.env.JWT_SECRET || '';
+  const configuredSecret = process.env.JWT_SECRET || '';
+  const secret = configuredSecret || ephemeralJwtSecret || '';
   const weakMarker = hasWeakMarker(secret);
 
   if (!secret) {
-    throw new Error('JWT_SECRET zorunlu');
+    if (isProduction()) {
+      throw new Error('JWT_SECRET zorunlu');
+    }
+
+    ephemeralJwtSecret = randomToken(64);
+    console.warn('JWT_SECRET tanimli degil; development/staging icin gecici secret uretildi. Restart sonrasi oturumlar gecersiz olur.');
+    return ephemeralJwtSecret;
   }
 
   if (isProduction() && (secret.length < 64 || weakMarker)) {
