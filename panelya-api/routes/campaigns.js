@@ -17,7 +17,7 @@ const managerOnly = [requireAuth, requireRole(['super_admin', 'owner', 'admin'])
  *     parameters:
  *       - in: query
  *         name: organizationSlug
- *         schema: { type: string, example: maveran }
+ *         schema: { type: string, example: panelya }
  *     responses:
  *       200:
  *         description: Aktif kampanya dizisi
@@ -68,7 +68,7 @@ function campaignPayload(body) {
 
 router.get('/', async (req, res, next) => {
   try {
-    const organization = await resolveOrganization(req);
+    const organization = await resolveOrganization(req, db, { allowPublic: !req.auth });
     const result = await db.query(
       `select * from campaigns
        where organization_id = $1

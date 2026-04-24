@@ -14,6 +14,7 @@ export type SessionOrganization = {
   plan: string;
   status: string;
   role: string;
+  publicAccessToken?: string;
 };
 
 type SessionPayload = {

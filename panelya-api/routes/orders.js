@@ -26,6 +26,30 @@ function safePaging(limit, offset, defaultLimit = 100) {
   };
 }
 
+function publicOrderView(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    order_code: row.order_code,
+    total: row.total,
+    status: row.status,
+    payment_provider: row.payment_provider,
+    shipping_company: row.shipping_company,
+    tracking_number: row.tracking_number,
+    tracking_url: row.tracking_url,
+    shipped_at: row.shipped_at,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    customer: {
+      name: row.customer_name,
+      email: row.email,
+      phone: row.phone,
+      address: row.address,
+    },
+    items: Array.isArray(row.items) ? row.items : [],
+  };
+}
+
 /**
  * @swagger
  * /api/orders:
@@ -72,7 +96,7 @@ function safePaging(limit, offset, defaultLimit = 100) {
  *             properties:
  *               organizationSlug:
  *                 type: string
- *                 example: maveran
+ *                 example: panelya
  *               customer:
  *                 type: object
  *                 required: [name, email, phone]
@@ -154,6 +178,57 @@ router.post('/expire-pending', requireAuth, requireRole(['super_admin', 'owner',
   }
 });
 
+router.get('/lookup', async (req, res, next) => {
+  try {
+    const orderCode = String(req.query.orderCode || '').trim().slice(0, 40);
+    if (!orderCode) return res.status(400).json({ error: 'Siparis kodu zorunlu' });
+
+    const organization = await resolveOrganization(req, db, { allowPublic: !req.auth });
+    const result = await db.query(
+      `select
+         o.id,
+         o.order_code,
+         o.total,
+         o.status,
+         o.payment_provider,
+         o.shipping_company,
+         o.tracking_number,
+         o.tracking_url,
+         o.shipped_at,
+         o.created_at,
+         o.updated_at,
+         c.name as customer_name,
+         c.email,
+         c.phone,
+         c.address,
+         coalesce(
+           json_agg(
+             json_build_object(
+               'product_id', oi.product_id,
+               'name', oi.product_name,
+               'quantity', oi.quantity,
+               'unit_price', oi.unit_price
+             )
+             order by oi.id
+           ) filter (where oi.id is not null),
+           '[]'::json
+         ) as items
+       from orders o
+       left join customers c on c.id = o.customer_id and c.organization_id = o.organization_id
+       left join order_items oi on oi.order_id = o.id
+       where o.organization_id = $1 and o.order_code = $2
+       group by o.id, c.id
+       limit 1`,
+      [organization.id, orderCode]
+    );
+
+    if (!result.rows[0]) return res.status(404).json({ error: 'Siparis bulunamadi' });
+    res.json(publicOrderView(result.rows[0]));
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.post('/', createOrderLimiter, async (req, res, next) => {
   const client = await db.pool.connect();
 
@@ -161,7 +236,7 @@ router.post('/', createOrderLimiter, async (req, res, next) => {
     const customer = sanitizeCustomer(req.body.customer || {});
 
     await client.query('begin');
-    const organization = await resolveOrganization(req, client);
+    const organization = await resolveOrganization(req, client, { allowPublic: true });
     const items = await priceCartItems(client, req.body.items, { organizationId: organization.id });
     const total = cartTotal(items);
 
@@ -279,8 +354,11 @@ router.put('/:id/status', requireAuth, requireRole(['super_admin', 'owner', 'adm
 });
 
 router.put('/:id/shipping', requireAuth, requireRole(['super_admin', 'owner', 'admin']), async (req, res, next) => {
+  const client = await db.pool.connect();
+
   try {
-    const organization = await resolveOrganization(req);
+    await client.query('begin');
+    const organization = await resolveOrganization(req, client);
     const {
       shipping_company = '',
       tracking_number = '',
@@ -288,13 +366,20 @@ router.put('/:id/shipping', requireAuth, requireRole(['super_admin', 'owner', 'a
       shipped_at = null,
     } = req.body;
 
-    const oldResult = await db.query(
+    const oldResult = await client.query(
       `select shipping_company, tracking_number, tracking_url, shipped_at, status
        from orders
-       where id = $1 and organization_id = $2`,
+       where id = $1 and organization_id = $2
+       for update`,
       [req.params.id, organization.id]
     );
-    const result = await db.query(
+
+    if (!oldResult.rows[0]) {
+      await client.query('rollback');
+      return res.status(404).json({ error: 'Siparis bulunamadi' });
+    }
+
+    const result = await client.query(
       `update orders
        set shipping_company = $1,
            tracking_number = $2,
@@ -314,7 +399,6 @@ router.put('/:id/shipping', requireAuth, requireRole(['super_admin', 'owner', 'a
       ]
     );
 
-    if (!result.rows[0]) return res.status(404).json({ error: 'Siparis bulunamadi' });
     await auditLog(req, {
       action: 'UPDATE_SHIPPING',
       resourceType: 'order',
@@ -328,9 +412,13 @@ router.put('/:id/shipping', requireAuth, requireRole(['super_admin', 'owner', 'a
         status: result.rows[0].status,
       },
     });
+    await client.query('commit');
     res.json(result.rows[0]);
   } catch (err) {
+    await client.query('rollback');
     next(err);
+  } finally {
+    client.release();
   }
 });
 

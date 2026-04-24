@@ -51,8 +51,8 @@ function productParams(body) {
  *     parameters:
  *       - in: query
  *         name: organizationSlug
- *         schema: { type: string, example: maveran }
- *         description: Public storefront icin workspace slug
+ *         schema: { type: string, example: panelya }
+ *         description: Public API calls icin workspace slug
  *       - in: query
  *         name: q
  *         schema: { type: string }
@@ -140,7 +140,7 @@ function productParams(body) {
  */
 router.get('/', async (req, res, next) => {
   try {
-    const organization = await resolveOrganization(req);
+    const organization = await resolveOrganization(req, db, { allowPublic: !req.auth });
     const { q = '', category_id, status, limit = 50, offset = 0 } = req.query;
     const paging = safePaging(limit, offset);
     const params = [organization.id, `%${String(q).slice(0, 120)}%`];
@@ -172,8 +172,11 @@ router.get('/', async (req, res, next) => {
         p.stock,
         p.status,
         p.colors,
+        p.sizes,
         p.images,
+        p.details,
         p.tags,
+        p.description,
         p.emoji,
         p.created_at,
         p.updated_at
@@ -193,7 +196,7 @@ router.get('/', async (req, res, next) => {
 
 router.get('/:id', async (req, res, next) => {
   try {
-    const organization = await resolveOrganization(req);
+    const organization = await resolveOrganization(req, db, { allowPublic: !req.auth });
     const result = await db.query(
       `select p.*, c.name as category_name
        from products p

@@ -17,7 +17,7 @@ const managerOnly = [requireAuth, requireRole(['super_admin', 'owner', 'admin'])
  *     parameters:
  *       - in: query
  *         name: organizationSlug
- *         schema: { type: string, example: maveran }
+ *         schema: { type: string, example: panelya }
  *     responses:
  *       200:
  *         description: Aktif slayt dizisi
@@ -39,7 +39,7 @@ const managerOnly = [requireAuth, requireRole(['super_admin', 'owner', 'admin'])
  *             required: [title]
  *             properties:
  *               tag: { type: string, example: Panelya Operations }
- *               title: { type: string, example: Maveran vitrin akisi }
+ *               title: { type: string, example: Panelya vitrin akisi }
  *               sub: { type: string, example: Siparis ve stok akisi }
  *               btn: { type: string, example: Katalogu ac }
  *               image_url: { type: string, example: https://images.unsplash.com/photo.jpg }
@@ -72,7 +72,7 @@ function slidePayload(body) {
 
 router.get('/', async (req, res, next) => {
   try {
-    const organization = await resolveOrganization(req);
+    const organization = await resolveOrganization(req, db, { allowPublic: !req.auth });
     const result = await db.query(
       `select * from slider_items
        where organization_id = $1 and active = true

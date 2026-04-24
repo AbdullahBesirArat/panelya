@@ -16,7 +16,7 @@ const router = express.Router();
  *     parameters:
  *       - in: query
  *         name: organizationSlug
- *         schema: { type: string, example: maveran }
+ *         schema: { type: string, example: panelya }
  *     responses:
  *       200:
  *         description: Kategori dizisi
@@ -57,7 +57,7 @@ const router = express.Router();
  */
 router.get('/', async (req, res, next) => {
   try {
-    const organization = await resolveOrganization(req);
+    const organization = await resolveOrganization(req, db, { allowPublic: !req.auth });
     const result = await db.query(
       `select id, name, slug
        from categories
