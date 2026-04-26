@@ -25,18 +25,18 @@ const dateTimeFormatter = new Intl.DateTimeFormat("tr-TR", {
 
 export const orderStatusLabels = {
   new: "Yeni",
-  payment_pending: "Odeme bekliyor",
-  processing: "Hazirlaniyor",
-  paid: "Odendi",
+  payment_pending: "Ödeme bekliyor",
+  processing: "Hazırlanıyor",
+  paid: "Ödendi",
   shipped: "Kargoda",
   delivered: "Teslim edildi",
-  cancelled: "Iptal",
+  cancelled: "İptal",
 } as const;
 
 export const productStatusLabels = {
   active: "Aktif",
   draft: "Taslak",
-  out: "Tukendi",
+  out: "Tükendi",
 } as const;
 
 export function useSummaryQuery(organizationSlug: string) {
@@ -231,7 +231,7 @@ export function pickActivity(summary: OrganizationSummary, entityTypes: string[]
   }
 
   if (categories.length > 0) {
-    return categories.slice(0, 4).map((category) => `${category.name} kategorisi aktif katalogda hazir.`);
+    return categories.slice(0, 4).map((category) => `${category.name} kategorisi aktif katalogda hazır.`);
   }
 
   return ["Hareketler burada listelenecek."];
@@ -249,17 +249,17 @@ export function describeActivity(activity: OrganizationSummary["recentActivity"]
 function activityActionLabel(action: string) {
   switch (action) {
     case "CREATE":
-      return "olusturdu";
+      return "oluşturdu";
     case "UPDATE":
-      return "guncelledi";
+      return "güncelledi";
     case "DELETE":
       return "sildi";
     case "UPDATE_STATUS":
-      return "durumunu degistirdi";
+      return "durumunu değiştirdi";
     case "UPDATE_SHIPPING":
-      return "kargo bilgisini guncelledi";
+      return "kargo bilgisini güncelledi";
     case "EXPIRE_PENDING":
-      return "bekleyen siparisleri temizledi";
+      return "bekleyen siparişleri temizledi";
     default:
       return action.toLocaleLowerCase("tr-TR");
   }
@@ -268,15 +268,15 @@ function activityActionLabel(action: string) {
 function entityLabel(entity: string) {
   switch (entity) {
     case "product":
-      return "urun";
+      return "ürün";
     case "category":
       return "kategori";
     case "order":
-      return "siparis";
+      return "sipariş";
     case "customer":
-      return "musteri";
+      return "müşteri";
     case "organization":
-      return "workspace";
+      return "mağaza";
     case "slider":
       return "slayt";
     case "campaign":

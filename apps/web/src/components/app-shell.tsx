@@ -22,8 +22,6 @@ export function AppShell({
   const queryClient = useQueryClient();
   const accessToken = useSessionStore((state) => state.accessToken);
   const hydrated = useSessionStore((state) => state.hydrated);
-  const user = useSessionStore((state) => state.user);
-  const organizations = useSessionStore((state) => state.organizations);
   const organizationSlug = useSessionStore((state) => state.organizationSlug);
   const syncProfile = useSessionStore((state) => state.syncProfile);
   const clearSession = useSessionStore((state) => state.clearSession);
@@ -31,18 +29,17 @@ export function AppShell({
   const [switching, setSwitching] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
 
-  const { data, isError } = useQuery({
+  const { data, isError, isLoading } = useQuery({
     queryKey: ["me", accessToken, organizationSlug],
     queryFn: fetchMe,
     enabled: hydrated && Boolean(accessToken),
     retry: false,
     staleTime: 60_000,
   });
-  const currentOrganization = organizations.find((organization) => organization.slug === organizationSlug) || organizations[0];
   const profile = data?.actorType === "app" ? data : null;
-  const displayUser = profile?.user || user;
-  const displayOrganization = profile?.currentOrganization || currentOrganization;
-  const displayOrganizations = profile?.organizations || organizations;
+  const displayUser = profile?.user ?? null;
+  const displayOrganization = profile?.currentOrganization ?? null;
+  const displayOrganizations = profile?.organizations ?? [];
   const activeOrganizationSlug = displayOrganization?.slug || organizationSlug;
 
   useEffect(() => {
@@ -88,13 +85,13 @@ export function AppShell({
       syncProfile(nextSession);
       await queryClient.invalidateQueries({ queryKey: ["me"] });
       pushToast({
-        title: "Workspace degisti",
-        description: `Yeni alan: ${nextSession.currentOrganization.name}`,
+        title: "Mağaza değişti",
+        description: `Yeni mağaza: ${nextSession.currentOrganization.name}`,
         tone: "success",
       });
     } catch (err) {
       pushToast({
-        title: "Workspace degistirilemedi",
+        title: "Mağaza değiştirilemedi",
         description: err instanceof Error ? err.message : "Tekrar deneyin.",
         tone: "error",
       });
@@ -109,8 +106,8 @@ export function AppShell({
       await logoutSession();
       queryClient.clear();
       pushToast({
-        title: "Oturum kapatildi",
-        description: "Tekrar gorusuruz.",
+        title: "Oturum kapatıldı",
+        description: "Tekrar görüşürüz.",
         tone: "info",
       });
       router.replace("/login");
@@ -119,12 +116,22 @@ export function AppShell({
     }
   }
 
-  if (!hydrated || !accessToken || !displayUser || !displayOrganization || displayOrganizations.length === 0 || data?.actorType === "admin") {
+  const waitingForVerifiedSession = hydrated && Boolean(accessToken) && (isLoading || !profile);
+
+  if (
+    !hydrated
+    || !accessToken
+    || waitingForVerifiedSession
+    || !displayUser
+    || !displayOrganization
+    || displayOrganizations.length === 0
+    || data?.actorType === "admin"
+  ) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-paper px-6">
         <div className="w-full max-w-md rounded-lg border border-line bg-white p-6 text-center shadow-panel">
           <p className="text-sm font-semibold uppercase text-mint">{PLATFORM_NAME}</p>
-          <p className="mt-3 text-lg font-bold">Oturum hazirlaniyor</p>
+          <p className="mt-3 text-lg font-bold">Oturum hazırlanıyor</p>
         </div>
       </div>
     );
@@ -135,7 +142,7 @@ export function AppShell({
       <aside className="fixed inset-y-0 left-0 z-20 hidden w-64 border-r border-line bg-white px-5 py-6 lg:block">
         <Link className="focus-ring block rounded-lg" href="/dashboard">
           <p className="text-sm font-semibold uppercase text-mint">{PLATFORM_NAME}</p>
-          <p className="mt-1 text-xl font-bold">Operations</p>
+          <p className="mt-1 text-xl font-bold">Operasyon Merkezi</p>
         </Link>
         <nav className="mt-8 space-y-2">
           {navigationItems.map((item) => {
@@ -159,7 +166,7 @@ export function AppShell({
         <header className="sticky top-0 z-10 border-b border-line bg-white/95 px-4 py-4 backdrop-blur sm:px-6">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
-              <p className="text-xs font-semibold uppercase text-zinc-500">Workspace</p>
+              <p className="text-xs font-semibold uppercase text-zinc-500">Mağaza</p>
               <p className="text-lg font-bold">{displayBrandName(displayOrganization.name)}</p>
               <p className="text-sm text-zinc-500">{displayBrandName(displayUser.name) || displayUser.email}</p>
             </div>
@@ -172,7 +179,7 @@ export function AppShell({
               >
                 {displayOrganizations.map((organization) => (
                   <option key={organization.slug} value={organization.slug}>
-                    {displayBrandName(organization.name)} ({organization.role})
+                    {displayBrandName(organization.name)} ({roleLabel(organization.role)})
                   </option>
                 ))}
               </select>
@@ -182,7 +189,7 @@ export function AppShell({
                 onClick={() => void handleLogout()}
                 type="button"
               >
-                {loggingOut ? "Cikiliyor" : "Cikis"}
+                {loggingOut ? "Çıkış yapılıyor" : "Çıkış"}
               </button>
             </div>
           </div>
@@ -212,4 +219,19 @@ export function AppShell({
       </div>
     </div>
   );
+}
+
+function roleLabel(role: string) {
+  switch (role) {
+    case "owner":
+      return "Sahip";
+    case "admin":
+      return "Yönetici";
+    case "member":
+      return "Ekip Üyesi";
+    case "viewer":
+      return "Salt Okur";
+    default:
+      return role;
+  }
 }

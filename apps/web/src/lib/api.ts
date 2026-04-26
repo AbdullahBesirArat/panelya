@@ -1,6 +1,6 @@
 import { useSessionStore, type SessionOrganization, type SessionUser } from "@/store/session";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:3000/api";
+export const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:3000/api";
 
 export type ProductStatus = "active" | "draft" | "out";
 export type OrderStatus =
@@ -45,6 +45,19 @@ export type ApiProduct = {
   sale_price: string | null;
   stock: number;
   status: ProductStatus;
+  colors: string[];
+  sizes: string[];
+  images: string[];
+  details: {
+    short_description?: string;
+    story?: string;
+    measurements?: string;
+    delivery_note?: string;
+    [key: string]: unknown;
+  };
+  tags: string;
+  description: string;
+  emoji: string;
   created_at: string;
   updated_at: string;
 };
@@ -71,6 +84,11 @@ export type ApiOrder = {
   items: string;
   total: string;
   status: OrderStatus;
+  payment_provider: string | null;
+  payment_method: "card" | "iban";
+  note: string;
+  gift_wrap: boolean;
+  shipping_fee: string;
   shipping_company: string | null;
   tracking_number: string | null;
   tracking_url: string | null;
@@ -203,7 +221,29 @@ async function readError(response: Response) {
   const body = contentType.includes("application/json")
     ? await response.json().catch(() => ({}))
     : {};
-  throw new Error(body.error || `API request failed: ${response.status}`);
+  const status = response.status;
+  const serverMessage = typeof body.error === "string" ? body.error : "";
+
+  if (status === 401) {
+    throw new Error("Oturumunuz gecersiz veya suresi dolmus.");
+  }
+  if (status === 403) {
+    throw new Error("Bu işlem için yetkiniz yok.");
+  }
+  if (status === 404) {
+    throw new Error("Istenen kayit bulunamadi.");
+  }
+  if (status === 409) {
+    throw new Error("Bu işlem mevcut verilerle çakıştı.");
+  }
+  if (status === 429) {
+    throw new Error("Cok fazla istek gonderildi. Lutfen biraz sonra tekrar deneyin.");
+  }
+  if (status >= 500) {
+    throw new Error("Sunucuda bir hata olustu. Lutfen tekrar deneyin.");
+  }
+
+  throw new Error(serverMessage || "Islem tamamlanamadi. Girdilerinizi kontrol edip tekrar deneyin.");
 }
 
 function buildQuery(params: Record<string, string | number | undefined | null>) {
@@ -221,7 +261,7 @@ function buildQuery(params: Record<string, string | number | undefined | null>) 
 
 async function publicRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers = new Headers(options.headers);
-  if (options.body != null) {
+  if (options.body != null && !(options.body instanceof FormData)) {
     headers.set("Content-Type", "application/json");
   }
 
@@ -234,31 +274,43 @@ async function publicRequest<T>(path: string, options: RequestInit = {}): Promis
   return parseResponse<T>(response);
 }
 
+let refreshSessionPromise: Promise<boolean> | null = null;
+
 async function tryRefreshSession() {
+  if (refreshSessionPromise) {
+    return refreshSessionPromise;
+  }
+
   const state = useSessionStore.getState();
   if (!state.refreshToken) return false;
 
-  try {
-    const refreshed = await publicRequest<SessionResponse>("/auth/session/refresh", {
-      method: "POST",
-      body: JSON.stringify({
-        refreshToken: state.refreshToken,
-        organizationSlug: state.organizationSlug,
-      }),
-    });
-    useSessionStore.getState().applySession(refreshed);
-    return true;
-  } catch {
-    useSessionStore.getState().clearSession();
-    return false;
-  }
+  refreshSessionPromise = (async () => {
+    try {
+      const refreshed = await publicRequest<SessionResponse>("/auth/session/refresh", {
+        method: "POST",
+        body: JSON.stringify({
+          refreshToken: state.refreshToken,
+          organizationSlug: state.organizationSlug,
+        }),
+      });
+      useSessionStore.getState().applySession(refreshed);
+      return true;
+    } catch {
+      useSessionStore.getState().clearSession();
+      return false;
+    } finally {
+      refreshSessionPromise = null;
+    }
+  })();
+
+  return refreshSessionPromise;
 }
 
 async function authenticatedRequest<T>(path: string, options: RequestInit = {}, canRetry = true): Promise<T> {
   const state = useSessionStore.getState();
   const headers = new Headers(options.headers);
 
-  if (options.body != null) {
+  if (options.body != null && !(options.body instanceof FormData)) {
     headers.set("Content-Type", "application/json");
   }
 
@@ -372,6 +424,18 @@ export async function createProduct(payload: {
   salePrice?: number | null;
   stock: number;
   status: ProductStatus;
+  colors?: string[];
+  sizes?: string[];
+  images?: string[];
+  details?: {
+    short_description?: string;
+    story?: string;
+    measurements?: string;
+    delivery_note?: string;
+  };
+  tags?: string;
+  description?: string;
+  emoji?: string;
 }) {
   return authenticatedRequest<ApiProduct>("/products", {
     method: "POST",
@@ -382,6 +446,13 @@ export async function createProduct(payload: {
       sale_price: payload.salePrice ?? null,
       stock: payload.stock,
       status: payload.status,
+      colors: payload.colors ?? [],
+      sizes: payload.sizes ?? [],
+      images: payload.images ?? [],
+      details: payload.details ?? {},
+      tags: payload.tags ?? "",
+      description: payload.description ?? "",
+      emoji: payload.emoji ?? "",
     }),
   });
 }
@@ -393,6 +464,18 @@ export async function updateProduct(id: string, payload: {
   salePrice?: number | null;
   stock: number;
   status: ProductStatus;
+  colors?: string[];
+  sizes?: string[];
+  images?: string[];
+  details?: {
+    short_description?: string;
+    story?: string;
+    measurements?: string;
+    delivery_note?: string;
+  };
+  tags?: string;
+  description?: string;
+  emoji?: string;
 }) {
   return authenticatedRequest<ApiProduct>(`/products/${id}`, {
     method: "PUT",
@@ -403,6 +486,13 @@ export async function updateProduct(id: string, payload: {
       sale_price: payload.salePrice ?? null,
       stock: payload.stock,
       status: payload.status,
+      colors: payload.colors ?? [],
+      sizes: payload.sizes ?? [],
+      images: payload.images ?? [],
+      details: payload.details ?? {},
+      tags: payload.tags ?? "",
+      description: payload.description ?? "",
+      emoji: payload.emoji ?? "",
     }),
   });
 }
@@ -410,6 +500,16 @@ export async function updateProduct(id: string, payload: {
 export async function deleteProduct(id: string) {
   return authenticatedRequest<void>(`/products/${id}`, {
     method: "DELETE",
+  });
+}
+
+export async function uploadProductImages(files: File[]) {
+  const formData = new FormData();
+  files.forEach((file) => formData.append("images", file));
+
+  return authenticatedRequest<{ files: Array<{ url: string }> }>("/upload", {
+    method: "POST",
+    body: formData,
   });
 }
 

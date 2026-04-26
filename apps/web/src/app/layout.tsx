@@ -6,7 +6,7 @@ import { PLATFORM_PRODUCT_NAME } from "@/lib/branding";
 
 export const metadata: Metadata = {
   title: PLATFORM_PRODUCT_NAME,
-  description: "Business operations dashboard"
+  description: "Türkiye e-ticaret ekipleri için operasyon paneli"
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

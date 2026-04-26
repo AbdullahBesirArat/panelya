@@ -50,7 +50,7 @@ export function OrdersSection({
     mutationFn: ({ id, nextStatus }: { id: string; nextStatus: OrderStatus }) => updateOrderStatus(id, nextStatus),
     onSuccess: async () => {
       pushToast({
-        title: "Siparis guncellendi",
+        title: "Sipariş güncellendi",
         description: "Durum bilgisi kaydedildi.",
         tone: "success",
       });
@@ -67,7 +67,7 @@ export function OrdersSection({
   if (summaryQuery.isError || (ordersQuery.isError && !ordersQuery.data) || !summaryQuery.data || !ordersQuery.data) {
     return (
       <SectionError
-        message="Siparis verisi yuklenemedi."
+        message="Sipariş verisi yüklenemedi."
         onRetry={() => {
           void summaryQuery.refetch();
           void ordersQuery.refetch();
@@ -84,21 +84,21 @@ export function OrdersSection({
       <MetricGrid
         metrics={[
           { label: "Bugun", value: formatCount(summary.metrics.today_orders), tone: "mint" },
-          { label: "Odeme bekliyor", value: formatCount(summary.metrics.pending_orders), tone: "sun" },
+          { label: "Ödeme bekliyor", value: formatCount(summary.metrics.pending_orders), tone: "sun" },
           { label: "Kargoda", value: formatCount(summary.metrics.shipped_orders), tone: "leaf" },
-          { label: "Iptal", value: formatCount(summary.metrics.cancelled_orders), tone: "coral" },
+          { label: "İptal", value: formatCount(summary.metrics.cancelled_orders), tone: "coral" },
         ]}
       />
       <div className="grid gap-5 xl:grid-cols-[1.2fr_0.8fr]">
         <Panel
-          title="Siparisler"
-          description="Canli siparis akislari"
+          title="Siparişler"
+          description="Canlı sipariş akışları"
           actions={(
             <div className="flex flex-wrap gap-2">
               <input
                 className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
                 onChange={(event) => setSearch(event.target.value)}
-                placeholder="Kod veya musteri ara"
+                placeholder="Kod veya müşteri ara"
                 value={search}
               />
               <select
@@ -106,22 +106,22 @@ export function OrdersSection({
                 onChange={(event) => setStatus(event.target.value as OrderStatus | "")}
                 value={status}
               >
-                <option value="">Tum durumlar</option>
+                <option value="">Tüm durumlar</option>
                 {orderStatusOptions.map((option) => (
                   <option key={option} value={option}>{orderStatusLabels[option]}</option>
                 ))}
               </select>
               {ordersQuery.isFetching ? (
                 <span className="inline-flex h-10 items-center rounded-lg border border-line px-3 text-xs font-semibold text-zinc-500">
-                  Guncelleniyor
+                  Güncelleniyor
                 </span>
               ) : null}
             </div>
           )}
         >
           <DataGrid
-            columns={["Kod", "Musteri", "Tutar", "Kalemler", "Durum", "Aksiyon"]}
-            emptyMessage="Bu filtrelerle siparis bulunamadi."
+            columns={["Kod", "Müşteri", "Tutar", "Kalemler", "Ödeme", "Durum", "Aksiyon"]}
+            emptyMessage="Bu filtrelerle sipariş bulunamadı."
             rows={orders}
             renderRow={(order) => {
               const draft = statusDrafts[order.id] || order.status;
@@ -137,7 +137,19 @@ export function OrdersSection({
                     </div>
                   </DataCell>
                   <DataCell>{formatCurrency(order.total)}</DataCell>
-                  <DataCell>{order.items}</DataCell>
+                  <DataCell>
+                    <div className="space-y-1">
+                      <p>{order.items}</p>
+                      {order.note ? <p className="text-xs text-zinc-500">Not: {order.note}</p> : null}
+                      {order.gift_wrap ? <p className="text-xs font-semibold text-zinc-500">Hediye paketi</p> : null}
+                    </div>
+                  </DataCell>
+                  <DataCell>
+                    <div className="space-y-1 text-xs text-zinc-500">
+                      <p className="font-semibold text-ink">{paymentMethodLabel(order.payment_method)}</p>
+                      {Number(order.shipping_fee || 0) > 0 ? <p>Kargo: {formatCurrency(order.shipping_fee)}</p> : null}
+                    </div>
+                  </DataCell>
                   <DataCell>
                     <StatusPill tone={order.status === "cancelled" ? "coral" : order.status === "payment_pending" ? "sun" : "mint"}>
                       {orderStatusLabels[order.status]}
@@ -175,10 +187,10 @@ export function OrdersSection({
           {statusMutation.isError && <InlineError message={statusMutation.error.message} />}
         </Panel>
         <div className="space-y-5">
-          <Panel title="Siparis ozeti" description="En yeni hareket">
+          <Panel title="Sipariş özeti" description="En yeni hareket">
             <div className="space-y-3">
               {summary.recentOrders.length === 0 ? (
-                <p className="text-sm text-zinc-500">No orders yet. Ilk odeme denemesi burada gorunecek.</p>
+                <p className="text-sm text-zinc-500">Henüz sipariş yok. İlk ödeme denemesi burada görünecek.</p>
               ) : summary.recentOrders.map((order) => (
                 <div className="rounded-lg border border-line px-4 py-3" key={order.id}>
                   <div className="flex items-start justify-between gap-3">
@@ -196,13 +208,18 @@ export function OrdersSection({
             </div>
           </Panel>
           <ActivityPanel
-            title="Odeme hareketleri"
+            title="Ödeme hareketleri"
             items={summary.recentOrders.length > 0
-              ? summary.recentOrders.map((order) => `${order.order_code} ${order.customer_name || "Misafir"} icin ${orderStatusLabels[order.status].toLocaleLowerCase("tr-TR")}`)
-              : ["Siparis akisi basladiginda hareketler burada gorunecek."]}
+              ? summary.recentOrders.map((order) => `${order.order_code} ${order.customer_name || "Misafir"} için ${orderStatusLabels[order.status].toLocaleLowerCase("tr-TR")}`)
+              : ["Sipariş akışı başladığında hareketler burada görünecek."]}
           />
         </div>
       </div>
     </>
   );
+}
+
+function paymentMethodLabel(method: string | null | undefined) {
+  if (method === "iban") return "IBAN";
+  return "Kart";
 }

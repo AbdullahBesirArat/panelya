@@ -21,7 +21,7 @@ export function AnalyticsSection({ organizationSlug }: { organizationSlug: strin
 
   if (summaryQuery.isLoading) return <SectionLoading />;
   if (summaryQuery.isError || !summaryQuery.data) {
-    return <SectionError message="Analitik verisi yuklenemedi." onRetry={() => void summaryQuery.refetch()} />;
+    return <SectionError message="Rapor verisi yüklenemedi." onRetry={() => void summaryQuery.refetch()} />;
   }
 
   const summary = summaryQuery.data;
@@ -36,27 +36,27 @@ export function AnalyticsSection({ organizationSlug }: { organizationSlug: strin
     <>
       <MetricGrid
         metrics={[
-          { label: "Toplam gelir", value: formatCurrency(summary.metrics.gross_revenue), tone: "mint" },
-          { label: "Aylik gelir", value: formatCurrency(summary.metrics.month_revenue), tone: "leaf" },
-          { label: "Ortalama siparis", value: formatCurrency(averageOrderValue), tone: "sun" },
-          { label: "Tekrar oran", value: formatPercent(repeatRate), tone: "coral" },
+          { label: "Toplam ciro", value: formatCurrency(summary.metrics.gross_revenue), tone: "mint" },
+          { label: "Aylık ciro", value: formatCurrency(summary.metrics.month_revenue), tone: "leaf" },
+          { label: "Ortalama sipariş", value: formatCurrency(averageOrderValue), tone: "sun" },
+          { label: "Tekrar oranı", value: formatPercent(repeatRate), tone: "coral" },
         ]}
       />
       <div className="grid gap-5 xl:grid-cols-[1.2fr_0.8fr]">
-        <Panel title="Siparis durum grafigi" description="Adet ve paylari tek bakista izle">
+        <Panel title="Sipariş durum grafiği" description="Adet ve payları tek bakışta izle">
           <OrderStatusChart data={summary.orderStatusBreakdown} />
         </Panel>
         <ActivityPanel
-          title="Gelir notlari"
+          title="Ciro notları"
           items={summary.topCustomers.length > 0
-            ? summary.topCustomers.map((customer) => `${customer.name} ${formatCurrency(customer.total)} toplam ciro uretti`)
-            : summary.recentOrders.map((order) => `${order.order_code} ${formatCurrency(order.total)} tutarinda kaydedildi`)}
+            ? summary.topCustomers.map((customer) => `${customer.name} ${formatCurrency(customer.total)} toplam ciro üretti`)
+            : summary.recentOrders.map((order) => `${order.order_code} ${formatCurrency(order.total)} tutarında kaydedildi`)}
         />
       </div>
-      <Panel title="Performans dagilimi" description="Siparis durum dagilimi">
+      <Panel title="Performans dağılımı" description="Sipariş durum dağılımı">
         <DataGrid
           columns={["Durum", "Adet", "Pay", "Not"]}
-          emptyMessage="Durum dagilimi olusmadi."
+          emptyMessage="Durum dağılımı oluşmadı."
           rows={summary.orderStatusBreakdown}
           renderRow={(item) => (
             <tr key={item.status}>
@@ -65,10 +65,10 @@ export function AnalyticsSection({ organizationSlug }: { organizationSlug: strin
               <DataCell>{formatPercent(summary.metrics.order_count > 0 ? item.count / summary.metrics.order_count : 0)}</DataCell>
               <DataCell>
                 {item.status === "payment_pending"
-                  ? "Callback akislarini izle"
+                  ? "Ödeme dönüş akışlarını izle"
                   : item.status === "cancelled"
-                    ? "Iptal sebeplerini kontrol et"
-                    : "Akis dengeli"}
+                    ? "İptal sebeplerini kontrol et"
+                    : "Akış dengeli"}
               </DataCell>
             </tr>
           )}

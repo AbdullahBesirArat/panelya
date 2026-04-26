@@ -37,7 +37,7 @@ const emptySlideForm = {
   tag: "",
   title: "",
   sub: "",
-  btn: "Kesfet",
+  btn: "Keşfet",
   imageUrl: "",
   sortOrder: "0",
   active: true,
@@ -45,7 +45,7 @@ const emptySlideForm = {
 
 const emptyCampaignForm = {
   name: "",
-  type: "percentage",
+  type: "yüzde",
   value: "10",
   endDate: "",
   active: true,
@@ -85,8 +85,8 @@ export function ContentSection({
     onSuccess: async () => {
       resetSlideForm();
       pushToast({
-        title: "Slayt olusturuldu",
-        description: "Vitrin icerigi yayina hazir.",
+        title: "Slayt oluşturuldu",
+        description: "Vitrin içeriği yayına hazır.",
         tone: "success",
       });
       await invalidateContent();
@@ -101,8 +101,8 @@ export function ContentSection({
     onSuccess: async () => {
       resetSlideForm();
       pushToast({
-        title: "Slayt guncellendi",
-        description: "Vitrin sirasina islendi.",
+        title: "Slayt güncellendi",
+        description: "Vitrin sırasına işlendi.",
         tone: "success",
       });
       await invalidateContent();
@@ -114,7 +114,7 @@ export function ContentSection({
     onSuccess: async () => {
       pushToast({
         title: "Slayt silindi",
-        description: "Vitrinden kaldirildi.",
+        description: "Vitrinden kaldırıldı.",
         tone: "info",
       });
       await invalidateContent();
@@ -126,8 +126,8 @@ export function ContentSection({
     onSuccess: async () => {
       resetCampaignForm();
       pushToast({
-        title: "Kampanya olusturuldu",
-        description: "Aktif kampanya listesi guncellendi.",
+        title: "Kampanya oluşturuldu",
+        description: "Aktif kampanya listesi güncellendi.",
         tone: "success",
       });
       await invalidateContent();
@@ -142,7 +142,7 @@ export function ContentSection({
     onSuccess: async () => {
       resetCampaignForm();
       pushToast({
-        title: "Kampanya guncellendi",
+        title: "Kampanya güncellendi",
         description: "Promosyon bilgisi yenilendi.",
         tone: "success",
       });
@@ -155,7 +155,7 @@ export function ContentSection({
     onSuccess: async () => {
       pushToast({
         title: "Kampanya silindi",
-        description: "Promosyon listesi guncellendi.",
+        description: "Promosyon listesi güncellendi.",
         tone: "info",
       });
       await invalidateContent();
@@ -166,7 +166,7 @@ export function ContentSection({
   if (slidesQuery.isError || campaignsQuery.isError || !slidesQuery.data || !campaignsQuery.data) {
     return (
       <SectionError
-        message="Icerik verisi yuklenemedi."
+        message="İçerik verisi yüklenemedi."
         onRetry={() => {
           void slidesQuery.refetch();
           void campaignsQuery.refetch();
@@ -205,7 +205,7 @@ export function ContentSection({
       tag: slide.tag || "",
       title: slide.title,
       sub: slide.sub || "",
-      btn: slide.btn || "Kesfet",
+      btn: slide.btn || "Keşfet",
       imageUrl: slide.image_url || "",
       sortOrder: String(slide.sort_order || 0),
       active: slide.active,
@@ -232,7 +232,7 @@ export function ContentSection({
       tag: slideForm.tag.trim(),
       title: slideForm.title.trim(),
       sub: slideForm.sub.trim(),
-      btn: slideForm.btn.trim() || "Kesfet",
+      btn: slideForm.btn.trim() || "Keşfet",
       imageUrl: slideForm.imageUrl.trim(),
       sortOrder,
       active: slideForm.active,
@@ -272,7 +272,7 @@ export function ContentSection({
       <MetricGrid
         metrics={[
           { label: "Aktif slayt", value: formatCount(activeSlides), tone: "mint" },
-          { label: "Tum slayt", value: formatCount(slides.length), tone: "leaf" },
+          { label: "Tüm slayt", value: formatCount(slides.length), tone: "leaf" },
           { label: "Aktif kampanya", value: formatCount(activeCampaigns), tone: "sun" },
           { label: "Tarihli kampanya", value: formatCount(scheduledCampaigns), tone: "coral" },
         ]}
@@ -280,13 +280,13 @@ export function ContentSection({
 
       <div className="grid gap-5 xl:grid-cols-[1.2fr_0.8fr]">
         <Panel
-          title="Vitrin slaytlari"
-          description="Magaza ana sayfasi icin sirali icerik"
-          actions={slidesQuery.isFetching ? <StatusPill tone="leaf">Guncelleniyor</StatusPill> : null}
+          title="Vitrin slaytları"
+          description="Mağaza ana sayfası için sıralı içerik"
+          actions={slidesQuery.isFetching ? <StatusPill tone="leaf">Güncelleniyor</StatusPill> : null}
         >
           <DataGrid
-            columns={["Sira", "Baslik", "Etiket", "Buton", "Durum", "Aksiyon"]}
-            emptyMessage="Bu workspace icin henuz slayt yok."
+            columns={["Sıra", "Başlık", "Etiket", "Buton", "Durum", "Aksiyon"]}
+            emptyMessage="Bu mağaza için henüz slayt yok."
             rows={slides}
             renderRow={(slide) => (
               <tr key={slide.id}>
@@ -306,7 +306,7 @@ export function ContentSection({
                   <div className="flex flex-wrap gap-2">
                     {canManageContent ? (
                       <Button onClick={() => startEditingSlide(slide)} size="sm" type="button" variant="outline">
-                        Duzenle
+                        Düzenle
                       </Button>
                     ) : null}
                     {canDeleteContent ? (
@@ -329,11 +329,11 @@ export function ContentSection({
         </Panel>
 
         <Panel
-          title={editingSlideId ? "Slayti guncelle" : "Yeni slayt"}
-          description="Hero basligi, buton ve gorsel baglantisi"
+          title={editingSlideId ? "Slaytı güncelle" : "Yeni slayt"}
+          description="Vitrin başlığı, buton ve görsel bağlantısı"
         >
           <form className="grid gap-3" onSubmit={submitSlide}>
-            <FieldLabel htmlFor="slide-title">Baslik</FieldLabel>
+            <FieldLabel htmlFor="slide-title">Başlık</FieldLabel>
             <input
               className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
               id="slide-title"
@@ -356,7 +356,7 @@ export function ContentSection({
                 <input
                   className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
                   onChange={(event) => setSlideForm((current) => ({ ...current, btn: event.target.value }))}
-                  placeholder="Kesfet"
+              placeholder="Keşfet"
                   value={slideForm.btn}
                 />
               </label>
@@ -371,7 +371,7 @@ export function ContentSection({
               />
             </label>
             <label className="grid gap-2">
-              <span className="text-sm font-semibold text-zinc-700">Gorsel URL</span>
+              <span className="text-sm font-semibold text-zinc-700">Görsel URL</span>
               <input
                 className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
                 onChange={(event) => setSlideForm((current) => ({ ...current, imageUrl: event.target.value }))}
@@ -381,7 +381,7 @@ export function ContentSection({
             </label>
             <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
               <label className="grid gap-2">
-                <span className="text-sm font-semibold text-zinc-700">Sira</span>
+                <span className="text-sm font-semibold text-zinc-700">Sıra</span>
                 <input
                   className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
                   inputMode="numeric"
@@ -406,12 +406,12 @@ export function ContentSection({
                 variant="mint"
               >
                 {updateSlideMutation.isPending
-                  ? "Guncelleniyor"
+                  ? "Güncelleniyor"
                   : slideMutation.isPending
-                    ? "Olusturuluyor"
+                    ? "Oluşturuluyor"
                     : editingSlideId
-                      ? "Slayti guncelle"
-                      : "Slayt olustur"}
+                      ? "Slaytı güncelle"
+                      : "Slayt oluştur"}
               </Button>
               {editingSlideId ? (
                 <Button onClick={resetSlideForm} type="button" variant="outline">
@@ -419,7 +419,7 @@ export function ContentSection({
                 </Button>
               ) : null}
             </div>
-            {!canManageContent ? <InlineHint>Bu alanda yazma yetkisi icin owner veya admin rolune ihtiyac var.</InlineHint> : null}
+            {!canManageContent ? <InlineHint>Bu alanda yazma yetkisi için sahip veya yönetici rolüne ihtiyaç var.</InlineHint> : null}
             {slideMutation.isError && <InlineError message={slideMutation.error.message} />}
             {updateSlideMutation.isError && <InlineError message={updateSlideMutation.error.message} />}
           </form>
@@ -429,19 +429,19 @@ export function ContentSection({
       <div className="grid gap-5 xl:grid-cols-[1.2fr_0.8fr]">
         <Panel
           title="Kampanyalar"
-          description="Aktif promosyon ve bitis tarihleri"
-          actions={campaignsQuery.isFetching ? <StatusPill tone="leaf">Guncelleniyor</StatusPill> : null}
+          description="Aktif promosyon ve bitiş tarihleri"
+          actions={campaignsQuery.isFetching ? <StatusPill tone="leaf">Güncelleniyor</StatusPill> : null}
         >
           <DataGrid
-            columns={["Ad", "Tip", "Deger", "Bitis", "Durum", "Aksiyon"]}
-            emptyMessage="Bu workspace icin henuz kampanya yok."
+            columns={["Ad", "Tip", "Değer", "Bitiş", "Durum", "Aksiyon"]}
+            emptyMessage="Bu mağaza için henüz kampanya yok."
             rows={campaigns}
             renderRow={(campaign) => (
               <tr key={campaign.id}>
                 <DataCell>{campaign.name}</DataCell>
                 <DataCell>{campaign.type}</DataCell>
                 <DataCell>{formatCampaignValue(campaign)}</DataCell>
-                <DataCell>{campaign.end_date ? formatDateTime(campaign.end_date) : "Suresiz"}</DataCell>
+                <DataCell>{campaign.end_date ? formatDateTime(campaign.end_date) : "Süresiz"}</DataCell>
                 <DataCell>
                   <StatusPill tone={campaign.active ? "mint" : "sun"}>
                     {campaign.active ? "Aktif" : "Pasif"}
@@ -451,7 +451,7 @@ export function ContentSection({
                   <div className="flex flex-wrap gap-2">
                     {canManageContent ? (
                       <Button onClick={() => startEditingCampaign(campaign)} size="sm" type="button" variant="outline">
-                        Duzenle
+                        Düzenle
                       </Button>
                     ) : null}
                     {canDeleteContent ? (
@@ -475,11 +475,11 @@ export function ContentSection({
 
         <div className="space-y-5">
           <Panel
-            title={editingCampaignId ? "Kampanyayi guncelle" : "Yeni kampanya"}
-            description="Vitrin ve magaza promosyon akisi"
+            title={editingCampaignId ? "Kampanyayı güncelle" : "Yeni kampanya"}
+            description="Vitrin ve mağaza promosyon akışı"
           >
             <form className="grid gap-3" onSubmit={submitCampaign}>
-              <FieldLabel htmlFor="campaign-name">Kampanya adi</FieldLabel>
+              <FieldLabel htmlFor="campaign-name">Kampanya adı</FieldLabel>
               <input
                 className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
                 id="campaign-name"
@@ -493,12 +493,12 @@ export function ContentSection({
                   <input
                     className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
                     onChange={(event) => setCampaignForm((current) => ({ ...current, type: event.target.value }))}
-                    placeholder="percentage"
+                    placeholder="yüzde"
                     value={campaignForm.type}
                   />
                 </label>
                 <label className="grid gap-2">
-                  <span className="text-sm font-semibold text-zinc-700">Deger</span>
+                  <span className="text-sm font-semibold text-zinc-700">Değer</span>
                   <input
                     className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
                     inputMode="decimal"
@@ -509,7 +509,7 @@ export function ContentSection({
               </div>
               <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
                 <label className="grid gap-2">
-                  <span className="text-sm font-semibold text-zinc-700">Bitis tarihi</span>
+                  <span className="text-sm font-semibold text-zinc-700">Bitiş tarihi</span>
                   <input
                     className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
                     onChange={(event) => setCampaignForm((current) => ({ ...current, endDate: event.target.value }))}
@@ -534,12 +534,12 @@ export function ContentSection({
                   variant="mint"
                 >
                   {updateCampaignMutation.isPending
-                    ? "Guncelleniyor"
+                    ? "Güncelleniyor"
                     : campaignMutation.isPending
-                      ? "Olusturuluyor"
+                      ? "Oluşturuluyor"
                       : editingCampaignId
-                        ? "Kampanyayi guncelle"
-                        : "Kampanya olustur"}
+                        ? "Kampanyayı güncelle"
+                        : "Kampanya oluştur"}
                 </Button>
                 {editingCampaignId ? (
                   <Button onClick={resetCampaignForm} type="button" variant="outline">
@@ -547,19 +547,19 @@ export function ContentSection({
                   </Button>
                 ) : null}
               </div>
-              {!canManageContent ? <InlineHint>Bu alanda yazma yetkisi icin owner veya admin rolune ihtiyac var.</InlineHint> : null}
+              {!canManageContent ? <InlineHint>Bu alanda yazma yetkisi için sahip veya yönetici rolüne ihtiyaç var.</InlineHint> : null}
               {campaignMutation.isError && <InlineError message={campaignMutation.error.message} />}
               {updateCampaignMutation.isError && <InlineError message={updateCampaignMutation.error.message} />}
             </form>
           </Panel>
 
           <ActivityPanel
-            title="Icerik notlari"
+            title="İçerik notları"
             items={[
-              `${formatCount(activeSlides)} slayt aktif vitrinde siralaniyor.`,
-              `${formatCount(activeCampaigns)} kampanya magaza akisina hazir.`,
+              `${formatCount(activeSlides)} slayt aktif vitrinde sıralanıyor.`,
+              `${formatCount(activeCampaigns)} kampanya mağaza akışına hazır.`,
               scheduledCampaigns > 0
-                ? `${formatCount(scheduledCampaigns)} kampanya bitis tarihiyle takip ediliyor.`
+                ? `${formatCount(scheduledCampaigns)} kampanya bitiş tarihiyle takip ediliyor.`
                 : "Tarihli kampanya yok.",
             ]}
           />

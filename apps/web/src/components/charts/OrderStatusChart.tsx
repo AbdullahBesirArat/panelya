@@ -24,7 +24,7 @@ export function OrderStatusChart({ data }: { data: { status: OrderStatus; count:
     .filter((item) => item.count > 0);
 
   if (chartData.length === 0) {
-    return <EmptyText>Durum grafigi icin henuz siparis yok.</EmptyText>;
+    return <EmptyText>Durum grafiği için henüz sipariş yok.</EmptyText>;
   }
 
   return (

@@ -48,16 +48,16 @@ export default function LoginPage() {
       const session = await loginSession(loginForm);
       applySession(session);
       pushToast({
-        title: "Oturum acildi",
-        description: "Dashboard hazir.",
+        title: "Oturum açıldı",
+        description: "Operasyon paneli hazır.",
         tone: "success",
       });
       router.replace("/dashboard");
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Oturum acilamadi";
+      const message = err instanceof Error ? err.message : "Oturum açılamadı";
       setError(message);
       pushToast({
-        title: "Giris basarisiz",
+        title: "Giriş başarısız",
         description: message,
         tone: "error",
       });
@@ -75,16 +75,16 @@ export default function LoginPage() {
       const session = await registerWorkspace(registerForm);
       applySession(session);
       pushToast({
-        title: "Workspace hazir",
-        description: "Yeni organizasyon ile oturum acildi.",
+        title: "Mağaza hazır",
+        description: "Yeni mağaza hesabı ile oturum açıldı.",
         tone: "success",
       });
       router.replace("/dashboard");
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Workspace olusturulamadi";
+      const message = err instanceof Error ? err.message : "Mağaza oluşturulamadı";
       setError(message);
       pushToast({
-        title: "Workspace acilamadi",
+        title: "Mağaza açılamadı",
         description: message,
         tone: "error",
       });
@@ -98,9 +98,9 @@ export default function LoginPage() {
       <section className="flex items-center px-6 py-10 sm:px-10 lg:px-16">
         <div className="w-full max-w-md">
           <p className="text-sm font-semibold uppercase text-mint">{PLATFORM_NAME}</p>
-          <h1 className="mt-3 text-4xl font-bold leading-tight">Operasyonlar tek merkezde.</h1>
+          <h1 className="mt-3 text-4xl font-bold leading-tight">Türkiye e-ticaret operasyonu tek merkezde.</h1>
           <p className="mt-4 text-base leading-7 text-zinc-600">
-            Workspace kur, ekibini davet et, siparis ve stok akislarini tek panelden yonet.
+            Mağazanı kur, ekibini davet et, sipariş, stok, ödeme ve kargo akışlarını tek panelden yönet.
           </p>
 
           <div className="mt-8 inline-flex rounded-lg border border-line bg-white p-1">
@@ -109,14 +109,14 @@ export default function LoginPage() {
               onClick={() => setMode("login")}
               type="button"
             >
-              Giris
+              Giriş
             </button>
             <button
               className={`focus-ring rounded-md px-4 py-2 text-sm font-semibold ${mode === "register" ? "bg-mint text-white" : "text-zinc-600"}`}
               onClick={() => setMode("register")}
               type="button"
             >
-              Workspace ac
+              Mağaza aç
             </button>
           </div>
 
@@ -127,13 +127,13 @@ export default function LoginPage() {
                 <input
                   className="focus-ring mt-2 h-12 w-full rounded-lg border border-line bg-white px-4"
                   onChange={(event) => setLoginForm((state) => ({ ...state, email: event.target.value }))}
-                  placeholder="owner@panelya.com"
+                  placeholder="sahip@panelya.com"
                   type="email"
                   value={loginForm.email}
                 />
               </label>
               <label className="block">
-                <span className="text-sm font-semibold text-zinc-700">Sifre</span>
+                <span className="text-sm font-semibold text-zinc-700">Şifre</span>
                 <input
                   className="focus-ring mt-2 h-12 w-full rounded-lg border border-line bg-white px-4"
                   onChange={(event) => setLoginForm((state) => ({ ...state, password: event.target.value }))}
@@ -143,17 +143,17 @@ export default function LoginPage() {
                 />
               </label>
               <label className="block">
-                <span className="text-sm font-semibold text-zinc-700">Workspace slug</span>
+                <span className="text-sm font-semibold text-zinc-700">Mağaza kısa adı</span>
                 <input
                   className="focus-ring mt-2 h-12 w-full rounded-lg border border-line bg-white px-4"
                   onChange={(event) => setLoginForm((state) => ({ ...state, organizationSlug: event.target.value }))}
-                  placeholder="maveran"
+                  placeholder="panelya"
                   type="text"
                   value={loginForm.organizationSlug}
                 />
               </label>
               <button className="focus-ring h-12 w-full rounded-lg bg-mint px-5 font-semibold text-white disabled:opacity-70" disabled={loading} type="submit">
-                {loading ? "Oturum aciliyor" : "Giris yap"}
+                {loading ? "Oturum açılıyor" : "Giriş yap"}
               </button>
             </form>
           ) : (
@@ -173,13 +173,13 @@ export default function LoginPage() {
                 <input
                   className="focus-ring mt-2 h-12 w-full rounded-lg border border-line bg-white px-4"
                   onChange={(event) => setRegisterForm((state) => ({ ...state, email: event.target.value }))}
-                  placeholder="owner@workspace.com"
+                  placeholder="sahip@magaza.com"
                   type="email"
                   value={registerForm.email}
                 />
               </label>
               <label className="block">
-                <span className="text-sm font-semibold text-zinc-700">Sifre</span>
+                <span className="text-sm font-semibold text-zinc-700">Şifre</span>
                 <input
                   className="focus-ring mt-2 h-12 w-full rounded-lg border border-line bg-white px-4"
                   onChange={(event) => setRegisterForm((state) => ({ ...state, password: event.target.value }))}
@@ -189,27 +189,27 @@ export default function LoginPage() {
                 />
               </label>
               <label className="block">
-                <span className="text-sm font-semibold text-zinc-700">Workspace adi</span>
+                <span className="text-sm font-semibold text-zinc-700">Mağaza adı</span>
                 <input
                   className="focus-ring mt-2 h-12 w-full rounded-lg border border-line bg-white px-4"
                   onChange={(event) => setRegisterForm((state) => ({ ...state, organizationName: event.target.value }))}
-                  placeholder="Maveran"
+                  placeholder="Panelya"
                   type="text"
                   value={registerForm.organizationName}
                 />
               </label>
               <label className="block">
-                <span className="text-sm font-semibold text-zinc-700">Workspace slug</span>
+                <span className="text-sm font-semibold text-zinc-700">Mağaza kısa adı</span>
                 <input
                   className="focus-ring mt-2 h-12 w-full rounded-lg border border-line bg-white px-4"
                   onChange={(event) => setRegisterForm((state) => ({ ...state, organizationSlug: event.target.value }))}
-                  placeholder="maveran"
+                  placeholder="panelya"
                   type="text"
                   value={registerForm.organizationSlug}
                 />
               </label>
               <button className="focus-ring h-12 w-full rounded-lg bg-mint px-5 font-semibold text-white disabled:opacity-70" disabled={loading} type="submit">
-                {loading ? "Workspace kuruluyor" : "Workspace ac"}
+                {loading ? "Mağaza kuruluyor" : "Mağaza aç"}
               </button>
             </form>
           )}
@@ -224,7 +224,7 @@ export default function LoginPage() {
 
       <section className="hidden min-h-screen items-end bg-ink p-8 text-white lg:flex">
         <Image
-          alt="Warehouse operations desk"
+          alt="Türkiye e-ticaret operasyon masası"
           className="h-[72vh] w-full rounded-lg object-cover"
           height={1440}
           priority
