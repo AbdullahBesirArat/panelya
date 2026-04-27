@@ -38,13 +38,13 @@ export const sectionMeta: Record<string, {
     kicker: "Müşteri İlişkileri",
     title: "Müşteri görünümü",
     description: "Sipariş geçmişi, iletişim bilgileri ve toplam harcamayı tek akışta izle.",
-    image: "https://images.unsplash.com/photo-1556745757-8d76bdb6984b?auto=format&fit=crop&w=900&q=80",
+    image: "https://images.unsplash.com/photo-1554224155-6726b3ff858f?auto=format&fit=crop&w=900&q=80",
   },
   content: {
     kicker: "Vitrin",
     title: "Vitrin ve kampanya yönetimi",
     description: "Her mağaza kendi ana sayfa slaytlarını ve promosyon akışlarını yönetir.",
-    image: "https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=900&q=80",
+    image: "https://images.unsplash.com/photo-1523381210434-271e8be1f52b?auto=format&fit=crop&w=900&q=80",
   },
   analytics: {
     kicker: "Raporlama",
