@@ -1,21 +1,29 @@
 "use client";
 
 import type { FormEvent } from "react";
+import Image from "next/image";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { MetricGrid } from "@/components/page-kit";
 import { Button } from "@/components/ui/button";
 import {
+  API_BASE,
   createCampaign,
+  createCollection,
   createSlide,
   deleteCampaign,
+  deleteCollection,
   deleteSlide,
   fetchCampaigns,
+  fetchCollections,
   fetchSlides,
   updateCampaign,
+  updateCollection,
   updateSlide,
   type ApiCampaign,
+  type ApiCollection,
   type ApiSlide,
+  uploadProductImages,
 } from "@/lib/api";
 import {
   ActivityPanel,
@@ -51,6 +59,22 @@ const emptyCampaignForm = {
   active: true,
 };
 
+const emptyCollectionForm = {
+  title: "",
+  slug: "",
+  description: "",
+  imageUrl: "",
+  linkUrl: "urunler.html",
+  sortOrder: "0",
+  active: true,
+};
+
+function assetUrl(url: string | null | undefined) {
+  if (!url) return "";
+  if (/^https?:\/\//i.test(url)) return url;
+  return `${API_BASE.replace(/\/api\/?$/, "")}${url}`;
+}
+
 export function ContentSection({
   organizationSlug,
   currentRole,
@@ -62,8 +86,10 @@ export function ContentSection({
   const pushToast = useToastStore((state) => state.pushToast);
   const [editingSlideId, setEditingSlideId] = useState<string | null>(null);
   const [editingCampaignId, setEditingCampaignId] = useState<string | null>(null);
+  const [editingCollectionId, setEditingCollectionId] = useState<string | null>(null);
   const [slideForm, setSlideForm] = useState(emptySlideForm);
   const [campaignForm, setCampaignForm] = useState(emptyCampaignForm);
+  const [collectionForm, setCollectionForm] = useState(emptyCollectionForm);
 
   const slidesQuery = useQuery({
     queryKey: ["slides", organizationSlug],
@@ -74,6 +100,12 @@ export function ContentSection({
   const campaignsQuery = useQuery({
     queryKey: ["campaigns", organizationSlug],
     queryFn: fetchCampaigns,
+    staleTime: 30_000,
+  });
+
+  const collectionsQuery = useQuery({
+    queryKey: ["collections", organizationSlug],
+    queryFn: fetchCollections,
     staleTime: 30_000,
   });
 
@@ -162,14 +194,70 @@ export function ContentSection({
     },
   });
 
-  if (slidesQuery.isLoading || campaignsQuery.isLoading) return <SectionLoading />;
-  if (slidesQuery.isError || campaignsQuery.isError || !slidesQuery.data || !campaignsQuery.data) {
+  const collectionMutation = useMutation({
+    mutationFn: createCollection,
+    onSuccess: async () => {
+      resetCollectionForm();
+      pushToast({
+        title: "Koleksiyon oluşturuldu",
+        description: "Koleksiyon vitrinde kullanıma hazır.",
+        tone: "success",
+      });
+      await invalidateContent();
+    },
+  });
+
+  const updateCollectionMutation = useMutation({
+    mutationFn: ({ id, payload }: {
+      id: string;
+      payload: Parameters<typeof updateCollection>[1];
+    }) => updateCollection(id, payload),
+    onSuccess: async () => {
+      resetCollectionForm();
+      pushToast({
+        title: "Koleksiyon güncellendi",
+        description: "Koleksiyon bilgileri yenilendi.",
+        tone: "success",
+      });
+      await invalidateContent();
+    },
+  });
+
+  const deleteCollectionMutation = useMutation({
+    mutationFn: deleteCollection,
+    onSuccess: async () => {
+      pushToast({
+        title: "Koleksiyon silindi",
+        description: "Koleksiyon listesinden kaldırıldı.",
+        tone: "info",
+      });
+      await invalidateContent();
+    },
+  });
+
+  const uploadCollectionImageMutation = useMutation({
+    mutationFn: uploadProductImages,
+    onSuccess: (response) => {
+      const uploaded = response.files[0]?.url || "";
+      if (!uploaded) return;
+      setCollectionForm((current) => ({ ...current, imageUrl: uploaded }));
+      pushToast({
+        title: "Koleksiyon görseli yüklendi",
+        description: "Görsel koleksiyon formuna eklendi.",
+        tone: "success",
+      });
+    },
+  });
+
+  if (slidesQuery.isLoading || campaignsQuery.isLoading || collectionsQuery.isLoading) return <SectionLoading />;
+  if (slidesQuery.isError || campaignsQuery.isError || collectionsQuery.isError || !slidesQuery.data || !campaignsQuery.data || !collectionsQuery.data) {
     return (
       <SectionError
         message="İçerik verisi yüklenemedi."
         onRetry={() => {
           void slidesQuery.refetch();
           void campaignsQuery.refetch();
+          void collectionsQuery.refetch();
         }}
       />
     );
@@ -177,14 +265,17 @@ export function ContentSection({
 
   const slides = slidesQuery.data;
   const campaigns = campaignsQuery.data;
+  const collections = collectionsQuery.data;
   const activeSlides = slides.filter((slide) => slide.active).length;
   const activeCampaigns = campaigns.filter((campaign) => campaign.active).length;
+  const activeCollections = collections.filter((collection) => collection.active).length;
   const scheduledCampaigns = campaigns.filter((campaign) => campaign.active && campaign.end_date).length;
 
   async function invalidateContent() {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["slides", organizationSlug] }),
       queryClient.invalidateQueries({ queryKey: ["campaigns", organizationSlug] }),
+      queryClient.invalidateQueries({ queryKey: ["collections", organizationSlug] }),
       queryClient.invalidateQueries({ queryKey: ["summary", organizationSlug] }),
     ]);
   }
@@ -197,6 +288,11 @@ export function ContentSection({
   function resetCampaignForm() {
     setEditingCampaignId(null);
     setCampaignForm(emptyCampaignForm);
+  }
+
+  function resetCollectionForm() {
+    setEditingCollectionId(null);
+    setCollectionForm(emptyCollectionForm);
   }
 
   function startEditingSlide(slide: ApiSlide) {
@@ -220,6 +316,19 @@ export function ContentSection({
       value: String(campaign.value || 0),
       endDate: campaign.end_date ? campaign.end_date.slice(0, 10) : "",
       active: campaign.active,
+    });
+  }
+
+  function startEditingCollection(collection: ApiCollection) {
+    setEditingCollectionId(collection.id);
+    setCollectionForm({
+      title: collection.title,
+      slug: collection.slug,
+      description: collection.description || "",
+      imageUrl: collection.image_url || "",
+      linkUrl: collection.link_url || "urunler.html",
+      sortOrder: String(collection.sort_order || 0),
+      active: collection.active,
     });
   }
 
@@ -267,6 +376,29 @@ export function ContentSection({
     campaignMutation.mutate(payload);
   }
 
+  function submitCollection(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const sortOrder = Number(collectionForm.sortOrder || 0);
+    if (!collectionForm.title.trim() || !Number.isFinite(sortOrder) || sortOrder < 0) return;
+
+    const payload = {
+      title: collectionForm.title.trim(),
+      slug: collectionForm.slug.trim(),
+      description: collectionForm.description.trim(),
+      imageUrl: collectionForm.imageUrl.trim(),
+      linkUrl: collectionForm.linkUrl.trim() || "urunler.html",
+      sortOrder,
+      active: collectionForm.active,
+    };
+
+    if (editingCollectionId) {
+      updateCollectionMutation.mutate({ id: editingCollectionId, payload });
+      return;
+    }
+
+    collectionMutation.mutate(payload);
+  }
+
   return (
     <>
       <MetricGrid
@@ -274,7 +406,7 @@ export function ContentSection({
           { label: "Aktif slayt", value: formatCount(activeSlides), tone: "mint" },
           { label: "Tüm slayt", value: formatCount(slides.length), tone: "leaf" },
           { label: "Aktif kampanya", value: formatCount(activeCampaigns), tone: "sun" },
-          { label: "Tarihli kampanya", value: formatCount(scheduledCampaigns), tone: "coral" },
+          { label: "Koleksiyon", value: formatCount(activeCollections), tone: "coral" },
         ]}
       />
 
@@ -551,6 +683,194 @@ export function ContentSection({
               {campaignMutation.isError && <InlineError message={campaignMutation.error.message} />}
               {updateCampaignMutation.isError && <InlineError message={updateCampaignMutation.error.message} />}
             </form>
+          </Panel>
+
+          <Panel
+            title={editingCollectionId ? "Koleksiyonu güncelle" : "Yeni koleksiyon"}
+            description="Ürün listeleme sayfasındaki koleksiyon bağlantıları"
+          >
+            <form className="grid gap-3" onSubmit={submitCollection}>
+              <FieldLabel htmlFor="collection-title">Koleksiyon adı</FieldLabel>
+              <input
+                className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
+                id="collection-title"
+                onChange={(event) => setCollectionForm((current) => ({ ...current, title: event.target.value }))}
+                placeholder="Yeni Gelenler"
+                value={collectionForm.title}
+              />
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="grid gap-2">
+                  <span className="text-sm font-semibold text-zinc-700">Kısa ad</span>
+                  <input
+                    className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
+                    onChange={(event) => setCollectionForm((current) => ({ ...current, slug: event.target.value }))}
+                    placeholder="yeni-gelenler"
+                    value={collectionForm.slug}
+                  />
+                </label>
+                <label className="grid gap-2">
+                  <span className="text-sm font-semibold text-zinc-700">Sıra</span>
+                  <input
+                    className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
+                    inputMode="numeric"
+                    onChange={(event) => setCollectionForm((current) => ({ ...current, sortOrder: event.target.value }))}
+                    value={collectionForm.sortOrder}
+                  />
+                </label>
+              </div>
+              <label className="grid gap-2">
+                <span className="text-sm font-semibold text-zinc-700">Açıklama</span>
+                <textarea
+                  className="focus-ring min-h-20 rounded-lg border border-line bg-white px-3 py-2 text-sm"
+                  onChange={(event) => setCollectionForm((current) => ({ ...current, description: event.target.value }))}
+                  placeholder="Koleksiyon açıklamasını yaz"
+                  value={collectionForm.description}
+                />
+              </label>
+              <label className="grid gap-2">
+                <span className="text-sm font-semibold text-zinc-700">Link</span>
+                <input
+                  className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
+                  onChange={(event) => setCollectionForm((current) => ({ ...current, linkUrl: event.target.value }))}
+                  placeholder="urunler.html?collection=yeni-gelenler"
+                  value={collectionForm.linkUrl}
+                />
+              </label>
+              <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+                <input
+                  className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
+                  onChange={(event) => setCollectionForm((current) => ({ ...current, imageUrl: event.target.value }))}
+                  placeholder="Koleksiyon görsel URL'si veya /uploads yolu"
+                  value={collectionForm.imageUrl}
+                />
+                <label className="focus-ring inline-flex h-10 cursor-pointer items-center justify-center rounded-lg border border-line px-3 text-xs font-semibold text-ink">
+                  <input
+                    accept="image/png,image/jpeg,image/webp"
+                    className="hidden"
+                    onChange={(event) => {
+                      const files = Array.from(event.target.files || []);
+                      if (files.length > 0) {
+                        uploadCollectionImageMutation.mutate(files.slice(0, 1));
+                      }
+                      event.currentTarget.value = "";
+                    }}
+                    type="file"
+                  />
+                  {uploadCollectionImageMutation.isPending ? "Yükleniyor" : "Görsel yükle"}
+                </label>
+              </div>
+              {collectionForm.imageUrl ? (
+                <Image
+                  alt=""
+                  className="h-24 w-full rounded-lg border border-line object-cover"
+                  height={160}
+                  src={assetUrl(collectionForm.imageUrl)}
+                  unoptimized
+                  width={640}
+                />
+              ) : null}
+              <label className="flex h-10 items-center gap-2 text-sm font-semibold text-zinc-700">
+                <input
+                  checked={collectionForm.active}
+                  className="h-4 w-4 rounded border-line"
+                  onChange={(event) => setCollectionForm((current) => ({ ...current, active: event.target.checked }))}
+                  type="checkbox"
+                />
+                Aktif
+              </label>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  disabled={!canManageContent || collectionMutation.isPending || updateCollectionMutation.isPending || uploadCollectionImageMutation.isPending}
+                  type="submit"
+                  variant="mint"
+                >
+                  {updateCollectionMutation.isPending
+                    ? "Güncelleniyor"
+                    : collectionMutation.isPending
+                      ? "Oluşturuluyor"
+                      : editingCollectionId
+                        ? "Koleksiyonu güncelle"
+                        : "Koleksiyon oluştur"}
+                </Button>
+                {editingCollectionId ? (
+                  <Button onClick={resetCollectionForm} type="button" variant="outline">
+                    Vazgeç
+                  </Button>
+                ) : null}
+              </div>
+              {!canManageContent ? <InlineHint>Bu alanda yazma yetkisi için sahip veya yönetici rolüne ihtiyaç var.</InlineHint> : null}
+              {collectionMutation.isError && <InlineError message={collectionMutation.error.message} />}
+              {updateCollectionMutation.isError && <InlineError message={updateCollectionMutation.error.message} />}
+              {uploadCollectionImageMutation.isError && <InlineError message={uploadCollectionImageMutation.error.message} />}
+            </form>
+          </Panel>
+
+          <Panel
+            title="Koleksiyonlar"
+            description="Ürün sayfasındaki seçki ve koleksiyon menüsü"
+            actions={collectionsQuery.isFetching ? <StatusPill tone="leaf">Güncelleniyor</StatusPill> : null}
+          >
+            <DataGrid
+              columns={["Sıra", "Ad", "Link", "Durum", "Aksiyon"]}
+              emptyMessage="Bu mağaza için henüz koleksiyon yok."
+              rows={collections}
+              renderRow={(collection) => (
+                <tr key={collection.id}>
+                  <DataCell>{formatCount(collection.sort_order)}</DataCell>
+                  <DataCell>
+                    <div className="flex items-center gap-3">
+                      <div className="h-11 w-11 shrink-0 overflow-hidden rounded-md border border-line bg-zinc-100">
+                        {collection.image_url ? (
+                          <Image
+                            alt=""
+                            className="h-full w-full object-cover"
+                            height={88}
+                            src={assetUrl(collection.image_url)}
+                            unoptimized
+                            width={88}
+                          />
+                        ) : (
+                          <div className="flex h-full w-full items-center justify-center text-xs font-bold text-zinc-400">
+                            {collection.title.slice(0, 2).toLocaleUpperCase("tr-TR")}
+                          </div>
+                        )}
+                      </div>
+                      <div>
+                        <p className="font-semibold text-ink">{collection.title}</p>
+                        <p className="line-clamp-1 text-xs text-zinc-500">{collection.description || collection.slug}</p>
+                      </div>
+                    </div>
+                  </DataCell>
+                  <DataCell>{collection.link_url || "urunler.html"}</DataCell>
+                  <DataCell>
+                    <StatusPill tone={collection.active ? "mint" : "sun"}>
+                      {collection.active ? "Aktif" : "Pasif"}
+                    </StatusPill>
+                  </DataCell>
+                  <DataCell>
+                    <div className="flex flex-wrap gap-2">
+                      {canManageContent ? (
+                        <Button onClick={() => startEditingCollection(collection)} size="sm" type="button" variant="outline">
+                          Düzenle
+                        </Button>
+                      ) : null}
+                      {canDeleteContent ? (
+                        <Button
+                          disabled={deleteCollectionMutation.isPending && deleteCollectionMutation.variables === collection.id}
+                          onClick={() => deleteCollectionMutation.mutate(collection.id)}
+                          size="sm"
+                          type="button"
+                          variant="danger"
+                        >
+                          {deleteCollectionMutation.isPending && deleteCollectionMutation.variables === collection.id ? "Siliniyor" : "Sil"}
+                        </Button>
+                      ) : null}
+                      {!canManageContent && !canDeleteContent ? <span className="text-xs text-zinc-400">Salt okunur</span> : null}
+                    </div>
+                  </DataCell>
+                </tr>
+              )}
+            />
           </Panel>
 
           <ActivityPanel

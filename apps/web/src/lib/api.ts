@@ -34,6 +34,7 @@ export type ApiCategory = {
   id: string;
   name: string;
   slug: string;
+  image_url: string;
 };
 
 export type ApiProduct = {
@@ -119,6 +120,20 @@ export type ApiCampaign = {
   value: string;
   end_date: string | null;
   active: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ApiCollection = {
+  id: string;
+  organization_id: string;
+  title: string;
+  slug: string;
+  description: string;
+  image_url: string;
+  link_url: string;
+  active: boolean;
+  sort_order: number;
   created_at: string;
   updated_at: string;
 };
@@ -386,10 +401,25 @@ export async function fetchCategories() {
   return authenticatedRequest<ApiCategory[]>("/categories");
 }
 
-export async function createCategory(payload: { name: string; slug?: string }) {
+export async function createCategory(payload: { name: string; slug?: string; imageUrl?: string }) {
   return authenticatedRequest<ApiCategory>("/categories", {
     method: "POST",
-    body: JSON.stringify(payload),
+    body: JSON.stringify({
+      name: payload.name,
+      slug: payload.slug,
+      image_url: payload.imageUrl || "",
+    }),
+  });
+}
+
+export async function updateCategory(id: string, payload: { name: string; slug?: string; imageUrl?: string }) {
+  return authenticatedRequest<ApiCategory>(`/categories/${id}`, {
+    method: "PUT",
+    body: JSON.stringify({
+      name: payload.name,
+      slug: payload.slug,
+      image_url: payload.imageUrl || "",
+    }),
   });
 }
 
@@ -646,6 +676,62 @@ export async function updateCampaign(id: string, payload: {
 
 export async function deleteCampaign(id: string) {
   return authenticatedRequest<void>(`/campaigns/${id}`, {
+    method: "DELETE",
+  });
+}
+
+export async function fetchCollections() {
+  return authenticatedRequest<ApiCollection[]>("/collections/admin/all");
+}
+
+export async function createCollection(payload: {
+  title: string;
+  slug?: string;
+  description?: string;
+  imageUrl?: string;
+  linkUrl?: string;
+  active: boolean;
+  sortOrder: number;
+}) {
+  return authenticatedRequest<ApiCollection>("/collections", {
+    method: "POST",
+    body: JSON.stringify({
+      title: payload.title,
+      slug: payload.slug || "",
+      description: payload.description || "",
+      image_url: payload.imageUrl || "",
+      link_url: payload.linkUrl || "urunler.html",
+      active: payload.active,
+      sort_order: payload.sortOrder,
+    }),
+  });
+}
+
+export async function updateCollection(id: string, payload: {
+  title: string;
+  slug?: string;
+  description?: string;
+  imageUrl?: string;
+  linkUrl?: string;
+  active: boolean;
+  sortOrder: number;
+}) {
+  return authenticatedRequest<ApiCollection>(`/collections/${id}`, {
+    method: "PUT",
+    body: JSON.stringify({
+      title: payload.title,
+      slug: payload.slug || "",
+      description: payload.description || "",
+      image_url: payload.imageUrl || "",
+      link_url: payload.linkUrl || "urunler.html",
+      active: payload.active,
+      sort_order: payload.sortOrder,
+    }),
+  });
+}
+
+export async function deleteCollection(id: string) {
+  return authenticatedRequest<void>(`/collections/${id}`, {
     method: "DELETE",
   });
 }

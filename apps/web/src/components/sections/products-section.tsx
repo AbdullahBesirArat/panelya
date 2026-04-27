@@ -1,17 +1,21 @@
 "use client";
 
 import type { FormEvent } from "react";
+import Image from "next/image";
 import { useState } from "react";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { MetricGrid } from "@/components/page-kit";
 import {
+  API_BASE,
   createCategory,
   createProduct,
   deleteCategory,
   deleteProduct,
   fetchCategories,
   fetchProducts,
+  updateCategory,
   updateProduct,
+  type ApiCategory,
   type ApiProduct,
   type ProductStatus,
   uploadProductImages,
@@ -58,6 +62,12 @@ type ProductPayload = {
   emoji: string;
 };
 
+type CategoryForm = {
+  name: string;
+  slug: string;
+  imageUrl: string;
+};
+
 function createEmptyProductForm() {
   return {
     name: "",
@@ -79,6 +89,14 @@ function createEmptyProductForm() {
   };
 }
 
+function createEmptyCategoryForm(): CategoryForm {
+  return {
+    name: "",
+    slug: "",
+    imageUrl: "",
+  };
+}
+
 function splitCsvLines(value: string) {
   return value
     .split(/[\n,]+/)
@@ -88,6 +106,12 @@ function splitCsvLines(value: string) {
 
 function joinLines(values: string[] | null | undefined) {
   return Array.isArray(values) ? values.filter(Boolean).join("\n") : "";
+}
+
+function assetUrl(url: string | null | undefined) {
+  if (!url) return "";
+  if (/^https?:\/\//i.test(url)) return url;
+  return `${API_BASE.replace(/\/api\/?$/, "")}${url}`;
 }
 
 export function ProductsSection({
@@ -103,7 +127,8 @@ export function ProductsSection({
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<ProductStatus | "">("");
   const [categoryId, setCategoryId] = useState("");
-  const [categoryName, setCategoryName] = useState("");
+  const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
+  const [categoryForm, setCategoryForm] = useState(createEmptyCategoryForm);
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
   const [productForm, setProductForm] = useState(createEmptyProductForm);
   const debouncedSearch = useDebouncedValue(search);
@@ -127,10 +152,30 @@ export function ProductsSection({
   const categoryMutation = useMutation({
     mutationFn: createCategory,
     onSuccess: async () => {
-      setCategoryName("");
+      resetCategoryForm();
       pushToast({
         title: "Kategori eklendi",
         description: "Katalog listesi güncellendi.",
+        tone: "success",
+      });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["categories", organizationSlug] }),
+        queryClient.invalidateQueries({ queryKey: ["summary", organizationSlug] }),
+      ]);
+    },
+  });
+
+  const updateCategoryMutation = useMutation({
+    mutationFn: ({ id, payload }: { id: string; payload: CategoryForm }) => updateCategory(id, {
+      name: payload.name,
+      slug: payload.slug,
+      imageUrl: payload.imageUrl,
+    }),
+    onSuccess: async () => {
+      resetCategoryForm();
+      pushToast({
+        title: "Kategori güncellendi",
+        description: "Kategori görseli ve bilgileri yenilendi.",
         tone: "success",
       });
       await Promise.all([
@@ -222,6 +267,20 @@ export function ProductsSection({
     },
   });
 
+  const uploadCategoryImageMutation = useMutation({
+    mutationFn: uploadProductImages,
+    onSuccess: (response) => {
+      const uploaded = response.files[0]?.url || "";
+      if (!uploaded) return;
+      setCategoryForm((current) => ({ ...current, imageUrl: uploaded }));
+      pushToast({
+        title: "Kategori görseli yüklendi",
+        description: "Görsel kategori formuna eklendi.",
+        tone: "success",
+      });
+    },
+  });
+
   if (summaryQuery.isLoading || categoriesQuery.isLoading || (productsQuery.isLoading && !productsQuery.data)) return <SectionLoading />;
   if (summaryQuery.isError || categoriesQuery.isError || (productsQuery.isError && !productsQuery.data) || !summaryQuery.data || !categoriesQuery.data || !productsQuery.data) {
     return (
@@ -239,6 +298,20 @@ export function ProductsSection({
   const summary = summaryQuery.data;
   const categories = categoriesQuery.data;
   const products = productsQuery.data;
+
+  function resetCategoryForm() {
+    setEditingCategoryId(null);
+    setCategoryForm(createEmptyCategoryForm());
+  }
+
+  function startEditingCategory(category: ApiCategory) {
+    setEditingCategoryId(category.id);
+    setCategoryForm({
+      name: category.name,
+      slug: category.slug,
+      imageUrl: category.image_url || "",
+    });
+  }
 
   function resetProductForm() {
     setEditingProductId(null);
@@ -269,8 +342,19 @@ export function ProductsSection({
 
   function submitCategory(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!categoryName.trim()) return;
-    categoryMutation.mutate({ name: categoryName.trim() });
+    const payload = {
+      name: categoryForm.name.trim(),
+      slug: categoryForm.slug.trim(),
+      imageUrl: categoryForm.imageUrl.trim(),
+    };
+    if (!payload.name) return;
+
+    if (editingCategoryId) {
+      updateCategoryMutation.mutate({ id: editingCategoryId, payload });
+      return;
+    }
+
+    categoryMutation.mutate(payload);
   }
 
   function submitProduct(event: FormEvent<HTMLFormElement>) {
@@ -430,21 +514,50 @@ export function ProductsSection({
             <div className="space-y-3">
               {categories.length === 0 && <InlineHint>Henüz kategori yok. İlk kategori ile kataloğu başlat.</InlineHint>}
               {categories.map((category) => (
-                <div className="flex items-center justify-between rounded-lg border border-line px-4 py-3" key={category.id}>
-                  <div>
-                    <p className="text-sm font-semibold">{category.name}</p>
-                    <p className="text-xs text-zinc-500">{category.slug}</p>
+                <div className="flex items-center justify-between gap-3 rounded-lg border border-line px-4 py-3" key={category.id}>
+                  <div className="flex min-w-0 items-center gap-3">
+                    <div className="h-12 w-12 shrink-0 overflow-hidden rounded-md border border-line bg-zinc-100">
+                      {category.image_url ? (
+                        <Image
+                          alt=""
+                          className="h-full w-full object-cover"
+                          height={96}
+                          src={assetUrl(category.image_url)}
+                          unoptimized
+                          width={96}
+                        />
+                      ) : (
+                        <div className="flex h-full w-full items-center justify-center text-xs font-bold text-zinc-400">
+                          {category.name.slice(0, 2).toLocaleUpperCase("tr-TR")}
+                        </div>
+                      )}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold">{category.name}</p>
+                      <p className="truncate text-xs text-zinc-500">{category.slug}</p>
+                    </div>
                   </div>
-                  {canDeleteCatalog ? (
-                    <button
-                      className="focus-ring inline-flex h-9 items-center rounded-lg border border-line px-3 text-xs font-semibold text-coral"
-                      disabled={deleteCategoryMutation.isPending && deleteCategoryMutation.variables === category.id}
-                      onClick={() => deleteCategoryMutation.mutate(category.id)}
-                      type="button"
-                    >
-                      {deleteCategoryMutation.isPending && deleteCategoryMutation.variables === category.id ? "Siliniyor" : "Sil"}
-                    </button>
-                  ) : null}
+                  <div className="flex shrink-0 flex-wrap gap-2">
+                    {canManageCatalog ? (
+                      <button
+                        className="focus-ring inline-flex h-9 items-center rounded-lg border border-line px-3 text-xs font-semibold text-ink"
+                        onClick={() => startEditingCategory(category)}
+                        type="button"
+                      >
+                        Düzenle
+                      </button>
+                    ) : null}
+                    {canDeleteCatalog ? (
+                      <button
+                        className="focus-ring inline-flex h-9 items-center rounded-lg border border-line px-3 text-xs font-semibold text-coral"
+                        disabled={deleteCategoryMutation.isPending && deleteCategoryMutation.variables === category.id}
+                        onClick={() => deleteCategoryMutation.mutate(category.id)}
+                        type="button"
+                      >
+                        {deleteCategoryMutation.isPending && deleteCategoryMutation.variables === category.id ? "Siliniyor" : "Sil"}
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
               ))}
             </div>
@@ -456,25 +569,85 @@ export function ProductsSection({
           >
             <div className="space-y-5">
               <form className="space-y-3" onSubmit={submitCategory}>
-                <FieldLabel htmlFor="category-name">Yeni kategori</FieldLabel>
-                <div className="flex gap-2">
+                <div className="flex items-center justify-between gap-3">
+                  <FieldLabel htmlFor="category-name">{editingCategoryId ? "Kategoriyi düzenle" : "Yeni kategori"}</FieldLabel>
+                  {editingCategoryId ? (
+                    <button
+                      className="focus-ring rounded-lg border border-line px-3 py-1.5 text-xs font-semibold text-zinc-600"
+                      onClick={resetCategoryForm}
+                      type="button"
+                    >
+                      Vazgeç
+                    </button>
+                  ) : null}
+                </div>
+                <div className="grid gap-2 sm:grid-cols-[1fr_0.8fr]">
                   <input
-                    className="focus-ring h-10 flex-1 rounded-lg border border-line bg-white px-3 text-sm"
+                    className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
                     id="category-name"
-                    onChange={(event) => setCategoryName(event.target.value)}
+                    onChange={(event) => setCategoryForm((current) => ({ ...current, name: event.target.value }))}
                     placeholder="Kategori adı"
-                    value={categoryName}
+                    value={categoryForm.name}
                   />
+                  <input
+                    className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
+                    onChange={(event) => setCategoryForm((current) => ({ ...current, slug: event.target.value }))}
+                    placeholder="kategori-kisa-adi"
+                    value={categoryForm.slug}
+                  />
+                </div>
+                <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+                  <input
+                    className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
+                    onChange={(event) => setCategoryForm((current) => ({ ...current, imageUrl: event.target.value }))}
+                    placeholder="Kategori görsel URL'si veya /uploads yolu"
+                    value={categoryForm.imageUrl}
+                  />
+                  <label className="focus-ring inline-flex h-10 cursor-pointer items-center justify-center rounded-lg border border-line px-3 text-xs font-semibold text-ink">
+                    <input
+                      accept="image/png,image/jpeg,image/webp"
+                      className="hidden"
+                      onChange={(event) => {
+                        const files = Array.from(event.target.files || []);
+                        if (files.length > 0) {
+                          uploadCategoryImageMutation.mutate(files.slice(0, 1));
+                        }
+                        event.currentTarget.value = "";
+                      }}
+                      type="file"
+                    />
+                    {uploadCategoryImageMutation.isPending ? "Yükleniyor" : "Görsel yükle"}
+                  </label>
+                </div>
+                {categoryForm.imageUrl ? (
+                  <Image
+                    alt=""
+                    className="h-24 w-full rounded-lg border border-line object-cover"
+                    height={160}
+                    src={assetUrl(categoryForm.imageUrl)}
+                    unoptimized
+                    width={640}
+                  />
+                ) : null}
+                <div className="flex flex-wrap gap-2">
                   <button
                     className="focus-ring inline-flex h-10 items-center justify-center rounded-lg bg-mint px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
-                    disabled={!canManageCatalog || categoryMutation.isPending}
+                    disabled={!canManageCatalog || categoryMutation.isPending || updateCategoryMutation.isPending || uploadCategoryImageMutation.isPending}
                     type="submit"
                   >
-                    {categoryMutation.isPending ? "Ekleniyor" : "Ekle"}
+                    {updateCategoryMutation.isPending
+                      ? "Güncelleniyor"
+                      : categoryMutation.isPending
+                        ? "Ekleniyor"
+                        : editingCategoryId
+                          ? "Kategoriyi güncelle"
+                          : "Kategori ekle"}
                   </button>
                 </div>
                 {!canManageCatalog && <InlineHint>Bu alanda yazma yetkisi için sahip veya yönetici rolüne ihtiyaç var.</InlineHint>}
                 {categoryMutation.isError && <InlineError message={categoryMutation.error.message} />}
+                {updateCategoryMutation.isError && <InlineError message={updateCategoryMutation.error.message} />}
+                {uploadCategoryImageMutation.isError && <InlineError message={uploadCategoryImageMutation.error.message} />}
               </form>
 
               <form className="grid gap-4" onSubmit={submitProduct}>

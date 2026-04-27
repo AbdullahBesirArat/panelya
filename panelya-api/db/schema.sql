@@ -5,6 +5,7 @@ create table if not exists categories (
   id bigserial primary key,
   name text not null unique,
   slug text not null unique,
+  image_url text not null default '',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -45,9 +46,13 @@ create table if not exists orders (
   total numeric(12,2) not null default 0,
   status text not null default 'new' check (status in ('new', 'payment_pending', 'processing', 'shipped', 'delivered', 'cancelled', 'paid')),
   payment_provider text not null default 'manual',
+  payment_method text not null default 'card' check (payment_method in ('card', 'iban')),
   payment_token text,
   payment_id text,
   payment_error text,
+  note text not null default '',
+  gift_wrap boolean not null default false,
+  shipping_fee numeric(12,2) not null default 0,
   shipping_company text,
   tracking_number text,
   tracking_url text,
@@ -73,6 +78,20 @@ create table if not exists campaigns (
   value numeric(12,2) not null default 0,
   end_date date,
   active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists collections (
+  id bigserial primary key,
+  organization_id uuid not null references organizations(id) on delete cascade,
+  title text not null,
+  slug text not null,
+  description text not null default '',
+  image_url text not null default '',
+  link_url text not null default 'urunler.html',
+  active boolean not null default true,
+  sort_order integer not null default 0,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -118,6 +137,8 @@ create table if not exists audit_logs (
 );
 
 create index if not exists idx_products_category on products(category_id);
+create unique index if not exists idx_collections_org_slug_unique on collections (organization_id, slug);
+create index if not exists idx_collections_org_active_sort on collections (organization_id, active, sort_order, id);
 create index if not exists idx_products_status on products(status);
 create index if not exists idx_products_created_at on products(created_at desc);
 create index if not exists idx_products_name_trgm on products using gin (name gin_trgm_ops);
