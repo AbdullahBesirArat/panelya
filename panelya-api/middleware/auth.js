@@ -16,33 +16,63 @@ function normalizeClaims(claims) {
 }
 
 function requireAuth(req, res, next) {
+  const parsed = parseAuthorizationHeader(req);
+
+  if (!parsed.ok) {
+    return res.status(parsed.status).json({ error: parsed.error });
+  }
+
+  assignAuth(req, parsed.claims);
+  return next();
+}
+
+function parseAuthorizationHeader(req) {
   const header = req.headers.authorization || '';
   const token = header.startsWith('Bearer ') ? header.slice(7) : null;
 
   if (!token) {
-    return res.status(401).json({ error: 'Oturum gerekli' });
+    return { ok: false, status: 401, error: 'Oturum gerekli' };
   }
 
   try {
-    const claims = normalizeClaims(jwt.verify(token, ensureJwtSecret(), {
+    const decoded = jwt.decode(token) || {};
+    const audience = Array.isArray(decoded.aud) ? decoded.aud[0] : decoded.aud;
+    const tokenType = audience === ADMIN_AUDIENCE ? 'admin' : 'app';
+    const expectedAudience = tokenType === 'admin' ? ADMIN_AUDIENCE : APP_AUDIENCE;
+    const claims = normalizeClaims(jwt.verify(token, ensureJwtSecret(tokenType), {
       algorithms: ['HS256'],
       issuer: 'panelya-api',
-      audience: [ADMIN_AUDIENCE, APP_AUDIENCE],
+      audience: expectedAudience,
     }));
 
-    req.auth = claims;
-    req.admin = claims;
-    if (claims.actorType === 'app') req.user = claims;
-    if (claims.organizationId || claims.organizationSlug) {
-      req.organization = {
-        id: claims.organizationId,
-        slug: claims.organizationSlug,
-      };
-    }
-    return next();
+    return { ok: true, claims };
   } catch (_) {
-    return res.status(401).json({ error: 'Oturum gecersiz veya suresi dolmus' });
+    return { ok: false, status: 401, error: 'Oturum gecersiz veya suresi dolmus' };
   }
+}
+
+function assignAuth(req, claims) {
+  req.auth = claims;
+  req.admin = claims;
+  if (claims.actorType === 'app') req.user = claims;
+  if (claims.organizationId || claims.organizationSlug) {
+    req.organization = {
+      id: claims.organizationId,
+      slug: claims.organizationSlug,
+    };
+  }
+}
+
+function attachAuthIfPresent(req, _res, next) {
+  const header = req.headers.authorization || '';
+  if (!header.startsWith('Bearer ')) return next();
+
+  const parsed = parseAuthorizationHeader(req);
+  if (parsed.ok) {
+    assignAuth(req, parsed.claims);
+  }
+
+  return next();
 }
 
 function requireActorType(allowedTypes) {
@@ -66,6 +96,7 @@ function requireRole(allowedRoles) {
 }
 
 module.exports = {
+  attachAuthIfPresent,
   requireActorType,
   requireAuth,
   requireRole,
