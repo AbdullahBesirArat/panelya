@@ -44,7 +44,7 @@ export const sectionMeta: Record<string, {
     kicker: "Vitrin",
     title: "Vitrin ve kampanya yönetimi",
     description: "Her mağaza kendi ana sayfa slaytlarını ve promosyon akışlarını yönetir.",
-    image: "https://images.unsplash.com/photo-1516321497487-e288fb19713f?auto=format&fit=crop&w=900&q=80",
+    image: "https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=900&q=80",
   },
   analytics: {
     kicker: "Raporlama",
