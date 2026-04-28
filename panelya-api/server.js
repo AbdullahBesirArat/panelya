@@ -2,10 +2,12 @@ require('dotenv').config();
 
 const express = require('express');
 const cors = require('cors');
+const fs = require('fs');
 const helmet = require('helmet');
 const path = require('path');
 const swaggerUi = require('swagger-ui-express');
 const swaggerSpec = require('./swagger');
+const { resolveUploadDir } = require('./services/uploads');
 const {
   corsOptions,
   enforceHttps,
@@ -23,10 +25,13 @@ const productRoutes = require('./routes/products');
 const categoryRoutes = require('./routes/categories');
 const orderRoutes = require('./routes/orders');
 const customerRoutes = require('./routes/customers');
+const customerAuthRoutes = require('./routes/customerAuth');
 const uploadRoutes = require('./routes/upload');
 const sliderRoutes = require('./routes/slider');
 const campaignRoutes = require('./routes/campaigns');
 const collectionRoutes = require('./routes/collections');
+const blogRoutes = require('./routes/blog');
+const wishlistRoutes = require('./routes/wishlist');
 const paymentRoutes = require('./routes/payment');
 const auditRoutes = require('./routes/audit');
 const organizationRoutes = require('./routes/organizations');
@@ -34,7 +39,7 @@ const organizationRoutes = require('./routes/organizations');
 const app = express();
 const port = Number(process.env.PORT || 3000);
 const host = process.env.HOST || '';
-const uploadDir = process.env.UPLOAD_DIR || path.join(__dirname, 'uploads');
+const uploadDir = resolveUploadDir();
 let startupReadinessError = null;
 
 try {
@@ -42,6 +47,13 @@ try {
 } catch (err) {
   startupReadinessError = err;
   console.error(`Panelya API readiness failed: ${err.message}`);
+}
+
+try {
+  fs.mkdirSync(uploadDir, { recursive: true });
+  console.log(`Panelya uploads directory: ${uploadDir}`);
+} catch (err) {
+  console.error(`Uploads directory could not be created: ${err.message}`);
 }
 app.set('trust proxy', 1);
 app.disable('x-powered-by');
@@ -82,6 +94,35 @@ app.get('/api/health', (req, res) => {
 
 app.use(requestId);
 app.use(enforceHttps);
+
+// Public uploads should be readable from storefronts without CORS allowlist coupling.
+// CORS middleware can reject unknown origins and would otherwise block images with 500.
+app.use('/uploads', (req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  next();
+});
+app.use('/uploads', express.static(uploadDir, {
+  dotfiles: 'deny',
+  index: false,
+  fallthrough: false,
+  maxAge: process.env.NODE_ENV === 'production' ? '7d' : 0,
+  setHeaders(res) {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Content-Disposition', 'inline');
+  },
+}));
+app.use('/uploads', (err, req, res, next) => {
+  if (!err) return next();
+  if (err.code === 'ENOENT' || err.status === 404) {
+    return res.status(404).json({ error: 'Dosya bulunamadi', requestId: req.id });
+  }
+  if (err.code === 'EACCES' || err.code === 'EPERM') {
+    return res.status(503).json({ error: 'Uploads klasorune erisim yok', requestId: req.id });
+  }
+  return next(err);
+});
+
 app.use(handleCorsPreflight);
 app.use((req, res, next) => {
   if (!startupReadinessError) return next();
@@ -115,25 +156,19 @@ app.use(rateLimit({
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: false }));
 app.use(attachAuthIfPresent);
-app.use('/uploads', express.static(uploadDir, {
-  dotfiles: 'deny',
-  index: false,
-  maxAge: process.env.NODE_ENV === 'production' ? '7d' : 0,
-  setHeaders(res) {
-    res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('Content-Disposition', 'inline');
-  },
-}));
 
 app.use('/api/auth', authRoutes);
 app.use('/api/products', productRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/customers', customerRoutes);
+app.use('/api/customer-auth', customerAuthRoutes);
 app.use('/api/upload', uploadRoutes);
 app.use('/api/slider', sliderRoutes);
 app.use('/api/campaigns', campaignRoutes);
 app.use('/api/collections', collectionRoutes);
+app.use('/api/blog', blogRoutes);
+app.use('/api/wishlist', wishlistRoutes);
 app.use('/api/payment', paymentRoutes);
 app.use('/api/audit', auditRoutes);
 app.use('/api/organizations', organizationRoutes);

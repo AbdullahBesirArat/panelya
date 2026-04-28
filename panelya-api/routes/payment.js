@@ -2,19 +2,20 @@ const express = require('express');
 const db = require('../db');
 const {
   initializePayment,
-  retrievePayment,
   providerName,
-  successUrl,
   failureUrl,
 } = require('../services/paymentProviders');
-const { reserveStock, syncStockForStatusChange } = require('../services/inventory');
+const { reserveStock } = require('../services/inventory');
 const { cartTotal, priceCartItems } = require('../services/cartPricing');
-const { auditLog } = require('../services/audit');
 const { isProduction, rateLimit } = require('../middleware/security');
 const { requireCallbackSecret, sanitizeCustomer } = require('../services/validation');
 const { resolveOrganization } = require('../services/tenant');
 const { nextOrderCode } = require('../services/orderCodes');
 const { insertOrderItems } = require('../services/orderItems');
+const { enqueuePaymentCallbackEvent, processPaymentCallbackEvent } = require('../services/paymentCallbackEvents');
+const { normalizeCheckoutOptions } = require('../services/checkoutPayload');
+const { assertPlanCapacity } = require('../services/planLimits');
+const { upsertCustomer } = require('../services/customers');
 
 const router = express.Router();
 const paymentInitLimiter = rateLimit({
@@ -44,7 +45,7 @@ function mockAutoPayEnabled() {
  *             properties:
  *               organizationSlug:
  *                 type: string
- *                 example: maveran
+ *                 example: panelya
  *               customer:
  *                 type: object
  *                 required: [name, email, phone]
@@ -76,44 +77,50 @@ router.post('/initialize', paymentInitLimiter, async (req, res, next) => {
 
   try {
     const customer = sanitizeCustomer(req.body.customer || {});
-    const provider = providerName();
+    const checkoutOptions = normalizeCheckoutOptions(req.body);
+    const provider = checkoutOptions.paymentMethod === 'iban'
+      ? 'manual'
+      : providerName();
 
     await client.query('begin');
-    const organization = await resolveOrganization(req, client);
+    const organization = await resolveOrganization(req, client, { allowPublic: true });
+    await assertPlanCapacity(client, organization.id, 'orders_month');
     const items = await priceCartItems(client, req.body.items, { organizationId: organization.id });
 
-    const customerResult = await client.query(
-      `insert into customers (organization_id, name, email, phone, address)
-       values ($1, $2, $3, $4, $5)
-       returning id`,
-      [
-        organization.id,
-        customer.name,
-        customer.email,
-        customer.phone,
-        customer.address,
-      ]
-    );
+    const customerResult = await upsertCustomer(client, organization.id, customer);
 
-    const calculatedTotal = cartTotal(items);
+    const calculatedTotal = cartTotal(items) + checkoutOptions.shippingFee;
     const orderCode = await nextOrderCode(client);
     let orderResult = await client.query(
-      `insert into orders (organization_id, order_code, customer_id, total, status, payment_provider)
-       values ($1, $2, $3, $4, 'payment_pending', $5)
+      `insert into orders
+       (organization_id, order_code, customer_id, total, status, payment_provider, payment_method, note, gift_wrap, shipping_fee)
+       values ($1, $2, $3, $4, 'payment_pending', $5, $6, $7, $8, $9)
        returning *`,
-      [organization.id, orderCode, customerResult.rows[0].id, calculatedTotal, provider]
+      [
+        organization.id,
+        orderCode,
+        customerResult.id,
+        calculatedTotal,
+        provider,
+        checkoutOptions.paymentMethod,
+        checkoutOptions.note,
+        checkoutOptions.giftWrap,
+        checkoutOptions.shippingFee,
+      ]
     );
 
     await insertOrderItems(client, orderResult.rows[0].id, items);
 
     await reserveStock(client, items);
 
-    const payment = await initializePayment({
-      req,
-      order: orderResult.rows[0],
-      customer: { ...customer, id: customerResult.rows[0].id },
-      items,
-    });
+    const payment = provider === 'manual'
+      ? { token: null, paymentPageUrl: null, failureUrl: null }
+      : await initializePayment({
+        req,
+        order: orderResult.rows[0],
+        customer: { ...customer, id: customerResult.id },
+        items,
+      });
 
     const initialStatus = provider === 'mock' && mockAutoPayEnabled()
       ? 'paid'
@@ -201,8 +208,6 @@ router.post('/initialize', paymentInitLimiter, async (req, res, next) => {
  *         $ref: '#/components/responses/NotFound'
  */
 router.post('/callback', async (req, res, next) => {
-  let client;
-  let transactionStarted = false;
   try {
     const { orderCode, token, status = 'paid' } = req.body;
     if (!orderCode && !token) return res.status(400).json({ error: 'orderCode veya token zorunlu' });
@@ -218,93 +223,21 @@ router.post('/callback', async (req, res, next) => {
       return res.status(400).json({ error: 'Iyzico callback icin token zorunlu' });
     }
 
-    let nextStatus = provider === 'mock' && status === 'paid' ? 'paid' : 'cancelled';
-    let paymentId = null;
-    let paymentError = null;
-
-    if (token && provider === 'iyzico') {
-      const orderPreview = await db.query(
-        'select order_code from orders where payment_token = $1 limit 1',
-        [token]
-      );
-      if (!orderPreview.rows[0]) {
-        return res.status(404).json({ error: 'Siparis bulunamadi' });
-      }
-
-      const payment = await retrievePayment({
-        token,
-        conversationId: orderPreview.rows[0].order_code,
-      });
-      nextStatus = payment.status === 'success' && payment.paymentStatus === 'SUCCESS' ? 'paid' : 'cancelled';
-      paymentId = payment.paymentId || null;
-      paymentError = payment.errorMessage || null;
-    }
-
-    client = await db.pool.connect();
-    await client.query('begin');
-    transactionStarted = true;
-
-    const orderResult = token
-      ? await client.query('select * from orders where payment_token = $1 limit 1 for update', [token])
-      : await client.query('select * from orders where order_code = $1 limit 1 for update', [orderCode]);
-
-    if (!orderResult.rows[0]) {
-      await client.query('rollback');
-      return res.status(404).json({ error: 'Siparis bulunamadi' });
-    }
-
-    const currentStatus = orderResult.rows[0].status;
-    if (['paid', 'cancelled'].includes(currentStatus) && currentStatus !== nextStatus) {
-      nextStatus = currentStatus;
-      paymentError = paymentError || `Final durum korunuyor: ${currentStatus}`;
-    }
-
-    await syncStockForStatusChange(
-      client,
-      orderResult.rows[0].id,
-      currentStatus,
-      nextStatus
-    );
-
-    const result = await client.query(
-      `update orders
-       set status = $1,
-           payment_id = coalesce($2, payment_id),
-           payment_error = $3,
-           updated_at = now()
-       where id = $4
-       returning *`,
-      [nextStatus, paymentId, paymentError, orderResult.rows[0].id]
-    );
-
-    await auditLog(req, {
-      action: 'PAYMENT_CALLBACK',
-      resourceType: 'order',
-      resourceId: orderResult.rows[0].id,
-      oldValue: { status: orderResult.rows[0].status },
-      newValue: { status: nextStatus, provider, paymentId, paymentError },
-      success: nextStatus === 'paid',
-      errorMessage: paymentError,
+    const event = await enqueuePaymentCallbackEvent(req, {
+      provider,
+      orderCode,
+      token,
+      status,
     });
-    await client.query('commit');
-    transactionStarted = false;
+    const result = await processPaymentCallbackEvent(req, event.id);
 
     if (req.is('application/x-www-form-urlencoded')) {
-      return res.redirect(nextStatus === 'paid'
-        ? successUrl(req, result.rows[0].order_code)
-        : failureUrl(req, result.rows[0].order_code));
+      return res.redirect(result.redirectUrl);
     }
 
-    res.json({ ok: nextStatus === 'paid', order: result.rows[0] });
+    res.json({ ok: result.ok, order: result.order, callbackEventId: result.id });
   } catch (err) {
-    if (transactionStarted && client) {
-      await client.query('rollback');
-    }
     next(err);
-  } finally {
-    if (client) {
-      client.release();
-    }
   }
 });
 

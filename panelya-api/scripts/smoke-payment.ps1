@@ -29,6 +29,7 @@ $session = Invoke-RestMethod -Method Post -Uri "$apiBaseUrl/api/auth/register" -
   organizationName = 'Payment Smoke Org'
   organizationSlug = $organizationSlug
 } | ConvertTo-Json)
+$publicAccessToken = [string]$session.currentOrganization.publicAccessToken
 
 $headers = @{ Authorization = "Bearer $($session.accessToken)" }
 
@@ -45,10 +46,11 @@ $product = Invoke-RestMethod -Method Post -Headers $headers -Uri "$apiBaseUrl/ap
 } | ConvertTo-Json)
 
 function Initialize-SmokeOrder {
-  param([string]$OrganizationSlug, [string]$ProductId)
+  param([string]$OrganizationSlug, [string]$ProductId, [string]$PublicAccessToken)
 
   Invoke-RestMethod -Method Post -Uri "$apiBaseUrl/api/payment/initialize" -ContentType 'application/json' -Body (@{
     organizationSlug = $OrganizationSlug
+    publicAccessToken = $PublicAccessToken
     items = @(@{
       product_id = $ProductId
       quantity = 1
@@ -62,7 +64,7 @@ function Initialize-SmokeOrder {
   } | ConvertTo-Json -Depth 5)
 }
 
-$firstOrder = Initialize-SmokeOrder -OrganizationSlug $organizationSlug -ProductId $product.id
+$firstOrder = Initialize-SmokeOrder -OrganizationSlug $organizationSlug -ProductId $product.id -PublicAccessToken $publicAccessToken
 
 $callbackSecretRequired = [string]$env:PAYMENT_CALLBACK_SECRET_REQUIRED
 $callbackSecret = [string]$env:PAYMENT_CALLBACK_SECRET
@@ -127,7 +129,7 @@ if (-not $paidThenFailed.ok -or $paidThenFailed.order.status -ne 'paid') {
   throw 'Paid siparis failure callback ile geri dusmemeli'
 }
 
-$secondOrder = Initialize-SmokeOrder -OrganizationSlug $organizationSlug -ProductId $product.id
+$secondOrder = Initialize-SmokeOrder -OrganizationSlug $organizationSlug -ProductId $product.id -PublicAccessToken $publicAccessToken
 $failed = Invoke-RestMethod -Method Post -Headers $paidHeaders -Uri "$apiBaseUrl/api/payment/callback" -ContentType 'application/json' -Body (@{
   orderCode = $secondOrder.order.order_code
   token = $secondOrder.order.payment_token

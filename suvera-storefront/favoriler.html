@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Favoriler | Suvera</title>
+  <meta name="description" content="Kaydettiginiz Suvera urunlerini favoriler sayfasinda listeleyin ve tekrar inceleyin." />
+  <link rel="canonical" href="https://suvera.com.tr/favoriler.html" />
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="Favoriler | Suvera" />
+  <meta property="og:description" content="Kaydettiginiz Suvera urunlerini favoriler sayfasinda listeleyin ve tekrar inceleyin." />
+  <meta property="og:url" content="https://suvera.com.tr/favoriler.html" />
+  <meta property="og:image" content="https://suvera.com.tr/og-cover.svg" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Favoriler | Suvera" />
+  <meta name="twitter:description" content="Kaydettiginiz Suvera urunlerini favoriler sayfasinda listeleyin ve tekrar inceleyin." />
+  <meta name="twitter:image" content="https://suvera.com.tr/og-cover.svg" />
+  <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+  <link rel="manifest" href="site.webmanifest" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;500;600&family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="shared.css" />
+  <link rel="stylesheet" href="css/site-pages.css" />
+</head>
+<body class="site-page-body">
+  <div class="announce">Favori urunleriniz kalici olarak kaydedilir</div>
+  <nav id="mainNav">
+    <a class="nav-logo" href="index.html">Suvera</a>
+    <ul class="nav-menu-wrap">
+      <li><a href="index.html">Ana Sayfa</a></li>
+      <li><a href="urunler.html">Urunler</a></li>
+      <li><a href="hesabim.html">Hesabim</a></li>
+      <li><a href="iletisim.html">Iletisim</a></li>
+    </ul>
+    <div class="nav-right">
+      <div class="nav-search-wrap">
+        <button class="nav-search-icon" aria-label="Ara">⌕</button>
+        <div class="nav-search-box"><input type="text" placeholder="Urun ara..." /></div>
+      </div>
+      <a href="hesabim.html" class="nav-icon-btn">HESABIM</a>
+      <a href="sepet.html" class="nav-icon-btn" style="position:relative">SEPETIM <span class="cart-dot">0</span></a>
+      <button class="hamburger" aria-label="Menu"><span></span><span></span><span></span></button>
+    </div>
+  </nav>
+
+  <main class="info-page-shell" id="favoritesPage">
+    <div class="page-breadcrumb"><a href="index.html">Ana Sayfa</a><span>›</span><span>Favoriler</span></div>
+    <section class="page-hero">
+      <div class="page-hero-card">
+        <div class="hero-kicker">Wishlist</div>
+        <h1 class="hero-title">Sectikleriniz kaybolmaz,<br/>burada sizi bekler.</h1>
+        <p class="page-copy">Urun kartlarindaki kalp butonu ile eklediginiz parcalar bu sayfada listelenir. Bu kayit localStorage ile kalicidir.</p>
+        <div class="page-pill-row"><div class="page-pill">Toplam favori: <span id="favoritesCount">0</span></div></div>
+      </div>
+      <aside class="page-side-card">
+        <div class="hero-kicker">Kisa Yol</div>
+        <div class="page-actions">
+          <a class="page-btn" href="urunler.html">Koleksiyona Don</a>
+          <a class="page-btn-secondary" href="hesabim.html">Hesabim</a>
+        </div>
+      </aside>
+    </section>
+
+    <section class="page-card">
+      <div class="page-section-head">
+        <h2 class="page-section-title">Kayitli Urunler</h2>
+        <span class="page-section-subtitle">Tekrar incele veya kaldir</span>
+      </div>
+      <div id="favoritesGrid" class="page-favorites-grid"></div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <hr class="footer-divider" />
+    <div class="footer-grid">
+      <div class="footer-brand"><a class="nav-logo" href="index.html">Suvera</a><p>Favoriler, siparis akisi ve profil tek bir deneyimde bulusur.</p></div>
+      <div class="footer-col"><h5>Bilgiler</h5><ul><li><a href="kvkk.html">KVKK</a></li><li><a href="kargo.html">Kargo</a></li><li><a href="iade.html">Iade</a></li></ul></div>
+      <div class="footer-col"><h5>Musteri</h5><ul><li><a href="hesabim.html">Hesabim</a></li><li><a href="siparis-takip.html">Takip</a></li><li><a href="sifre-sifirla.html">Sifre</a></li></ul></div>
+      <div class="footer-col"><h5>Suvera</h5><ul><li><a href="hakkimizda.html">Hakkimizda</a></li><li><a href="iletisim.html">Iletisim</a></li><li><a href="blog.html">Blog</a></li></ul></div>
+    </div>
+    <div class="footer-bottom"><span>© 2026 Suvera.</span><span>Favori kayitlari bu tarayicida saklanir.</span></div>
+  </footer>
+
+  <script src="js/config.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/site-seo.js"></script>
+  <script src="js/site-pages.js"></script>
+  <script src="shared.js"></script>
+</body>
+</html>

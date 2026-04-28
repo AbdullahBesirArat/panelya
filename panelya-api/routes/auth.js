@@ -6,15 +6,16 @@ const { isProduction, rateLimit } = require('../middleware/security');
 const { auditLog } = require('../services/audit');
 const {
   buildSessionPayload,
-  createAdminAccessToken,
   createAppAccessToken,
   getRefreshSession,
   issueRefreshToken,
   revokeRefreshToken,
 } = require('../services/authTokens');
+const { sendWelcomeEmail } = require('../services/email');
 const { slugify } = require('../services/tenant');
 
 const router = express.Router();
+const DUMMY_PASSWORD_HASH = '$2b$12$QJv3JQv8ZCk1sQxw2P7/fOMQ7A0J7sKnzGWxZmf0RduCMsZ/HXXdK';
 
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -58,7 +59,8 @@ async function appMemberships(client, userId) {
        o.name as organization_name,
        o.slug as organization_slug,
        o.plan as organization_plan,
-       o.status as organization_status
+       o.status as organization_status,
+       o.public_access_token as organization_public_access_token
      from memberships m
      join organizations o on o.id = m.organization_id
      where m.user_id = $1
@@ -83,6 +85,7 @@ async function appMemberships(client, userId) {
       slug: row.organization_slug,
       plan: row.organization_plan,
       status: row.organization_status,
+      publicAccessToken: row.organization_public_access_token,
     },
   }));
 }
@@ -112,70 +115,15 @@ async function issueAppSession(client, req, user, memberships, currentMembership
   });
 }
 
-async function handleAdminLogin(req, res, next) {
-  try {
-    const username = String(req.body.username || '').trim();
-    const password = String(req.body.password || '');
-
-    if (!username || !password || username.length > 80 || password.length > 200) {
-      return res.status(400).json({ error: 'Kullanici adi ve sifre zorunlu' });
-    }
-
-    const result = await db.query(
-      'select id, username, password_hash, role from admins where username = $1 limit 1',
-      [username]
-    );
-
-    const admin = result.rows[0];
-    const fallbackEnabled = !isProduction() && process.env.ALLOW_ENV_ADMIN_LOGIN === 'true';
-    const fallbackUser = process.env.ADMIN_USERNAME || '';
-    const fallbackPassHash = process.env.ADMIN_PASSWORD_HASH || '';
-
-    let isValid = false;
-    let adminId = admin?.id || 0;
-    let role = admin?.role || 'viewer';
-
-    if (admin) {
-      isValid = await bcrypt.compare(password, admin.password_hash);
-    } else if (fallbackEnabled && fallbackPassHash && username === fallbackUser) {
-      isValid = await bcrypt.compare(password, fallbackPassHash);
-      role = 'super_admin';
-    }
-
-    if (!isValid) {
-      await auditLog(req, {
-        action: 'LOGIN',
-        resourceType: 'admin',
-        resourceId: username,
-        success: false,
-        errorMessage: 'invalid credentials',
-      });
-      return res.status(401).json({ error: 'Giris bilgileri hatali' });
-    }
-
-    const token = createAdminAccessToken({
-      id: adminId,
-      username,
-      role,
-    });
-
-    req.auth = { sub: adminId, username, role, actorType: 'admin' };
-    req.admin = req.auth;
-    await auditLog(req, {
-      action: 'LOGIN',
-      resourceType: 'admin',
-      resourceId: adminId,
-      newValue: { username, role },
-    });
-
-    res.json({ token, admin: { id: adminId, username, role } });
-  } catch (err) {
-    next(err);
-  }
+function legacyAdminDisabled(res) {
+  return res.status(410).json({
+    error: 'Eski admin girisi kaldirildi. /auth/session/login kullanin.',
+    code: 'LEGACY_ADMIN_AUTH_DISABLED',
+  });
 }
 
-router.post('/login', loginLimiter, handleAdminLogin);
-router.post('/admin/login', loginLimiter, handleAdminLogin);
+router.post('/login', loginLimiter, async (req, res) => legacyAdminDisabled(res));
+router.post('/admin/login', loginLimiter, async (req, res) => legacyAdminDisabled(res));
 
 /**
  * @swagger
@@ -205,10 +153,10 @@ router.post('/admin/login', loginLimiter, handleAdminLogin);
  *                 example: StrongDemo!123
  *               organizationName:
  *                 type: string
- *                 example: Maveran
+ *                 example: Panelya
  *               organizationSlug:
  *                 type: string
- *                 example: maveran
+ *                 example: panelya
  *     responses:
  *       201:
  *         description: Workspace olusturuldu ve oturum acildi
@@ -309,6 +257,9 @@ router.post('/register', registerLimiter, async (req, res, next) => {
       actorUserId: userResult.rows[0].id,
       organizationId: currentMembership.organization.id,
     });
+    await sendWelcomeEmail(userResult.rows[0], currentMembership.organization).catch((error) => {
+      console.warn('Welcome email gonderilemedi', { message: error.message });
+    });
     res.status(201).json(session);
   } catch (err) {
     await client.query('rollback');
@@ -342,7 +293,7 @@ router.post('/register', registerLimiter, async (req, res, next) => {
  *                 example: PanelyaDemo!123
  *               organizationSlug:
  *                 type: string
- *                 example: maveran
+ *                 example: panelya
  *     responses:
  *       200:
  *         description: Oturum acildi
@@ -380,7 +331,10 @@ router.post('/session/login', loginLimiter, async (req, res, next) => {
     );
     const user = userResult.rows[0];
 
-    if (!user || !user.password_hash || !(await bcrypt.compare(password, user.password_hash))) {
+    const passwordHashToCompare = user?.password_hash || DUMMY_PASSWORD_HASH;
+    const passwordMatches = await bcrypt.compare(password, passwordHashToCompare);
+
+    if (!user || !user.password_hash || !passwordMatches) {
       await auditLog(req, {
         action: 'LOGIN',
         resourceType: 'session',
@@ -452,7 +406,7 @@ router.post('/session/login', loginLimiter, async (req, res, next) => {
  *                 type: string
  *               organizationSlug:
  *                 type: string
- *                 example: maveran
+ *                 example: panelya
  *     responses:
  *       200:
  *         description: Oturum yenilendi
@@ -472,7 +426,7 @@ router.post('/session/refresh', async (req, res, next) => {
     if (!refreshToken) return res.status(400).json({ error: 'Refresh token zorunlu' });
 
     await client.query('begin');
-    const refreshSession = await getRefreshSession(client, refreshToken);
+    const refreshSession = await getRefreshSession(client, refreshToken, { forUpdate: true });
     if (!refreshSession) {
       await client.query('rollback');
       return res.status(401).json({ error: 'Refresh token gecersiz' });

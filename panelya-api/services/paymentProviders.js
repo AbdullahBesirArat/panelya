@@ -22,7 +22,7 @@ function normalizePhone(phone) {
 function baseUrl(req) {
   const siteUrl = process.env.PUBLIC_SITE_URL;
   if (siteUrl) return siteUrl.replace(/\/$/, '');
-  if ((process.env.NODE_ENV || 'development') !== 'production') return 'http://localhost:5500';
+  if ((process.env.NODE_ENV || 'development') !== 'production') return 'http://localhost:3001';
   return `${req.protocol}://${req.get('host')}`.replace(/\/$/, '');
 }
 
@@ -34,14 +34,14 @@ function apiBaseUrl(req) {
 
 function successUrl(req, orderCode) {
   const configured = process.env.PAYMENT_SUCCESS_URL;
-  const url = new URL(configured || `${baseUrl(req)}/index.html?payment=success`, baseUrl(req));
+  const url = new URL(configured || `${baseUrl(req)}/tesekkur.html`, baseUrl(req));
   url.searchParams.set('order', orderCode);
   return url.toString();
 }
 
 function failureUrl(req, orderCode) {
   const configured = process.env.PAYMENT_FAILURE_URL;
-  const url = new URL(configured || `${baseUrl(req)}/siparis.html?payment=failed`, baseUrl(req));
+  const url = new URL(configured || `${baseUrl(req)}/tesekkur.html?payment=failed`, baseUrl(req));
   url.searchParams.set('order', orderCode);
   return url.toString();
 }

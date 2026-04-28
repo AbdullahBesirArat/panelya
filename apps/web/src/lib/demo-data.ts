@@ -5,6 +5,7 @@ export const navigationItems = [
   { key: "customers", label: "Müşteriler" },
   { key: "content", label: "Vitrin" },
   { key: "analytics", label: "Raporlar" },
+  { key: "team", label: "Ekip" },
   { key: "settings", label: "Ayarlar" },
 ] as const;
 
@@ -51,6 +52,12 @@ export const sectionMeta: Record<string, {
     title: "Gelir ve performans",
     description: "Sipariş, ciro ve tekrar satın alma metriklerini canlı veriden oku.",
     image: "https://images.unsplash.com/photo-1551288049-bebda4e38f71?auto=format&fit=crop&w=900&q=80",
+  },
+  team: {
+    kicker: "Ekip",
+    title: "Yetkiler ve davetler",
+    description: "Mağaza ekip üyelerini, rolleri ve bekleyen davetleri tek ekrandan yönet.",
+    image: "https://images.unsplash.com/photo-1522071820081-009f0129c71c?auto=format&fit=crop&w=900&q=80",
   },
   settings: {
     kicker: "Yönetim",

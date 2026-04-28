@@ -8,18 +8,23 @@ import { MetricGrid } from "@/components/page-kit";
 import { Button } from "@/components/ui/button";
 import {
   API_BASE,
+  createBlogPost,
   createCampaign,
   createCollection,
   createSlide,
+  deleteBlogPost,
   deleteCampaign,
   deleteCollection,
   deleteSlide,
+  fetchBlogPosts,
   fetchCampaigns,
   fetchCollections,
   fetchSlides,
+  updateBlogPost,
   updateCampaign,
   updateCollection,
   updateSlide,
+  type ApiBlogPost,
   type ApiCampaign,
   type ApiCollection,
   type ApiSlide,
@@ -69,6 +74,17 @@ const emptyCollectionForm = {
   active: true,
 };
 
+const emptyBlogForm = {
+  title: "",
+  slug: "",
+  excerpt: "",
+  content: "",
+  imageUrl: "",
+  sortOrder: "0",
+  publishedAt: "",
+  active: true,
+};
+
 function assetUrl(url: string | null | undefined) {
   if (!url) return "";
   if (/^https?:\/\//i.test(url)) return url;
@@ -87,9 +103,11 @@ export function ContentSection({
   const [editingSlideId, setEditingSlideId] = useState<string | null>(null);
   const [editingCampaignId, setEditingCampaignId] = useState<string | null>(null);
   const [editingCollectionId, setEditingCollectionId] = useState<string | null>(null);
+  const [editingBlogId, setEditingBlogId] = useState<string | null>(null);
   const [slideForm, setSlideForm] = useState(emptySlideForm);
   const [campaignForm, setCampaignForm] = useState(emptyCampaignForm);
   const [collectionForm, setCollectionForm] = useState(emptyCollectionForm);
+  const [blogForm, setBlogForm] = useState(emptyBlogForm);
 
   const slidesQuery = useQuery({
     queryKey: ["slides", organizationSlug],
@@ -106,6 +124,12 @@ export function ContentSection({
   const collectionsQuery = useQuery({
     queryKey: ["collections", organizationSlug],
     queryFn: fetchCollections,
+    staleTime: 30_000,
+  });
+
+  const blogQuery = useQuery({
+    queryKey: ["blog-posts", organizationSlug],
+    queryFn: fetchBlogPosts,
     staleTime: 30_000,
   });
 
@@ -235,6 +259,47 @@ export function ContentSection({
     },
   });
 
+  const blogMutation = useMutation({
+    mutationFn: createBlogPost,
+    onSuccess: async () => {
+      resetBlogForm();
+      pushToast({
+        title: "Blog yazısı oluşturuldu",
+        description: "Suvera blog akışı güncellendi.",
+        tone: "success",
+      });
+      await invalidateContent();
+    },
+  });
+
+  const updateBlogMutation = useMutation({
+    mutationFn: ({ id, payload }: {
+      id: string;
+      payload: Parameters<typeof updateBlogPost>[1];
+    }) => updateBlogPost(id, payload),
+    onSuccess: async () => {
+      resetBlogForm();
+      pushToast({
+        title: "Blog yazısı güncellendi",
+        description: "Blog içeriği yenilendi.",
+        tone: "success",
+      });
+      await invalidateContent();
+    },
+  });
+
+  const deleteBlogMutation = useMutation({
+    mutationFn: deleteBlogPost,
+    onSuccess: async () => {
+      pushToast({
+        title: "Blog yazısı silindi",
+        description: "Blog listesinden kaldırıldı.",
+        tone: "info",
+      });
+      await invalidateContent();
+    },
+  });
+
   const uploadCollectionImageMutation = useMutation({
     mutationFn: uploadProductImages,
     onSuccess: (response) => {
@@ -249,8 +314,8 @@ export function ContentSection({
     },
   });
 
-  if (slidesQuery.isLoading || campaignsQuery.isLoading || collectionsQuery.isLoading) return <SectionLoading />;
-  if (slidesQuery.isError || campaignsQuery.isError || collectionsQuery.isError || !slidesQuery.data || !campaignsQuery.data || !collectionsQuery.data) {
+  if (slidesQuery.isLoading || campaignsQuery.isLoading || collectionsQuery.isLoading || blogQuery.isLoading) return <SectionLoading />;
+  if (slidesQuery.isError || campaignsQuery.isError || collectionsQuery.isError || blogQuery.isError || !slidesQuery.data || !campaignsQuery.data || !collectionsQuery.data || !blogQuery.data) {
     return (
       <SectionError
         message="İçerik verisi yüklenemedi."
@@ -258,6 +323,7 @@ export function ContentSection({
           void slidesQuery.refetch();
           void campaignsQuery.refetch();
           void collectionsQuery.refetch();
+          void blogQuery.refetch();
         }}
       />
     );
@@ -266,9 +332,11 @@ export function ContentSection({
   const slides = slidesQuery.data;
   const campaigns = campaignsQuery.data;
   const collections = collectionsQuery.data;
+  const blogPosts = blogQuery.data;
   const activeSlides = slides.filter((slide) => slide.active).length;
   const activeCampaigns = campaigns.filter((campaign) => campaign.active).length;
   const activeCollections = collections.filter((collection) => collection.active).length;
+  const activeBlogPosts = blogPosts.filter((post) => post.active).length;
   const scheduledCampaigns = campaigns.filter((campaign) => campaign.active && campaign.end_date).length;
 
   async function invalidateContent() {
@@ -276,6 +344,7 @@ export function ContentSection({
       queryClient.invalidateQueries({ queryKey: ["slides", organizationSlug] }),
       queryClient.invalidateQueries({ queryKey: ["campaigns", organizationSlug] }),
       queryClient.invalidateQueries({ queryKey: ["collections", organizationSlug] }),
+      queryClient.invalidateQueries({ queryKey: ["blog-posts", organizationSlug] }),
       queryClient.invalidateQueries({ queryKey: ["summary", organizationSlug] }),
     ]);
   }
@@ -293,6 +362,11 @@ export function ContentSection({
   function resetCollectionForm() {
     setEditingCollectionId(null);
     setCollectionForm(emptyCollectionForm);
+  }
+
+  function resetBlogForm() {
+    setEditingBlogId(null);
+    setBlogForm(emptyBlogForm);
   }
 
   function startEditingSlide(slide: ApiSlide) {
@@ -329,6 +403,20 @@ export function ContentSection({
       linkUrl: collection.link_url || "urunler.html",
       sortOrder: String(collection.sort_order || 0),
       active: collection.active,
+    });
+  }
+
+  function startEditingBlog(post: ApiBlogPost) {
+    setEditingBlogId(post.id);
+    setBlogForm({
+      title: post.title,
+      slug: post.slug,
+      excerpt: post.excerpt || "",
+      content: post.content || "",
+      imageUrl: post.image_url || "",
+      sortOrder: String(post.sort_order || 0),
+      publishedAt: post.published_at ? post.published_at.slice(0, 10) : "",
+      active: post.active,
     });
   }
 
@@ -399,6 +487,30 @@ export function ContentSection({
     collectionMutation.mutate(payload);
   }
 
+  function submitBlog(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const sortOrder = Number(blogForm.sortOrder || 0);
+    if (!blogForm.title.trim() || !Number.isFinite(sortOrder) || sortOrder < 0) return;
+
+    const payload = {
+      title: blogForm.title.trim(),
+      slug: blogForm.slug.trim(),
+      excerpt: blogForm.excerpt.trim(),
+      content: blogForm.content.trim(),
+      imageUrl: blogForm.imageUrl.trim(),
+      sortOrder,
+      publishedAt: blogForm.publishedAt || null,
+      active: blogForm.active,
+    };
+
+    if (editingBlogId) {
+      updateBlogMutation.mutate({ id: editingBlogId, payload });
+      return;
+    }
+
+    blogMutation.mutate(payload);
+  }
+
   return (
     <>
       <MetricGrid
@@ -406,7 +518,7 @@ export function ContentSection({
           { label: "Aktif slayt", value: formatCount(activeSlides), tone: "mint" },
           { label: "Tüm slayt", value: formatCount(slides.length), tone: "leaf" },
           { label: "Aktif kampanya", value: formatCount(activeCampaigns), tone: "sun" },
-          { label: "Koleksiyon", value: formatCount(activeCollections), tone: "coral" },
+          { label: "Blog", value: formatCount(activeBlogPosts), tone: "coral" },
         ]}
       />
 
@@ -873,11 +985,167 @@ export function ContentSection({
             />
           </Panel>
 
+          <Panel
+            title={editingBlogId ? "Blog yazısını güncelle" : "Yeni blog yazısı"}
+            description="Suvera blog sayfasında yayınlanan içerikler"
+          >
+            <form className="grid gap-3" onSubmit={submitBlog}>
+              <FieldLabel htmlFor="blog-title">Başlık</FieldLabel>
+              <input
+                className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
+                id="blog-title"
+                onChange={(event) => setBlogForm((current) => ({ ...current, title: event.target.value }))}
+                placeholder="Kumaş bakım notları"
+                value={blogForm.title}
+              />
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="grid gap-2">
+                  <span className="text-sm font-semibold text-zinc-700">Kısa ad</span>
+                  <input
+                    className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
+                    onChange={(event) => setBlogForm((current) => ({ ...current, slug: event.target.value }))}
+                    placeholder="kumas-bakim-notlari"
+                    value={blogForm.slug}
+                  />
+                </label>
+                <label className="grid gap-2">
+                  <span className="text-sm font-semibold text-zinc-700">Yayın tarihi</span>
+                  <input
+                    className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
+                    onChange={(event) => setBlogForm((current) => ({ ...current, publishedAt: event.target.value }))}
+                    type="date"
+                    value={blogForm.publishedAt}
+                  />
+                </label>
+              </div>
+              <label className="grid gap-2">
+                <span className="text-sm font-semibold text-zinc-700">Özet</span>
+                <textarea
+                  className="focus-ring min-h-20 rounded-lg border border-line bg-white px-3 py-2 text-sm"
+                  onChange={(event) => setBlogForm((current) => ({ ...current, excerpt: event.target.value }))}
+                  placeholder="Blog kartında görünecek kısa açıklama"
+                  value={blogForm.excerpt}
+                />
+              </label>
+              <label className="grid gap-2">
+                <span className="text-sm font-semibold text-zinc-700">İçerik</span>
+                <textarea
+                  className="focus-ring min-h-32 rounded-lg border border-line bg-white px-3 py-2 text-sm"
+                  onChange={(event) => setBlogForm((current) => ({ ...current, content: event.target.value }))}
+                  placeholder="Yazının ana içeriğini girin"
+                  value={blogForm.content}
+                />
+              </label>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="grid gap-2">
+                  <span className="text-sm font-semibold text-zinc-700">Görsel URL</span>
+                  <input
+                    className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
+                    onChange={(event) => setBlogForm((current) => ({ ...current, imageUrl: event.target.value }))}
+                    placeholder="/uploads/blog.webp"
+                    value={blogForm.imageUrl}
+                  />
+                </label>
+                <label className="grid gap-2">
+                  <span className="text-sm font-semibold text-zinc-700">Sıra</span>
+                  <input
+                    className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
+                    inputMode="numeric"
+                    onChange={(event) => setBlogForm((current) => ({ ...current, sortOrder: event.target.value }))}
+                    value={blogForm.sortOrder}
+                  />
+                </label>
+              </div>
+              <label className="flex h-10 items-center gap-2 text-sm font-semibold text-zinc-700">
+                <input
+                  checked={blogForm.active}
+                  className="h-4 w-4 rounded border-line"
+                  onChange={(event) => setBlogForm((current) => ({ ...current, active: event.target.checked }))}
+                  type="checkbox"
+                />
+                Aktif
+              </label>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  disabled={!canManageContent || blogMutation.isPending || updateBlogMutation.isPending}
+                  type="submit"
+                  variant="mint"
+                >
+                  {updateBlogMutation.isPending
+                    ? "Güncelleniyor"
+                    : blogMutation.isPending
+                      ? "Oluşturuluyor"
+                      : editingBlogId
+                        ? "Blog yazısını güncelle"
+                        : "Blog yazısı oluştur"}
+                </Button>
+                {editingBlogId ? (
+                  <Button onClick={resetBlogForm} type="button" variant="outline">
+                    Vazgeç
+                  </Button>
+                ) : null}
+              </div>
+              {!canManageContent ? <InlineHint>Bu alanda yazma yetkisi için sahip veya yönetici rolüne ihtiyaç var.</InlineHint> : null}
+              {blogMutation.isError && <InlineError message={blogMutation.error.message} />}
+              {updateBlogMutation.isError && <InlineError message={updateBlogMutation.error.message} />}
+            </form>
+          </Panel>
+
+          <Panel
+            title="Blog yazıları"
+            description="Suvera içerik merkezi"
+            actions={blogQuery.isFetching ? <StatusPill tone="leaf">Güncelleniyor</StatusPill> : null}
+          >
+            <DataGrid
+              columns={["Sıra", "Başlık", "Yayın", "Durum", "Aksiyon"]}
+              emptyMessage="Bu mağaza için henüz blog yazısı yok."
+              rows={blogPosts}
+              renderRow={(post) => (
+                <tr key={post.id}>
+                  <DataCell>{formatCount(post.sort_order)}</DataCell>
+                  <DataCell>
+                    <p className="font-semibold text-ink">{post.title}</p>
+                    <p className="line-clamp-1 text-xs text-zinc-500">{post.excerpt || post.slug}</p>
+                  </DataCell>
+                  <DataCell>{post.published_at ? formatDateTime(post.published_at) : "-"}</DataCell>
+                  <DataCell>
+                    <StatusPill tone={post.active ? "mint" : "sun"}>
+                      {post.active ? "Aktif" : "Pasif"}
+                    </StatusPill>
+                  </DataCell>
+                  <DataCell>
+                    <div className="flex flex-wrap gap-2">
+                      {canManageContent ? (
+                        <Button onClick={() => startEditingBlog(post)} size="sm" type="button" variant="outline">
+                          Düzenle
+                        </Button>
+                      ) : null}
+                      {canDeleteContent ? (
+                        <Button
+                          disabled={deleteBlogMutation.isPending && deleteBlogMutation.variables === post.id}
+                          onClick={() => deleteBlogMutation.mutate(post.id)}
+                          size="sm"
+                          type="button"
+                          variant="danger"
+                        >
+                          {deleteBlogMutation.isPending && deleteBlogMutation.variables === post.id ? "Siliniyor" : "Sil"}
+                        </Button>
+                      ) : null}
+                      {!canManageContent && !canDeleteContent ? <span className="text-xs text-zinc-400">Salt okunur</span> : null}
+                    </div>
+                  </DataCell>
+                </tr>
+              )}
+            />
+          </Panel>
+
           <ActivityPanel
             title="İçerik notları"
             items={[
               `${formatCount(activeSlides)} slayt aktif vitrinde sıralanıyor.`,
               `${formatCount(activeCampaigns)} kampanya mağaza akışına hazır.`,
+              `${formatCount(activeCollections)} koleksiyon ürün sayfasında yayında.`,
+              `${formatCount(activeBlogPosts)} blog yazısı Suvera içerik merkezinde aktif.`,
               scheduledCampaigns > 0
                 ? `${formatCount(scheduledCampaigns)} kampanya bitiş tarihiyle takip ediliyor.`
                 : "Tarihli kampanya yok.",

@@ -3,13 +3,22 @@ require('dotenv').config();
 const bcrypt = require('bcryptjs');
 const db = require('../db');
 
+function envFlag(name, fallback = false) {
+  const value = process.env[name];
+  if (value == null || value === '') return fallback;
+  return ['1', 'true', 'yes', 'on'].includes(String(value).trim().toLowerCase());
+}
+
 const DEMO = {
   email: String(process.env.DEMO_OWNER_EMAIL || 'demo@panelya.dev').trim().toLowerCase(),
   password: String(process.env.DEMO_OWNER_PASSWORD || 'PanelyaDemo!123'),
-  name: String(process.env.DEMO_OWNER_NAME || 'Maveran Owner').trim().slice(0, 160),
-  organizationName: String(process.env.DEMO_ORGANIZATION_NAME || 'Maveran').trim().slice(0, 160),
-  organizationSlug: String(process.env.DEMO_ORGANIZATION_SLUG || 'maveran').trim().toLowerCase(),
+  name: String(process.env.DEMO_OWNER_NAME || 'Panelya Owner').trim().slice(0, 160),
+  organizationName: String(process.env.DEMO_ORGANIZATION_NAME || 'Panelya').trim().slice(0, 160),
+  organizationSlug: String(process.env.DEMO_ORGANIZATION_SLUG || 'panelya').trim().toLowerCase(),
 };
+const DEFAULT_DEMO_SLUG = 'panelya';
+const ALLOW_DEMO_SEED = envFlag('ALLOW_DEMO_SEED', process.env.NODE_ENV !== 'production');
+const FORCE_DEMO_SEED = envFlag('FORCE_DEMO_SEED', false);
 
 const categories = [
   { name: 'Operations Kits', slug: 'operations-kits' },
@@ -96,7 +105,7 @@ const products = [
 const slides = [
   {
     tag: 'Panelya Operations',
-    title: 'Maveran vitrin akisi',
+    title: 'Panelya vitrin akisi',
     sub: 'Tek workspace icinde siparis, stok ve kampanya yonetimi.',
     btn: 'Katalogu ac',
     imageUrl: 'https://images.unsplash.com/photo-1523381294911-8d3cead13475?auto=format&fit=crop&w=1200&q=80',
@@ -413,8 +422,13 @@ async function seedCustomers(client, organizationId) {
 }
 
 async function seedOrders(client, organizationId, customerIds, productIds) {
+  const orderCodePrefix = DEMO.organizationSlug === DEFAULT_DEMO_SLUG
+    ? ''
+    : `${DEMO.organizationSlug.toUpperCase()}-`;
+
   for (const order of orders) {
     const createdAt = daysAgo(order.createdOffsetDays);
+    const orderCode = `${orderCodePrefix}${order.orderCode}`;
     const orderResult = await client.query(
       `insert into orders
        (organization_id, order_code, customer_id, total, status, payment_provider, shipping_company, tracking_number, tracking_url, shipped_at, created_at, updated_at)
@@ -422,7 +436,7 @@ async function seedOrders(client, organizationId, customerIds, productIds) {
        returning id`,
       [
         organizationId,
-        order.orderCode,
+        orderCode,
         customerIds.get(order.customerKey),
         order.total,
         order.status,
@@ -493,6 +507,19 @@ async function seedActivity(client, organizationId, userId) {
 async function main() {
   if (!DEMO.organizationSlug) {
     throw new Error('DEMO_ORGANIZATION_SLUG bos olamaz');
+  }
+
+  if (!ALLOW_DEMO_SEED) {
+    throw new Error(
+      'Demo seed devre disi. Calistirmak icin ALLOW_DEMO_SEED=true ayarlayin.'
+    );
+  }
+
+  if (DEMO.organizationSlug !== DEFAULT_DEMO_SLUG && !FORCE_DEMO_SEED) {
+    throw new Error(
+      `Guvenlik korumasi: demo seed yalnizca "${DEFAULT_DEMO_SLUG}" slug'i icin calisabilir. ` +
+      'Farkli bir workspace icin bilincli olarak FORCE_DEMO_SEED=true tanimlayin.'
+    );
   }
 
   const client = await db.pool.connect();

@@ -24,7 +24,7 @@ Tamamlanan ana bloklar:
 
 ## Suvera tarafinda kalan isler
 
-1. `C:\Users\Arat\Desktop\suvera-integrated\suvera` altindaki degisiklikleri gercek Suvera reposuna tasi.
+1. Ana Suvera kaynagi olan `C:\Users\Arat\Desktop\proje\suvera` klasorunu ayri Suvera Vercel projesinin root'u olarak kullan.
 2. Vercel ortaminda `SUVERA_PUBLIC_ACCESS_TOKEN` degiskenini ekle.
 3. Gerekirse `UPSTREAM_API` degiskenini Panelya canli API adresine ayarla.
 4. `api/[...path].js` proxy dosyasinin deploy paketinde yer aldigini dogrula.
@@ -44,12 +44,13 @@ Tamamlanan ana bloklar:
 
 ## Teslim dosyalari
 
-Suvera reposuna tasinacak ana dosyalar:
+Suvera ana klasorunde dogrulanacak ana dosyalar:
 
 - `api/[...path].js`
 - `js/api.js`
 - `js/storefront.js`
 - `js/site-pages.js`
+- `siparis.html`
 - `index.html`
 - `urunler.html`
 

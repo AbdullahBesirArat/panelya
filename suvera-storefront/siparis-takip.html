@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Siparis Takip | Suvera</title>
+  <meta name="description" content="Suvera siparis durumunuzu siparis kodu ile takip edin." />
+  <link rel="canonical" href="https://suvera.com.tr/siparis-takip.html" />
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="Siparis Takip | Suvera" />
+  <meta property="og:description" content="Suvera siparis durumunuzu siparis kodu ile takip edin." />
+  <meta property="og:url" content="https://suvera.com.tr/siparis-takip.html" />
+  <meta property="og:image" content="https://suvera.com.tr/og-cover.svg" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Siparis Takip | Suvera" />
+  <meta name="twitter:description" content="Suvera siparis durumunuzu siparis kodu ile takip edin." />
+  <meta name="twitter:image" content="https://suvera.com.tr/og-cover.svg" />
+  <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+  <link rel="manifest" href="site.webmanifest" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;500;600&family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="shared.css" />
+  <link rel="stylesheet" href="css/site-pages.css" />
+</head>
+<body class="site-page-body">
+  <div class="announce">Siparis kodunuzla durum takibi yapin</div>
+  <nav id="mainNav">
+    <a class="nav-logo" href="index.html">Suvera</a>
+    <ul class="nav-menu-wrap">
+      <li><a href="index.html">Ana Sayfa</a></li>
+      <li><a href="hesabim.html">Hesabim</a></li>
+      <li><a href="iletisim.html">Iletisim</a></li>
+    </ul>
+    <div class="nav-right">
+      <a href="sepet.html" class="nav-icon-btn" style="position:relative">SEPETIM <span class="cart-dot">0</span></a>
+      <button class="hamburger" aria-label="Menu"><span></span><span></span><span></span></button>
+    </div>
+  </nav>
+
+  <main class="info-page-shell" id="trackingPage">
+    <div class="page-breadcrumb"><a href="index.html">Ana Sayfa</a><span>›</span><span>Siparis Takip</span></div>
+    <section class="page-hero">
+      <div class="page-hero-card">
+        <div class="hero-kicker">Kargo ve Durum</div>
+        <h1 class="hero-title">Siparisinizin hangi<br/>adimda oldugunu görün.</h1>
+        <p class="page-copy">Bu ekran checkout sonrasinda kaydedilen siparis ozetlerini kullanir. Canli ortamda panelden gelen kargo bilgisi buraya otomatik yazilacak.</p>
+      </div>
+      <aside class="page-side-card">
+        <form class="page-form" id="trackingForm">
+          <label for="trackingOrderInput">Siparis Kodu</label>
+          <input id="trackingOrderInput" type="text" placeholder="#1002" />
+          <div class="page-form-actions">
+            <button type="submit" class="page-btn">Durumu Goster</button>
+          </div>
+        </form>
+      </aside>
+    </section>
+
+    <section class="page-grid single">
+      <article class="page-card">
+        <div class="page-section-head">
+          <h2 class="page-section-title">Durum Ozeti</h2>
+          <span class="page-section-subtitle">Anlik gorunum</span>
+        </div>
+        <div id="trackingResult" class="page-empty">Siparis kodunuzu girdiginizde durum karti burada gorunur.</div>
+      </article>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <hr class="footer-divider" />
+    <div class="footer-grid">
+      <div class="footer-brand"><a class="nav-logo" href="index.html">Suvera</a><p>Siparis kodu, hesap ozeti ve iletisim destegi tek akista yer alir.</p></div>
+      <div class="footer-col"><h5>Bilgiler</h5><ul><li><a href="kvkk.html">KVKK</a></li><li><a href="kargo.html">Kargo</a></li><li><a href="iade.html">Iade</a></li></ul></div>
+      <div class="footer-col"><h5>Musteri</h5><ul><li><a href="hesabim.html">Hesabim</a></li><li><a href="favoriler.html">Favoriler</a></li><li><a href="sifre-sifirla.html">Sifre</a></li></ul></div>
+      <div class="footer-col"><h5>Suvera</h5><ul><li><a href="iletisim.html">Iletisim</a></li><li><a href="blog.html">Blog</a></li><li><a href="hakkimizda.html">Hakkimizda</a></li></ul></div>
+    </div>
+    <div class="footer-bottom"><span>© 2026 Suvera.</span><span>Siparis durumu su anda yerel siparis gecmisiyle eslenir.</span></div>
+  </footer>
+
+  <script src="js/config.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/site-seo.js"></script>
+  <script src="js/site-pages.js"></script>
+  <script src="shared.js"></script>
+</body>
+</html>

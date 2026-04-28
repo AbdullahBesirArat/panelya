@@ -2,9 +2,14 @@ $ErrorActionPreference = 'Stop'
 
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $apiRoot = Join-Path $root 'panelya-api'
+$webRoot = Join-Path $root 'apps\web'
 $node = 'C:\Program Files\nodejs\node.exe'
+$npm = 'C:\Program Files\nodejs\npm.cmd'
 if (-not (Test-Path $node)) {
   $node = 'node'
+}
+if (-not (Test-Path $npm)) {
+  $npm = 'npm.cmd'
 }
 
 function Test-Port($port) {
@@ -24,9 +29,9 @@ if (-not (Test-Port 3000)) {
   Start-Sleep -Seconds 2
 }
 
-if (-not (Test-Port 5500)) {
-  Start-Process -FilePath $node -ArgumentList 'dev-static-server.js' -WorkingDirectory $root -WindowStyle Hidden | Out-Null
-  Start-Sleep -Seconds 1
+if (-not (Test-Port 3001)) {
+  Start-Process -FilePath $npm -ArgumentList 'run dev' -WorkingDirectory $webRoot -WindowStyle Hidden | Out-Null
+  Start-Sleep -Seconds 4
 }
 
 $health = Invoke-RestMethod -Uri 'http://127.0.0.1:3000/api/health' -Method Get
@@ -36,5 +41,4 @@ if (-not $health.ok) {
 
 Write-Host 'Panelya dev ortami calisiyor.'
 Write-Host 'API:   http://localhost:3000/api/health'
-Write-Host 'Site:  http://localhost:5500/index.html'
-Write-Host 'Admin: http://localhost:5500/admin.html'
+Write-Host 'Web:   http://localhost:3001'

@@ -10,6 +10,10 @@ const { sanitizeCustomer } = require('../services/validation');
 const { resolveOrganization } = require('../services/tenant');
 const { nextOrderCode } = require('../services/orderCodes');
 const { insertOrderItems } = require('../services/orderItems');
+const { normalizeCheckoutOptions } = require('../services/checkoutPayload');
+const { assertPlanCapacity } = require('../services/planLimits');
+const { fetchOrderCustomer, upsertCustomer } = require('../services/customers');
+const { sendOrderStatusEmail } = require('../services/email');
 
 const router = express.Router();
 const ORDER_STATUSES = ['new', 'payment_pending', 'processing', 'shipped', 'delivered', 'cancelled', 'paid'];
@@ -34,6 +38,10 @@ function publicOrderView(row) {
     total: row.total,
     status: row.status,
     payment_provider: row.payment_provider,
+    payment_method: row.payment_method,
+    note: row.note,
+    gift_wrap: row.gift_wrap,
+    shipping_fee: row.shipping_fee,
     shipping_company: row.shipping_company,
     tracking_number: row.tracking_number,
     tracking_url: row.tracking_url,
@@ -48,6 +56,30 @@ function publicOrderView(row) {
     },
     items: Array.isArray(row.items) ? row.items : [],
   };
+}
+
+function orderDetailView(row) {
+  if (!row) return null;
+  return {
+    ...row,
+    customer: {
+      id: row.customer_id,
+      name: row.customer_name,
+      email: row.email,
+      phone: row.phone,
+      address: row.address,
+    },
+    items: Array.isArray(row.items) ? row.items : [],
+  };
+}
+
+async function notifyOrderUpdate(order, customer) {
+  await sendOrderStatusEmail(order, customer).catch((error) => {
+    console.warn('Order status email gonderilemedi', {
+      orderCode: order?.order_code,
+      message: error.message,
+    });
+  });
 }
 
 /**
@@ -182,8 +214,19 @@ router.get('/lookup', async (req, res, next) => {
   try {
     const orderCode = String(req.query.orderCode || '').trim().slice(0, 40);
     if (!orderCode) return res.status(400).json({ error: 'Siparis kodu zorunlu' });
+    const customerEmail = String(req.query.email || req.query.customerEmail || '').trim().toLowerCase().slice(0, 254);
+    if (!req.auth && (!customerEmail || !customerEmail.includes('@'))) {
+      return res.status(400).json({ error: 'Siparis takibi icin email zorunlu' });
+    }
 
     const organization = await resolveOrganization(req, db, { allowPublic: !req.auth });
+    const params = [organization.id, orderCode];
+    const filters = ['o.organization_id = $1', 'o.order_code = $2'];
+    if (!req.auth) {
+      params.push(customerEmail);
+      filters.push(`lower(c.email) = $${params.length}`);
+    }
+
     const result = await db.query(
       `select
          o.id,
@@ -191,6 +234,10 @@ router.get('/lookup', async (req, res, next) => {
          o.total,
          o.status,
          o.payment_provider,
+         o.payment_method,
+         o.note,
+         o.gift_wrap,
+         o.shipping_fee,
          o.shipping_company,
          o.tracking_number,
          o.tracking_url,
@@ -216,10 +263,10 @@ router.get('/lookup', async (req, res, next) => {
        from orders o
        left join customers c on c.id = o.customer_id and c.organization_id = o.organization_id
        left join order_items oi on oi.order_id = o.id
-       where o.organization_id = $1 and o.order_code = $2
+       where ${filters.join(' and ')}
        group by o.id, c.id
        limit 1`,
-      [organization.id, orderCode]
+      params
     );
 
     if (!result.rows[0]) return res.status(404).json({ error: 'Siparis bulunamadi' });
@@ -237,28 +284,30 @@ router.post('/', createOrderLimiter, async (req, res, next) => {
 
     await client.query('begin');
     const organization = await resolveOrganization(req, client, { allowPublic: true });
+    await assertPlanCapacity(client, organization.id, 'orders_month');
     const items = await priceCartItems(client, req.body.items, { organizationId: organization.id });
-    const total = cartTotal(items);
+    const subtotal = cartTotal(items);
+    const checkoutOptions = normalizeCheckoutOptions(req.body, organization.store_settings || {}, subtotal);
+    const total = subtotal + checkoutOptions.shippingFee;
 
-    const customerResult = await client.query(
-      `insert into customers (organization_id, name, email, phone, address)
-       values ($1, $2, $3, $4, $5)
-       returning id`,
-      [
-        organization.id,
-        customer.name,
-        customer.email,
-        customer.phone,
-        customer.address,
-      ]
-    );
+    const customerResult = await upsertCustomer(client, organization.id, customer);
 
     const orderCode = await nextOrderCode(client);
     const orderResult = await client.query(
-      `insert into orders (organization_id, order_code, customer_id, total, status)
-       values ($1, $2, $3, $4, 'new')
+      `insert into orders
+       (organization_id, order_code, customer_id, total, status, payment_method, note, gift_wrap, shipping_fee)
+       values ($1, $2, $3, $4, 'new', $5, $6, $7, $8)
        returning *`,
-      [organization.id, orderCode, customerResult.rows[0].id, total]
+      [
+        organization.id,
+        orderCode,
+        customerResult.id,
+        total,
+        checkoutOptions.paymentMethod,
+        checkoutOptions.note,
+        checkoutOptions.giftWrap,
+        checkoutOptions.shippingFee,
+      ]
     );
 
     await insertOrderItems(client, orderResult.rows[0].id, items);
@@ -272,6 +321,46 @@ router.post('/', createOrderLimiter, async (req, res, next) => {
     next(err);
   } finally {
     client.release();
+  }
+});
+
+router.get('/:id', requireAuth, requireRole(['super_admin', 'owner', 'admin', 'member', 'viewer']), async (req, res, next) => {
+  try {
+    const organization = await resolveOrganization(req);
+    const result = await db.query(
+      `select
+         o.*,
+         c.name as customer_name,
+         c.email,
+         c.phone,
+         c.address,
+         coalesce(
+           json_agg(
+             json_build_object(
+               'id', oi.id,
+               'product_id', oi.product_id,
+               'name', oi.product_name,
+               'quantity', oi.quantity,
+               'unit_price', oi.unit_price,
+               'line_total', oi.quantity * oi.unit_price
+             )
+             order by oi.id
+           ) filter (where oi.id is not null),
+           '[]'::json
+         ) as items
+       from orders o
+       left join customers c on c.id = o.customer_id and c.organization_id = o.organization_id
+       left join order_items oi on oi.order_id = o.id
+       where o.id = $1 and o.organization_id = $2
+       group by o.id, c.id
+       limit 1`,
+      [req.params.id, organization.id]
+    );
+
+    if (!result.rows[0]) return res.status(404).json({ error: 'Siparis bulunamadi' });
+    res.json(orderDetailView(result.rows[0]));
+  } catch (err) {
+    next(err);
   }
 });
 
@@ -344,6 +433,8 @@ router.put('/:id/status', requireAuth, requireRole(['super_admin', 'owner', 'adm
       newValue: { status },
     });
     await client.query('commit');
+    const customer = await fetchOrderCustomer(db, result.rows[0].id, organization.id);
+    await notifyOrderUpdate(result.rows[0], customer);
     res.json(result.rows[0]);
   } catch (err) {
     await client.query('rollback');
@@ -413,6 +504,8 @@ router.put('/:id/shipping', requireAuth, requireRole(['super_admin', 'owner', 'a
       },
     });
     await client.query('commit');
+    const customer = await fetchOrderCustomer(db, result.rows[0].id, organization.id);
+    await notifyOrderUpdate(result.rows[0], customer);
     res.json(result.rows[0]);
   } catch (err) {
     await client.query('rollback');

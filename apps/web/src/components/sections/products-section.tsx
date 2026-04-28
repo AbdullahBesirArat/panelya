@@ -7,6 +7,7 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tansta
 import { MetricGrid } from "@/components/page-kit";
 import {
   API_BASE,
+  bulkUpdateProducts,
   createCategory,
   createProduct,
   deleteCategory,
@@ -131,6 +132,9 @@ export function ProductsSection({
   const [categoryForm, setCategoryForm] = useState(createEmptyCategoryForm);
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
   const [productForm, setProductForm] = useState(createEmptyProductForm);
+  const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
+  const [bulkStatus, setBulkStatus] = useState<ProductStatus>("active");
+  const [bulkCategoryId, setBulkCategoryId] = useState("");
   const debouncedSearch = useDebouncedValue(search);
 
   const categoriesQuery = useQuery({
@@ -235,6 +239,22 @@ export function ProductsSection({
     },
   });
 
+  const bulkProductsMutation = useMutation({
+    mutationFn: bulkUpdateProducts,
+    onSuccess: async (response) => {
+      setSelectedProductIds([]);
+      pushToast({
+        title: "Toplu işlem tamamlandı",
+        description: `${response.affectedCount} ürün güncellendi.`,
+        tone: "success",
+      });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["products", organizationSlug] }),
+        queryClient.invalidateQueries({ queryKey: ["summary", organizationSlug] }),
+      ]);
+    },
+  });
+
   const deleteCategoryMutation = useMutation({
     mutationFn: deleteCategory,
     onSuccess: async () => {
@@ -316,6 +336,33 @@ export function ProductsSection({
   function resetProductForm() {
     setEditingProductId(null);
     setProductForm(createEmptyProductForm());
+  }
+
+  function toggleProductSelection(id: string) {
+    setSelectedProductIds((current) => (
+      current.includes(id)
+        ? current.filter((item) => item !== id)
+        : [...current, id]
+    ));
+  }
+
+  function toggleVisibleProductSelection() {
+    const visibleIds = products.map((product) => product.id);
+    const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedProductIds.includes(id));
+    setSelectedProductIds((current) => {
+      if (allVisibleSelected) return current.filter((id) => !visibleIds.includes(id));
+      return Array.from(new Set([...current, ...visibleIds]));
+    });
+  }
+
+  function runBulkAction(action: "status" | "category" | "delete") {
+    if (!selectedProductIds.length) return;
+    bulkProductsMutation.mutate({
+      ids: selectedProductIds,
+      action,
+      status: action === "status" ? bulkStatus : undefined,
+      categoryId: action === "category" ? bulkCategoryId : undefined,
+    });
   }
 
   function startEditingProduct(product: ApiProduct) {
@@ -447,12 +494,79 @@ export function ProductsSection({
             </div>
           )}
         >
+          {canManageCatalog && products.length > 0 ? (
+            <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-line bg-zinc-50 px-3 py-3">
+              <span className="text-xs font-semibold text-zinc-600">{selectedProductIds.length} ürün seçili</span>
+              <button
+                className="focus-ring inline-flex h-9 items-center rounded-lg border border-line bg-white px-3 text-xs font-semibold text-ink"
+                onClick={toggleVisibleProductSelection}
+                type="button"
+              >
+                {products.every((product) => selectedProductIds.includes(product.id)) ? "Görünenleri bırak" : "Görünenleri seç"}
+              </button>
+              <select
+                className="focus-ring h-9 rounded-lg border border-line bg-white px-2 text-xs"
+                onChange={(event) => setBulkStatus(event.target.value as ProductStatus)}
+                value={bulkStatus}
+              >
+                {productStatusOptions.map((option) => (
+                  <option key={option} value={option}>{productStatusLabels[option]}</option>
+                ))}
+              </select>
+              <button
+                className="focus-ring inline-flex h-9 items-center rounded-lg border border-line bg-white px-3 text-xs font-semibold text-ink disabled:opacity-50"
+                disabled={!selectedProductIds.length || bulkProductsMutation.isPending}
+                onClick={() => runBulkAction("status")}
+                type="button"
+              >
+                Durumu uygula
+              </button>
+              <select
+                className="focus-ring h-9 rounded-lg border border-line bg-white px-2 text-xs"
+                onChange={(event) => setBulkCategoryId(event.target.value)}
+                value={bulkCategoryId}
+              >
+                <option value="">Kategorisiz yap</option>
+                {categories.map((category) => (
+                  <option key={category.id} value={category.id}>{category.name}</option>
+                ))}
+              </select>
+              <button
+                className="focus-ring inline-flex h-9 items-center rounded-lg border border-line bg-white px-3 text-xs font-semibold text-ink disabled:opacity-50"
+                disabled={!selectedProductIds.length || bulkProductsMutation.isPending}
+                onClick={() => runBulkAction("category")}
+                type="button"
+              >
+                Kategoriye taşı
+              </button>
+              {canDeleteCatalog ? (
+                <button
+                  className="focus-ring inline-flex h-9 items-center rounded-lg border border-coral/40 bg-white px-3 text-xs font-semibold text-coral disabled:opacity-50"
+                  disabled={!selectedProductIds.length || bulkProductsMutation.isPending}
+                  onClick={() => runBulkAction("delete")}
+                  type="button"
+                >
+                  Seçili ürünleri sil
+                </button>
+              ) : null}
+              {bulkProductsMutation.isError ? <InlineError message={bulkProductsMutation.error.message} /> : null}
+            </div>
+          ) : null}
           <DataGrid
-            columns={["Ürün", "Kategori", "Vitrin", "Fiyat", "Stok", "Aksiyon"]}
+            columns={["Seç", "Ürün", "Kategori", "Vitrin", "Fiyat", "Stok", "Aksiyon"]}
             emptyMessage="Bu filtrelerle ürün bulunamadı."
             rows={products}
             renderRow={(product) => (
               <tr key={product.id}>
+                <DataCell>
+                  <input
+                    checked={selectedProductIds.includes(product.id)}
+                    className="h-4 w-4 rounded border-line"
+                    disabled={!canManageCatalog || bulkProductsMutation.isPending}
+                    onChange={() => toggleProductSelection(product.id)}
+                    type="checkbox"
+                  />
+                </DataCell>
                 <DataCell>
                   <div className="space-y-1">
                     <p className="font-semibold text-ink">{product.name}</p>

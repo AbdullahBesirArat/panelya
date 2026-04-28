@@ -35,6 +35,10 @@ const SettingsSection = dynamic(
   () => import("@/components/sections/settings-section").then((mod) => mod.SettingsSection),
   { loading }
 );
+const TeamSection = dynamic(
+  () => import("@/components/sections/team-section").then((mod) => mod.TeamSection),
+  { loading }
+);
 
 export function OperationsContent({ sectionKey }: { sectionKey: string }) {
   const organizationSlug = useSessionStore((state) => state.organizationSlug);
@@ -58,6 +62,8 @@ export function OperationsContent({ sectionKey }: { sectionKey: string }) {
       return <ContentSection currentRole={currentRole} organizationSlug={activeOrganizationSlug} />;
     case "analytics":
       return <AnalyticsSection organizationSlug={activeOrganizationSlug} />;
+    case "team":
+      return <TeamSection currentRole={currentRole} organizationSlug={activeOrganizationSlug} />;
     case "settings":
       return <SettingsSection currentRole={currentRole} organizationSlug={activeOrganizationSlug} />;
     default:

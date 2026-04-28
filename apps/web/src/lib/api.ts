@@ -98,6 +98,24 @@ export type ApiOrder = {
   updated_at: string;
 };
 
+export type ApiOrderDetail = Omit<ApiOrder, "items" | "customer"> & {
+  customer: {
+    id: string | null;
+    name: string | null;
+    email: string | null;
+    phone: string | null;
+    address: string | null;
+  };
+  items: Array<{
+    id: string;
+    product_id: string | null;
+    name: string;
+    quantity: number;
+    unit_price: string;
+    line_total: string;
+  }>;
+};
+
 export type ApiSlide = {
   id: string;
   organization_id: string;
@@ -138,6 +156,21 @@ export type ApiCollection = {
   updated_at: string;
 };
 
+export type ApiBlogPost = {
+  id: string;
+  organization_id: string;
+  title: string;
+  slug: string;
+  excerpt: string;
+  content: string;
+  image_url: string;
+  active: boolean;
+  sort_order: number;
+  published_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type OrganizationSummary = {
   organization: {
     id: string;
@@ -146,6 +179,7 @@ export type OrganizationSummary = {
     plan: string;
     status: string;
     created_at: string;
+    store_settings?: StoreSettings;
   };
   metrics: {
     product_count: number;
@@ -216,6 +250,52 @@ export type OrganizationSummary = {
     cancel_at_period_end: boolean;
     updated_at: string;
   } | null;
+};
+
+export type ApiOrganizationSettings = {
+  id: string;
+  name: string;
+  slug: string;
+  plan: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+  public_access_token: string;
+  store_settings?: StoreSettings;
+};
+
+export type StoreSettings = {
+  contactEmail?: string;
+  supportPhone?: string;
+  shippingFee?: number;
+  freeShippingThreshold?: number;
+  paymentProvider?: "manual" | "iyzico";
+  paymentEnabled?: boolean;
+  orderEmailEnabled?: boolean;
+};
+
+export type ApiTeamMember = {
+  id: string;
+  role: "owner" | "admin" | "member" | "viewer";
+  status: string;
+  created_at: string;
+  updated_at: string;
+  user_id: string;
+  email: string;
+  name: string;
+  last_login_at: string | null;
+};
+
+export type ApiOrganizationInvite = {
+  id: string;
+  email: string;
+  role: "admin" | "member" | "viewer";
+  expires_at: string;
+  accepted_at: string | null;
+  created_at: string;
+  invited_by_name: string | null;
+  invited_by_email: string | null;
+  inviteToken?: string;
 };
 
 async function parseResponse<T>(response: Response): Promise<T> {
@@ -527,6 +607,28 @@ export async function updateProduct(id: string, payload: {
   });
 }
 
+export async function bulkUpdateProducts(payload: {
+  ids: string[];
+  action: "status" | "category" | "delete";
+  status?: ProductStatus;
+  categoryId?: string;
+}) {
+  return authenticatedRequest<{
+    ok: boolean;
+    action: string;
+    affectedCount: number;
+    products: Array<Pick<ApiProduct, "id" | "name" | "status" | "category_id">>;
+  }>("/products/bulk", {
+    method: "POST",
+    body: JSON.stringify({
+      ids: payload.ids,
+      action: payload.action,
+      status: payload.status,
+      category_id: payload.categoryId || null,
+    }),
+  });
+}
+
 export async function deleteProduct(id: string) {
   return authenticatedRequest<void>(`/products/${id}`, {
     method: "DELETE",
@@ -569,10 +671,31 @@ export async function fetchOrders(filters: {
   );
 }
 
+export async function fetchOrderDetail(id: string) {
+  return authenticatedRequest<ApiOrderDetail>(`/orders/${id}`);
+}
+
 export async function updateOrderStatus(id: string, status: OrderStatus) {
   return authenticatedRequest<ApiOrder>(`/orders/${id}/status`, {
     method: "PUT",
     body: JSON.stringify({ status }),
+  });
+}
+
+export async function updateOrderShipping(id: string, payload: {
+  shippingCompany?: string;
+  trackingNumber?: string;
+  trackingUrl?: string;
+  shippedAt?: string | null;
+}) {
+  return authenticatedRequest<ApiOrder>(`/orders/${id}/shipping`, {
+    method: "PUT",
+    body: JSON.stringify({
+      shipping_company: payload.shippingCompany || "",
+      tracking_number: payload.trackingNumber || "",
+      tracking_url: payload.trackingUrl || "",
+      shipped_at: payload.shippedAt || null,
+    }),
   });
 }
 
@@ -736,6 +859,107 @@ export async function deleteCollection(id: string) {
   });
 }
 
+export async function fetchBlogPosts() {
+  return authenticatedRequest<ApiBlogPost[]>("/blog/admin/all");
+}
+
+export async function createBlogPost(payload: {
+  title: string;
+  slug?: string;
+  excerpt?: string;
+  content?: string;
+  imageUrl?: string;
+  active: boolean;
+  sortOrder: number;
+  publishedAt?: string | null;
+}) {
+  return authenticatedRequest<ApiBlogPost>("/blog", {
+    method: "POST",
+    body: JSON.stringify({
+      title: payload.title,
+      slug: payload.slug || "",
+      excerpt: payload.excerpt || "",
+      content: payload.content || "",
+      image_url: payload.imageUrl || "",
+      active: payload.active,
+      sort_order: payload.sortOrder,
+      published_at: payload.publishedAt || null,
+    }),
+  });
+}
+
+export async function updateBlogPost(id: string, payload: {
+  title: string;
+  slug?: string;
+  excerpt?: string;
+  content?: string;
+  imageUrl?: string;
+  active: boolean;
+  sortOrder: number;
+  publishedAt?: string | null;
+}) {
+  return authenticatedRequest<ApiBlogPost>(`/blog/${id}`, {
+    method: "PUT",
+    body: JSON.stringify({
+      title: payload.title,
+      slug: payload.slug || "",
+      excerpt: payload.excerpt || "",
+      content: payload.content || "",
+      image_url: payload.imageUrl || "",
+      active: payload.active,
+      sort_order: payload.sortOrder,
+      published_at: payload.publishedAt || null,
+    }),
+  });
+}
+
+export async function deleteBlogPost(id: string) {
+  return authenticatedRequest<void>(`/blog/${id}`, {
+    method: "DELETE",
+  });
+}
+
 export async function fetchOrganizationSummary() {
   return authenticatedRequest<OrganizationSummary>("/organizations/current/summary");
+}
+
+export async function updateOrganizationSettings(payload: { name: string; slug: string; settings?: StoreSettings }) {
+  return authenticatedRequest<ApiOrganizationSettings>("/organizations/current", {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function regeneratePublicAccessToken() {
+  return authenticatedRequest<ApiOrganizationSettings>("/organizations/current/public-access-token/regenerate", {
+    method: "POST",
+  });
+}
+
+export async function fetchTeamMembers() {
+  return authenticatedRequest<ApiTeamMember[]>("/organizations/current/members");
+}
+
+export async function fetchOrganizationInvites() {
+  return authenticatedRequest<ApiOrganizationInvite[]>("/organizations/current/invites");
+}
+
+export async function createOrganizationInvite(payload: { email: string; role: "admin" | "member" | "viewer" }) {
+  return authenticatedRequest<ApiOrganizationInvite>("/organizations/current/invites", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateTeamMemberRole(id: string, role: "admin" | "member" | "viewer") {
+  return authenticatedRequest<ApiTeamMember>(`/organizations/current/members/${id}`, {
+    method: "PUT",
+    body: JSON.stringify({ role }),
+  });
+}
+
+export async function removeTeamMember(id: string) {
+  return authenticatedRequest<void>(`/organizations/current/members/${id}`, {
+    method: "DELETE",
+  });
 }

@@ -1,26 +1,34 @@
 # Panelya Operations
 
-Multi-tenant SaaS operations platform built by evolving an existing commerce backend into a hiring-ready product demo.
+Panelya Operations is a multi-tenant SaaS operations platform for catalog, order, customer, content and analytics workflows. This repository now contains only the Panelya product surface:
 
-## What It Does
+- `apps/web`: Next.js operations dashboard
+- `panelya-api`: Express API, auth, tenant filtering, payments and PostgreSQL data layer
+- PostgreSQL: organizations, memberships, products, orders, customers, content and activity logs
 
-Panelya gives each organization its own workspace, session context, operational dashboard, product catalog, order tracking, customer view and analytics surface. Maveran is the first demo store/workspace managed from the platform.
+## Live Services
 
-Recruiter flow:
+- Web dashboard: `https://panelya-web.vercel.app`
+- API health: `https://panelya-api-production.up.railway.app/api/health`
+- API docs: `https://panelya-api-production.up.railway.app/api/docs`
+- API spec: `https://panelya-api-production.up.railway.app/api/docs-json`
 
-1. Open the web app.
-2. Create a workspace or log in.
-3. Land on a live dashboard backed by organization-scoped data.
-4. Explore products, orders, customers, analytics and settings.
+## Demo Workspace
 
-## Live Demo
+After `npm run demo:seed`, use:
 
-- Local demo: `http://localhost:3001`
-- Public dashboard: add the Panelya Vercel URL after deployment
-- API docs: add the Panelya Railway URL after deployment, then open `/api/docs`
-- API spec: add the Panelya Railway URL after deployment, then open `/api/docs-json`
-- Demo email: `demo@panelya.dev`
-- Demo workspace: `maveran`
+- Organization slug: `panelya`
+- Email: `demo@panelya.dev`
+- Password: `PanelyaDemo!123`
+
+Override these with `DEMO_OWNER_EMAIL`, `DEMO_OWNER_PASSWORD`, `DEMO_OWNER_NAME`, `DEMO_ORGANIZATION_NAME` and `DEMO_ORGANIZATION_SLUG` for staging demos.
+
+Safety note:
+
+- `demo:seed` is enabled by default only outside production.
+- In production, set `ALLOW_DEMO_SEED=true` explicitly before running the seed script.
+- By default the script only writes to the `panelya` demo workspace.
+- If you intentionally need a different demo slug, also set `FORCE_DEMO_SEED=true`.
 
 ## Stack
 
@@ -28,41 +36,18 @@ Recruiter flow:
 - Backend: Node.js, Express, PostgreSQL
 - Auth: JWT access token + refresh token rotation
 - SaaS layer: organizations, memberships, subscriptions, activity logs
-- Payments: mock flow for local smoke testing, iyzico integration path for sandbox/production
-- DevOps: Docker Compose, GitHub Actions, production check scripts
-
-## Current Product Surface
-
-- Workspace registration and login
-- Organization switching
-- Tenant-aware dashboard summary
-- Product and category management, including create, update and delete flows
-- Order listing and status updates
-- Customer list and spend view
-- Content management for workspace storefront slides and campaigns
-- Analytics summary with order status chart
-- Settings summary for plan, subscription and team footprint
-- Toast feedback, retry actions, empty states and mobile-friendly navigation polish
-- Swagger UI and JSON spec under the API deploy
-
-## Architecture
-
-```text
-apps/web        -> Panelya Next.js SaaS dashboard
-panelya-api     -> Panelya Express API + auth + payment + tenant filtering
-maveran-storefront -> Maveran public e-commerce storefront
-PostgreSQL      -> products, orders, customers, organizations, memberships, sessions
-```
+- Payments: manual/mock for local smoke tests, iyzico integration path for sandbox and production
+- DevOps: Docker Compose, Vercel, Railway, GitHub Actions, production check scripts
 
 ## Local Run
 
-### 1. Install
+Install dependencies:
 
 ```bash
 npm install
 ```
 
-### 2. Prepare database
+Prepare the database:
 
 ```bash
 npm run db:setup
@@ -70,30 +55,21 @@ npm run db:migrate
 npm run demo:seed
 ```
 
-### 3. Start the API
+Start API and web in separate terminals:
 
 ```bash
 npm run dev:api
-```
-
-### 4. Start the web app
-
-```bash
 npm run dev:web
 ```
 
 Web runs on `http://localhost:3001`.
 API health runs on `http://localhost:3000/api/health`.
 
-## Demo Login
+On Windows you can also run:
 
-After `npm run demo:seed`, use this showcase workspace:
-
-- Organization slug: `maveran`
-- Email: `demo@panelya.dev`
-- Password: `PanelyaDemo!123`
-
-Override them with `DEMO_OWNER_EMAIL`, `DEMO_OWNER_PASSWORD`, `DEMO_OWNER_NAME`, `DEMO_ORGANIZATION_NAME` and `DEMO_ORGANIZATION_SLUG` when preparing a staging demo.
+```powershell
+.\start-dev.ps1
+```
 
 ## Useful Commands
 
@@ -103,57 +79,62 @@ npm run lint:web
 npm run typecheck:web
 npm run build:web
 npm run demo:seed
-npm run db:seed-demo
-npm run deploy:api:staging
-npm run deploy:api:production
+npm run suvera:seed
+npm run db:migrate
 npm run smoke:auth
 npm run smoke:payment
 npm run check:production
 npm run secrets:generate
 ```
 
-## Security And Production Readiness
+## Product Surface
+
+- Workspace registration and login
+- Organization switching
+- Tenant-aware dashboard summary
+- Product and category management
+- Order listing, shipping fields and status updates
+- Customer list and spend view
+- Content management for slides and campaigns
+- Analytics summary with order status chart
+- Settings summary for plan, subscription and team footprint
+- Swagger UI and JSON spec under the API deploy
+
+## Production Notes
 
 - `PAYMENT_PROVIDER=mock` is blocked in production.
+- Real production should use `PAYMENT_PROVIDER=iyzico` after sandbox sign-off.
 - Callback secret validation is available for protected payment flows.
-- Production env validation checks JWT strength, CORS, public URLs, payment configuration and admin bootstrap.
-- Admin bootstrap is available through `npm --prefix panelya-api run admin:create`.
-- Demo seed is idempotent for local or staging showcase use; change demo credentials before sharing a public staging link.
-- GitHub Actions CI now runs API syntax, web lint, web typecheck and web build from the root workspace lockfile.
-- Public demo deploy uses `NODE_ENV=staging` with the mock provider; real production must use `PAYMENT_PROVIDER=iyzico`.
+- Production env validation checks JWT strength, CORS, public URLs, payment config and admin bootstrap.
+- Admin bootstrap is available with `npm --prefix panelya-api run admin:create`.
+- GitHub Actions CI runs API syntax, web lint, web typecheck and web build from the root workspace lockfile.
 
-## Deployment Direction
+## Deployment
 
-- Frontend: Vercel
-- Backend: Railway
-- Database: Neon
-
-Railway demo start command:
-
-```bash
-npm run deploy:staging
-```
-
-For real production use `npm run deploy:production` and set `PAYMENT_PROVIDER=iyzico`.
+- Frontend: Vercel project `panelya-web`
+- Backend: Railway service `panelya-api`
+- Database: Railway Postgres
 
 Vercel web env:
 
 ```text
-NEXT_PUBLIC_API_BASE_URL=<RAILWAY_URL>/api
+NEXT_PUBLIC_API_BASE_URL=https://panelya-api-production.up.railway.app/api
 ```
 
-Detailed infra notes live in:
+Railway API env should include:
 
-- `deploy/DEPLOY-CHECKLIST.md`
-- `docs/DEPLOY-PROJECTS.md`
-- `docs/PROJECT-SPLIT.md`
-- `docs/VERCEL-RAILWAY-NEON-DEPLOY.md`
-- `docs/SHOWCASE-VERIFICATION.md`
-- `PRODUCTION-GECIS.md`
-- `PANELYA-OPERATIONS.md`
+```text
+NODE_ENV=production
+DATABASE_URL=${{Postgres.DATABASE_URL}}
+CORS_ORIGIN=https://panelya-web.vercel.app,https://panelya.com.tr,https://www.panelya.com.tr,https://suvera.com.tr,https://www.suvera.com.tr
+PUBLIC_API_URL=https://panelya-api-production.up.railway.app
+PUBLIC_SITE_URL=https://suvera.com.tr
+PAYMENT_PROVIDER=iyzico
+PAYMENT_SUCCESS_URL=https://suvera.com.tr/tesekkur.html
+PAYMENT_FAILURE_URL=https://suvera.com.tr/tesekkur.html?payment=failed
+PAYMENT_CALLBACK_SECRET_REQUIRED=true
+```
 
-## Roadmap
+For the Suvera storefront, use the separate source directory at `C:\Users\Arat\Desktop\proje\suvera` as the static Vercel project root. Run `npm run suvera:seed` after migrations to create the `suvera` workspace, then set the storefront proxy env `SUVERA_PUBLIC_ACCESS_TOKEN` to that workspace public access token.
 
-- Team invite and role management
-- Email flows and Redis cache
-- Production iyzico E2E sign-off
+Use `docs/SHOWCASE-VERIFICATION.md` for the final quality gate.

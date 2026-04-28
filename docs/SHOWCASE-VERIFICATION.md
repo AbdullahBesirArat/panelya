@@ -61,8 +61,8 @@ IYZICO_API_KEY=<sandbox-api-key>
 IYZICO_SECRET_KEY=<sandbox-secret-key>
 PUBLIC_API_URL=https://staging-api.example.com
 PAYMENT_CALLBACK_URL=https://staging-api.example.com/api/payment/callback
-PAYMENT_SUCCESS_URL=https://staging-web.example.com/index.html?payment=success
-PAYMENT_FAILURE_URL=https://staging-web.example.com/siparis.html?payment=failed
+PAYMENT_SUCCESS_URL=https://staging-web.example.com/payment/success
+PAYMENT_FAILURE_URL=https://staging-web.example.com/payment/failed
 PAYMENT_CALLBACK_SECRET_REQUIRED=true
 ```
 

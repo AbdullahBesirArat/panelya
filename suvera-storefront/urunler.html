@@ -1,0 +1,653 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta name="description" content="Suvera urun listesi, elbise, dis giyim ve secili tesettur koleksiyonlarini bir arada sunar." />
+  <link rel="canonical" href="https://suvera.com.tr/urunler.html" />
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="Urunler | Suvera" />
+  <meta property="og:description" content="Suvera urun listesi, elbise, dis giyim ve secili tesettur koleksiyonlarini bir arada sunar." />
+  <meta property="og:url" content="https://suvera.com.tr/urunler.html" />
+  <meta property="og:image" content="https://suvera.com.tr/og-cover.svg" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Urunler | Suvera" />
+  <meta name="twitter:description" content="Suvera urun listesi, elbise, dis giyim ve secili tesettur koleksiyonlarini bir arada sunar." />
+  <meta name="twitter:image" content="https://suvera.com.tr/og-cover.svg" />
+  <meta name="theme-color" content="#2a4827" />
+  <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+  <link rel="manifest" href="site.webmanifest" />
+  <title>Elbise – Suvera</title>
+  <link rel="stylesheet" href="shared.css"/>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400&family=Jost:wght@300;400;500&display=swap" rel="stylesheet"/>
+  <style>
+    :root {
+      --bg:#faf8f5; --white:#fff; --black:#111; --mid:#444;
+      --light:#e8e2d9; --lighter:#f2ede6;
+      --accent:#8b6f5e; --accent2:#b8956a;
+      --serif:'Cormorant Garamond',serif; --sans:'Jost',sans-serif;
+    }
+    *,*::before,*::after{margin:0;padding:0;box-sizing:border-box;}
+    body{font-family:var(--sans);background:var(--bg);color:var(--black);overflow-x:hidden;padding-top:102px;}
+
+    /* NAV — same as index */
+    .announce{background:#2a4827;color:rgba(255,255,255,.82);text-align:center;padding:10px 20px;font-size:11.5px;letter-spacing:2px;text-transform:uppercase;position:fixed;top:0;left:0;right:0;z-index:301;height:38px;display:flex;align-items:center;justify-content:center;}
+    nav{background:rgba(255,255,255,.96);border-bottom:1px solid var(--light);position:fixed;top:38px;left:0;right:0;z-index:300;display:flex;align-items:center;justify-content:space-between;padding:0 48px;height:64px;box-shadow:0 2px 20px rgba(0,0,0,.04);}
+    .nav-left{display:flex;align-items:center;gap:36px;}
+    .nav-logo{font-family:var(--serif);font-size:28px;font-weight:600;letter-spacing:6px;color:var(--black);text-decoration:none;}
+    .nav-menu{display:flex;gap:28px;list-style:none;}
+    .nav-menu a{font-size:12.5px;letter-spacing:1.5px;text-transform:uppercase;font-weight:400;color:var(--black);text-decoration:none;position:relative;padding-bottom:3px;transition:color .2s;}
+    .nav-menu a::after{content:'';position:absolute;bottom:0;left:0;width:0;height:1px;background:var(--accent);transition:width .3s ease;}
+    .nav-menu a:hover{color:var(--accent);}
+    .nav-menu a:hover::after{width:100%;}
+    .nav-menu a.outlet{color:#b33a3a;}
+    .nav-right{display:flex;align-items:center;gap:22px;}
+    .nav-search{display:flex;align-items:center;gap:8px;}
+    .nav-search input{border:none;border-bottom:1px solid var(--light);background:none;font-family:var(--sans);font-size:12px;letter-spacing:1px;padding:4px 0;width:120px;outline:none;}
+    .nav-icon-btn{background:none;border:none;cursor:pointer;font-size:12.5px;letter-spacing:1.5px;color:var(--black);text-decoration:none;position:relative;transition:color .2s;}
+    .nav-icon-btn:hover{color:var(--accent);}
+    .cart-dot{position:absolute;top:-5px;right:-7px;background:var(--accent);color:#fff;border-radius:50%;width:15px;height:15px;font-size:8px;font-family:var(--sans);display:flex;align-items:center;justify-content:center;}
+
+    /* BREADCRUMB */
+    .breadcrumb{padding:18px 48px 12px;font-size:12px;color:#8d877f;letter-spacing:.5px;}
+    .collection-editorial{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(280px,.7fr);gap:24px;padding:8px 40px 28px;}
+    .editorial-panel,.editorial-feature{background:var(--white);border:1px solid var(--light);}
+    .editorial-panel{padding:34px 38px;}
+    .editorial-kicker{font-size:10.5px;letter-spacing:2.8px;text-transform:uppercase;color:#6c8a5f;margin-bottom:18px;}
+    .editorial-grid{display:grid;grid-template-columns:1fr 1fr 180px;gap:28px;align-items:start;}
+    .editorial-col h3{font-size:11px;letter-spacing:2.5px;text-transform:uppercase;color:#4d7443;margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid var(--light);}
+    .editorial-link{display:flex;justify-content:space-between;gap:10px;padding:10px 0;color:var(--mid);text-decoration:none;font-size:14px;transition:color .2s,transform .2s;}
+    .editorial-link:hover{color:var(--black);transform:translateX(2px);}
+    .editorial-link span{color:#aaa;font-size:12px;}
+    .editorial-feature{padding:20px;display:flex;flex-direction:column;justify-content:space-between;background:linear-gradient(180deg,#f8f4ed 0%,#f2ede6 100%);}
+    .editorial-visual{min-height:180px;border-radius:6px;background:linear-gradient(140deg,#dfd6c8,#cfc3b4);display:flex;align-items:center;justify-content:center;font-size:66px;margin-bottom:18px;}
+    .editorial-feature small{font-size:10px;letter-spacing:2px;text-transform:uppercase;color:#6c8a5f;}
+    .editorial-feature h2{font-family:var(--serif);font-size:36px;font-weight:300;line-height:1.02;margin:10px 0 14px;}
+    .editorial-feature p{font-size:13px;line-height:1.8;color:var(--mid);}
+    .editorial-cta{margin-top:16px;display:inline-flex;align-items:center;gap:8px;font-size:11px;letter-spacing:2px;text-transform:uppercase;color:#4d7443;text-decoration:none;}
+    .breadcrumb a{color:#aaa;text-decoration:none;transition:color .2s;}
+    .breadcrumb a:hover{color:var(--accent);}
+    .breadcrumb span{margin:0 6px;opacity:.5;}
+
+    /* PAGE LAYOUT */
+    .page-wrap{display:grid;grid-template-columns:230px 1fr;gap:0;min-height:80vh;}
+
+    /* SIDEBAR FILTER */
+    .sidebar{background:var(--white);border-right:1px solid var(--light);padding:32px 28px;position:sticky;top:102px;height:calc(100vh - 102px);overflow-y:auto;}
+    .sidebar::-webkit-scrollbar{width:3px;}
+    .sidebar::-webkit-scrollbar-thumb{background:var(--light);}
+    .filter-section{margin-bottom:32px;}
+    .filter-section h4{font-size:10.5px;letter-spacing:2.5px;text-transform:uppercase;color:var(--black);margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;}
+    .filter-section h4::after{content:'−';font-size:14px;color:#aaa;}
+    .filter-section h4.closed::after{content:'+';}
+    .filter-opts{display:flex;flex-direction:column;gap:9px;}
+    .filter-check{display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px;color:var(--mid);}
+    .filter-check input{accent-color:var(--accent);width:14px;height:14px;cursor:pointer;}
+    .filter-check:hover{color:var(--black);}
+    .filter-count{margin-left:auto;font-size:11px;color:#bbb;}
+    .color-filter-opts{display:flex;flex-wrap:wrap;gap:8px;}
+    .cf-dot{width:24px;height:24px;border-radius:50%;cursor:pointer;border:2px solid transparent;transition:border-color .2s;}
+    .cf-dot:hover,.cf-dot.act{border-color:var(--black);}
+    .price-range{display:flex;flex-direction:column;gap:12px;}
+    .price-range input[type=range]{width:100%;accent-color:var(--accent);}
+    .price-vals{display:flex;justify-content:space-between;font-size:12px;color:#888;}
+    .size-filter{display:flex;flex-wrap:wrap;gap:6px;}
+    .size-btn{min-width:40px;padding:7px 10px;border:1px solid var(--light);font-family:var(--sans);font-size:11.5px;letter-spacing:.5px;cursor:pointer;background:#fff;transition:all .2s;text-align:center;}
+    .size-btn:hover,.size-btn.act{background:var(--black);color:#fff;border-color:var(--black);}
+    .filter-reset{width:100%;background:none;border:1px solid var(--light);padding:10px;font-family:var(--sans);font-size:11px;letter-spacing:1.5px;text-transform:uppercase;cursor:pointer;color:var(--mid);transition:all .2s;margin-top:8px;}
+    .filter-reset:hover{border-color:var(--accent);color:var(--accent);}
+
+    /* CONTENT AREA */
+    .content{padding:8px 40px 28px;}
+    .content-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:28px;flex-wrap:wrap;gap:14px;}
+    .content-title{font-family:var(--serif);font-size:36px;font-weight:300;}
+    .content-meta{display:flex;align-items:center;gap:20px;}
+    .result-count{font-size:12.5px;color:#888;letter-spacing:.5px;}
+    .view-toggle{display:flex;gap:6px;}
+    .vt-btn{width:32px;height:32px;border:1px solid var(--light);background:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:13px;transition:all .2s;}
+    .vt-btn.act{background:var(--black);color:#fff;border-color:var(--black);}
+    .sort-select{border:1px solid var(--light);background:#fff;font-family:var(--sans);font-size:12px;padding:8px 14px;outline:none;color:var(--black);cursor:pointer;}
+
+    /* FEATURED STRIP */
+    .featured-strip{display:grid;grid-template-columns:repeat(5,1fr);gap:2px;margin-bottom:32px;overflow-x:auto;}
+    .feat-strip-item{position:relative;cursor:pointer;overflow:hidden;}
+    .feat-strip-img{aspect-ratio:3/4;display:flex;align-items:center;justify-content:center;font-size:50px;transition:transform .5s;}
+    .feat-strip-item:hover .feat-strip-img{transform:scale(1.05);}
+    .feat-strip-item:nth-child(1) .feat-strip-img{background:linear-gradient(150deg,#6b5044 0%,#4a3530 100%);}
+    .feat-strip-item:nth-child(2) .feat-strip-img{background:linear-gradient(150deg,#8b9b6c 0%,#607050 100%);}
+    .feat-strip-item:nth-child(3) .feat-strip-img{background:linear-gradient(150deg,#7c7c7c 0%,#505050 100%);}
+    .feat-strip-item:nth-child(4) .feat-strip-img{background:linear-gradient(150deg,#c4ac78 0%,#a08850 100%);}
+    .feat-strip-item:nth-child(5) .feat-strip-img{background:linear-gradient(150deg,#6c8070 0%,#485850 100%);}
+    .feat-strip-info{padding:10px 6px;}
+    .feat-strip-info p{font-size:12.5px;font-family:var(--serif);margin-bottom:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    .feat-strip-info span{font-size:12px;color:var(--mid);}
+    .feat-strip-info del{font-size:11px;color:#aaa;margin-left:6px;}
+    .featured-label{font-size:10.5px;letter-spacing:2px;text-transform:uppercase;color:#888;margin-bottom:14px;}
+
+    /* PRODUCTS GRID */
+    .prods-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:2px;}
+    .prods-grid.three-col{grid-template-columns:repeat(3,1fr);}
+    .prod-card{position:relative;cursor:pointer;background:var(--white);transition:transform .3s;overflow:hidden;}
+    .prod-card:hover{transform:translateY(-4px);z-index:2;box-shadow:0 12px 40px rgba(0,0,0,.1);}
+    .prod-img{aspect-ratio:3/4;display:flex;align-items:center;justify-content:center;font-size:64px;position:relative;overflow:hidden;}
+    .prod-img-bg{width:100%;height:100%;position:absolute;inset:0;transition:transform .6s ease;}
+    .prod-card:hover .prod-img-bg{transform:scale(1.05);}
+    .prod-emoji{position:relative;z-index:1;}
+    .prod-badges{position:absolute;top:12px;left:12px;display:flex;flex-direction:column;gap:5px;z-index:2;}
+    .badge{font-size:9.5px;letter-spacing:1.5px;text-transform:uppercase;padding:4px 10px;font-family:var(--sans);}
+    .badge-sale{background:var(--accent);color:#fff;}
+    .badge-new{background:var(--black);color:#fff;}
+    .badge-soon{background:#fff;color:var(--black);border:1px solid var(--black);}
+    .prod-fav{position:absolute;top:12px;right:12px;z-index:2;width:32px;height:32px;background:rgba(255,255,255,.85);border:none;cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity .2s;}
+    .prod-card:hover .prod-fav{opacity:1;}
+    .prod-hover-actions{position:absolute;bottom:0;left:0;right:0;background:rgba(255,255,255,.95);padding:12px 16px;transform:translateY(100%);transition:transform .3s ease;display:flex;align-items:center;gap:10px;z-index:2;}
+    .prod-card:hover .prod-hover-actions{transform:translateY(0);}
+    .quick-add{flex:1;background:var(--black);color:#fff;border:none;font-family:var(--sans);font-size:10.5px;letter-spacing:2px;text-transform:uppercase;padding:10px;cursor:pointer;transition:background .2s;}
+    .quick-add:hover{background:var(--accent);}
+    .prod-info{padding:14px 14px 20px;}
+    .prod-info h4{font-family:var(--serif);font-size:15.5px;font-weight:400;margin-bottom:5px;line-height:1.3;}
+    .prod-colors{display:flex;gap:5px;margin-bottom:10px;}
+    .color-dot{width:14px;height:14px;border-radius:50%;border:1.5px solid transparent;cursor:pointer;transition:border-color .2s;}
+    .color-dot:hover,.color-dot.active{border-color:var(--black);}
+    .prod-price{display:flex;gap:10px;align-items:baseline;}
+    .p-new{font-size:14px;font-weight:500;}
+    .p-old{font-size:12px;color:#aaa;text-decoration:line-through;}
+    .p-pct{font-size:11px;color:var(--accent);font-weight:500;}
+
+    /* PAGINATION */
+    .pagination{display:flex;justify-content:center;align-items:center;gap:6px;margin:56px 0 20px;}
+    .page-btn{min-width:40px;height:40px;border:1px solid var(--light);background:#fff;font-family:var(--sans);font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .2s;}
+    .page-btn:hover,.page-btn.act{background:var(--black);color:#fff;border-color:var(--black);}
+
+    /* SEO TEXT */
+    .seo-text{padding:40px 40px 48px;max-width:700px;}
+    .seo-text h2{font-family:var(--serif);font-size:24px;font-weight:300;margin-bottom:14px;}
+    .seo-text p{font-size:13.5px;line-height:1.9;color:var(--mid);font-weight:300;}
+    .seo-text .read-more{font-size:12.5px;color:var(--accent);cursor:pointer;border-bottom:1px solid var(--accent);padding-bottom:1px;display:inline-block;margin-top:10px;}
+
+    /* FOOTER (minimal) */
+    footer{background:var(--black);padding:0 48px 28px;}
+    .footer-divider{border:none;border-top:1px solid rgba(255,255,255,.08);margin-bottom:48px;}
+    .footer-grid{display:grid;grid-template-columns:1.6fr 1fr 1fr 1fr 1fr;gap:48px;margin-bottom:48px;}
+    .footer-brand .nav-logo{color:#fff;display:block;margin-bottom:16px;}
+    .footer-brand p{font-size:12.5px;line-height:1.9;color:rgba(255,255,255,.4);font-weight:300;margin-bottom:24px;}
+    .socials{display:flex;gap:10px;}
+    .social-btn{font-size:11.5px;letter-spacing:1px;color:rgba(255,255,255,.55);text-decoration:none;transition:color .2s;}
+    .social-btn:hover{color:var(--accent2);}
+    .footer-col h5{font-size:10.5px;letter-spacing:2.5px;text-transform:uppercase;color:#fff;margin-bottom:20px;}
+    .footer-col ul{list-style:none;}
+    .footer-col ul li{margin-bottom:10px;}
+    .footer-col ul li a{font-size:13px;color:rgba(255,255,255,.45);text-decoration:none;transition:color .2s;font-weight:300;}
+    .footer-col ul li a:hover{color:var(--accent2);}
+    .footer-bottom{border-top:1px solid rgba(255,255,255,.07);padding-top:22px;display:flex;justify-content:space-between;font-size:11.5px;color:rgba(255,255,255,.3);}
+
+    @media(max-width:1024px){.collection-editorial{grid-template-columns:1fr;}.editorial-grid{grid-template-columns:1fr 1fr;}.page-wrap{grid-template-columns:1fr;}.sidebar{display:none;}.prods-grid{grid-template-columns:repeat(3,1fr);}.footer-grid{grid-template-columns:1fr 1fr;}}
+    @media(max-width:640px){body{padding-top:102px;}nav{padding:0 20px;}.breadcrumb{padding:14px 20px 10px;}.collection-editorial{padding:0 20px 20px;gap:16px;}.editorial-panel{padding:24px 20px;}.editorial-grid{grid-template-columns:1fr;gap:20px;}.editorial-feature h2{font-size:30px;}.content{padding:0 20px 24px;}.prods-grid{grid-template-columns:repeat(2,1fr);}.featured-strip{grid-template-columns:repeat(2,1fr);}footer{padding:0 20px 24px;}.footer-bottom{flex-direction:column;gap:12px;}}
+  </style>
+</head>
+<body>
+<div class="announce">✦ Yeni sezon geldi — tüm siparişlerde ücretsiz kargo 600 TL ve üzeri ✦</div>
+
+<nav id="mainNav">
+  <a class="nav-logo" href="index.html">Suvera</a>
+  <ul class="nav-menu-wrap">
+    <li><a href="urunler.html">Yeni <span class="nav-chevron">▾</span></a>
+      <div class="simple-drop"><a href="urunler.html">Yeni Gelenler</a><a href="urunler.html">Çok Satanlar</a><a href="urunler.html">Editörün Seçimleri</a></div>
+    </li>
+    <li><a href="urunler.html">Giyim <span class="nav-chevron">▾</span></a>
+      <div class="simple-drop"><a href="urunler.html">Elbise</a><a href="urunler.html">Bluz &amp; Gömlek</a><a href="urunler.html">Pantolon &amp; Etek</a><a href="urunler.html">Takım &amp; Kombin</a></div>
+    </li>
+    <li><a href="urunler.html">Dış Giyim <span class="nav-chevron">▾</span></a>
+      <div class="simple-drop"><a href="urunler.html">Kaban &amp; Mont</a><a href="urunler.html">Trençkot</a><a href="urunler.html">Ceket &amp; Blazer</a></div>
+    </li>
+    <li><a href="urunler.html">Abaya <span class="nav-chevron">▾</span></a>
+      <div class="simple-drop"><a href="urunler.html">Abaya</a><a href="urunler.html">Ferace</a><a href="urunler.html">Kuşaklı Modeller</a></div>
+    </li>
+    <li><a href="urunler.html">Eşarp &amp; Aksesuar</a></li>
+    <li><a href="urunler.html">Koleksiyonlar</a></li>
+    <li><a href="urunler.html" class="outlet">Outlet</a></li>
+  </ul>
+  <div class="nav-right">
+    <div class="nav-search-wrap">
+      <button class="nav-search-icon" aria-label="Ara">🔍</button>
+      <div class="nav-search-box" id="navSearchBox">
+        <input type="text" placeholder="Ürün ara..." onkeydown="if(event.key==='Enter')location.href='urunler.html'"/>
+      </div>
+    </div>
+    <a href="giris.html" class="nav-icon-btn">HESABIM</a>
+    <a href="sepet.html" class="nav-icon-btn" style="position:relative">SEPETİM <span class="cart-dot">0</span></a>
+    <button class="hamburger" aria-label="Menü" onclick="openMobileNav()"><span></span><span></span><span></span></button>
+  </div>
+</nav>
+
+
+<div class="breadcrumb">
+  <a href="index.html">Ana Sayfa</a><span>›</span>
+  <a href="urunler.html">Koleksiyon</a><span>›</span>
+  <a href="urunler.html" id="collectionBreadcrumbLink">Tüm Ürünler</a><span>›</span>
+  <span id="collectionBreadcrumbCurrent">Seçki</span>
+</div>
+
+<section class="collection-editorial">
+  <div class="editorial-panel">
+    <div class="editorial-kicker" id="collectionKicker">Suvera Seçkisi</div>
+    <div class="editorial-grid">
+      <div class="editorial-col">
+        <h3>Kategoriler</h3>
+        <div id="editorialCategoryLinks">
+          <a class="editorial-link" href="urunler.html">Seçki hazırlanıyor <span>Suvera</span></a>
+        </div>
+      </div>
+      <div class="editorial-col">
+        <h3>Koleksiyonlar</h3>
+        <div id="editorialCollectionLinks">
+          <a class="editorial-link" href="urunler.html">Koleksiyonlar hazırlanıyor <span>Suvera</span></a>
+        </div>
+      </div>
+      <div class="editorial-feature">
+        <div class="editorial-visual" id="editorialFeatureVisual">SU</div>
+        <div>
+          <small id="editorialFeatureTag">Öne Çıkan</small>
+          <h2 id="editorialFeatureTitle">Suvera<br/>Yeni<br/>Seçki</h2>
+          <p id="editorialFeatureDescription">Panelya panelinden yayına alınan ürünler burada öne çıkar.</p>
+          <a class="editorial-cta" href="urunler.html" id="editorialFeatureLink">Keşfet →</a>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="editorial-feature">
+    <div class="editorial-visual" id="collectionFeatureVisual">SU</div>
+    <div>
+      <small id="collectionFeatureTag">Yaz Koleksiyonu</small>
+      <h2 id="collectionFeatureTitle">Suvera<br/>seçkisine<br/>yakından bak</h2>
+      <p id="collectionFeatureDescription">Yayındaki ürünler Panelya panelinden gelir; kategori ve stok bilgileri canlı veriye göre güncellenir.</p>
+      <a class="editorial-cta" href="#prodsGrid">Ürünlere in →</a>
+    </div>
+  </div>
+</section>
+
+<div class="page-wrap">
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <div class="filter-section">
+      <h4>Renk</h4>
+      <div class="color-filter-opts" id="collectionColorFilters">
+        <div class="cf-dot" style="background:#111" title="Renk yükleniyor"></div>
+      </div>
+    </div>
+
+    <div class="filter-section">
+      <h4>Beden</h4>
+      <div class="size-filter" id="collectionSizeFilters">
+        <button class="size-btn">Standart</button>
+      </div>
+    </div>
+
+    <div class="filter-section">
+      <h4>Fiyat Aralığı</h4>
+      <div class="price-range">
+        <input type="range" min="0" max="5000" value="5000" id="priceRange" oninput="document.getElementById('priceVal').textContent=this.value+' TL'"/>
+        <div class="price-vals"><span>0 TL</span><span id="priceVal">5.000 TL</span></div>
+      </div>
+    </div>
+
+    <div class="filter-section">
+      <h4>Kategori</h4>
+      <div class="filter-opts" id="collectionCategoryFilters">
+        <label class="filter-check"><input type="radio" name="collectionCategory" value="" checked/> Tüm Ürünler</label>
+      </div>
+    </div>
+
+    <div class="filter-section">
+      <h4>Koleksiyon</h4>
+      <div class="filter-opts">
+        <label class="filter-check"><input type="checkbox" checked/> Yeni Gelenler</label>
+        <label class="filter-check"><input type="checkbox"/> Günlük Seçki</label>
+        <label class="filter-check"><input type="checkbox"/> Zamansız Parçalar</label>
+        <label class="filter-check"><input type="checkbox"/> Özel Seri</label>
+        <label class="filter-check"><input type="checkbox"/> Outlet</label>
+      </div>
+    </div>
+
+    <button class="filter-reset" id="collectionFilterReset" type="button">Filtreleri Temizle</button>
+  </aside>
+
+  <!-- CONTENT -->
+  <div class="content">
+    <div class="content-header">
+      <div>
+        <h1 class="content-title" id="collectionTitle">Seçki</h1>
+        <p class="result-count">Toplam <strong id="productResultCount">0</strong> ürün bulunmaktadır.</p>
+      </div>
+      <div class="content-meta">
+        <div class="view-toggle">
+          <button class="vt-btn" title="2 Sütun">▦</button>
+          <button class="vt-btn act" title="4 Sütun">⊞</button>
+          <button class="vt-btn" title="5 Sütun">⋮⋮⋮</button>
+        </div>
+        <select class="sort-select" id="collectionSort">
+          <option value="recommended">Sırala: Önerilen</option>
+          <option value="price_asc">Fiyat: Artan</option>
+          <option value="price_desc">Fiyat: Azalan</option>
+          <option value="newest">En Yeni</option>
+          <option value="name_asc">İsim: A-Z</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- FEATURED STRIP -->
+    <p class="featured-label">✦ Kategorinin Öne Çıkanları</p>
+    <div class="featured-strip" id="featuredProductsStrip">
+      <div class="empty-state">Öne çıkan ürünler yükleniyor.</div>
+    </div>
+
+    <!-- MAIN GRID -->
+    <div class="prods-grid stagger-children" id="prodsGrid">
+
+      <div class="prod-card" onclick="location.href='urun.html'">
+        <div class="prod-img">
+          <div class="prod-img-bg" style="background:linear-gradient(150deg,#ddd5c8,#c8bdb0)"></div>
+          <span class="prod-emoji">🧕</span>
+          <div class="prod-badges"><span class="badge badge-sale">İndirim</span></div>
+          <button class="prod-wish" onclick="event.stopPropagation();toggleFav(this)">🤍</button>
+          <div class="prod-hover-actions">
+            <button class="quick-add" onclick="event.stopPropagation()">Sepete Ekle</button>
+          </div>
+        </div>
+        <div class="prod-info">
+          <h4>Oversize Uzun Rahat Elbise Açık Kahve</h4>
+          <div class="prod-colors">
+            <div class="color-dot active" style="background:#6b5044"></div>
+            <div class="color-dot" style="background:#8b9b6c"></div>
+            <div class="color-dot" style="background:#7c7c7c"></div>
+          </div>
+          <div class="prod-price"><span class="p-new">749,90 TL</span><span class="p-old">999,90 TL</span></div>
+        </div>
+      </div>
+
+      <div class="prod-card" onclick="location.href='urun.html'">
+        <div class="prod-img">
+          <div class="prod-img-bg" style="background:linear-gradient(150deg,#8b9b6c,#607050)"></div>
+          <span class="prod-emoji">🧕</span>
+          <div class="prod-badges"><span class="badge badge-sale">İndirim</span></div>
+          <button class="prod-wish" onclick="event.stopPropagation();toggleFav(this)">🤍</button>
+          <div class="prod-hover-actions">
+            <button class="quick-add" onclick="event.stopPropagation()">Sepete Ekle</button>
+          </div>
+        </div>
+        <div class="prod-info">
+          <h4>Oversize Uzun Rahat Elbise Sarı Yeşil</h4>
+          <div class="prod-colors">
+            <div class="color-dot active" style="background:#8b9b6c"></div>
+            <div class="color-dot" style="background:#6b5044"></div>
+          </div>
+          <div class="prod-price"><span class="p-new">749,90 TL</span><span class="p-old">999,90 TL</span></div>
+        </div>
+      </div>
+
+      <div class="prod-card" onclick="location.href='urun.html'">
+        <div class="prod-img">
+          <div class="prod-img-bg" style="background:linear-gradient(150deg,#7c7c7c,#505050)"></div>
+          <span class="prod-emoji">🧕</span>
+          <div class="prod-badges"><span class="badge badge-sale">İndirim</span></div>
+          <button class="prod-wish" onclick="event.stopPropagation();toggleFav(this)">🤍</button>
+          <div class="prod-hover-actions">
+            <button class="quick-add" onclick="event.stopPropagation()">Sepete Ekle</button>
+          </div>
+        </div>
+        <div class="prod-info">
+          <h4>Oversize Uzun Rahat Elbise Antrasit</h4>
+          <div class="prod-colors">
+            <div class="color-dot active" style="background:#7c7c7c"></div>
+          </div>
+          <div class="prod-price"><span class="p-new">749,90 TL</span><span class="p-old">999,90 TL</span></div>
+        </div>
+      </div>
+
+      <div class="prod-card" onclick="location.href='urun.html'">
+        <div class="prod-img">
+          <div class="prod-img-bg" style="background:linear-gradient(150deg,#e8e4d8,#d8d0c4)"></div>
+          <span class="prod-emoji">🧕</span>
+          <div class="prod-badges"><span class="badge badge-sale">İndirim</span></div>
+          <button class="prod-wish" onclick="event.stopPropagation();toggleFav(this)">🤍</button>
+          <div class="prod-hover-actions">
+            <button class="quick-add" onclick="event.stopPropagation()">Sepete Ekle</button>
+          </div>
+        </div>
+        <div class="prod-info">
+          <h4>Geniş Etekli Uzun Elbise Çağla</h4>
+          <div class="prod-colors">
+            <div class="color-dot active" style="background:#e8e4d8"></div>
+            <div class="color-dot" style="background:#6c8070"></div>
+          </div>
+          <div class="prod-price"><span class="p-new">999,90 TL</span><span class="p-old">1.499,90 TL</span></div>
+        </div>
+      </div>
+
+      <div class="prod-card" onclick="location.href='urun.html'">
+        <div class="prod-img">
+          <div class="prod-img-bg" style="background:linear-gradient(150deg,#c8bdb0,#b8a898)"></div>
+          <span class="prod-emoji">🧕</span>
+          <div class="prod-badges"><span class="badge badge-sale">İndirim</span></div>
+          <button class="prod-wish" onclick="event.stopPropagation();toggleFav(this)">🤍</button>
+          <div class="prod-hover-actions">
+            <button class="quick-add" onclick="event.stopPropagation()">Sepete Ekle</button>
+          </div>
+        </div>
+        <div class="prod-info">
+          <h4>Oversize Uzun Rahat Elbise Vizon</h4>
+          <div class="prod-colors">
+            <div class="color-dot active" style="background:#c8bdb0"></div>
+          </div>
+          <div class="prod-price"><span class="p-new">749,90 TL</span><span class="p-old">999,90 TL</span></div>
+        </div>
+      </div>
+
+      <div class="prod-card" onclick="location.href='urun.html'">
+        <div class="prod-img">
+          <div class="prod-img-bg" style="background:linear-gradient(150deg,#dde4d8,#c4ccc0)"></div>
+          <span class="prod-emoji">🧕</span>
+          <div class="prod-badges"><span class="badge badge-new">Yeni</span></div>
+          <button class="prod-wish" onclick="event.stopPropagation();toggleFav(this)">🤍</button>
+          <div class="prod-hover-actions">
+            <button class="quick-add" onclick="event.stopPropagation()">Sepete Ekle</button>
+          </div>
+        </div>
+        <div class="prod-info">
+          <h4>Bağlamalı Kemer Detaylı Elbise</h4>
+          <div class="prod-colors">
+            <div class="color-dot active" style="background:#8b9b6c"></div>
+            <div class="color-dot" style="background:#111"></div>
+          </div>
+          <div class="prod-price"><span class="p-new">1.099,90 TL</span></div>
+        </div>
+      </div>
+
+      <div class="prod-card" onclick="location.href='urun.html'">
+        <div class="prod-img">
+          <div class="prod-img-bg" style="background:linear-gradient(150deg,#e4dcd4,#d4c8bc)"></div>
+          <span class="prod-emoji">🧕</span>
+          <div class="prod-badges"><span class="badge badge-new">Yeni</span></div>
+          <button class="prod-wish" onclick="event.stopPropagation();toggleFav(this)">🤍</button>
+          <div class="prod-hover-actions">
+            <button class="quick-add" onclick="event.stopPropagation()">Sepete Ekle</button>
+          </div>
+        </div>
+        <div class="prod-info">
+          <h4>Viskon Maxi Elbise Krem</h4>
+          <div class="prod-colors">
+            <div class="color-dot active" style="background:#e8e0d4"></div>
+            <div class="color-dot" style="background:#d4a8a0"></div>
+          </div>
+          <div class="prod-price"><span class="p-new">899,90 TL</span></div>
+        </div>
+      </div>
+
+      <div class="prod-card" onclick="location.href='urun.html'">
+        <div class="prod-img">
+          <div class="prod-img-bg" style="background:linear-gradient(150deg,#e0d8e0,#ccc4cc)"></div>
+          <span class="prod-emoji">🧕</span>
+          <div class="prod-badges"><span class="badge badge-soon">Yakında!</span></div>
+          <button class="prod-wish" onclick="event.stopPropagation();toggleFav(this)">🤍</button>
+          <div class="prod-hover-actions">
+            <button class="quick-add" onclick="event.stopPropagation()">Stok Bildir</button>
+          </div>
+        </div>
+        <div class="prod-info">
+          <h4>Krep Kuşaklı Uzun Elbise</h4>
+          <div class="prod-colors">
+            <div class="color-dot active" style="background:#c4a8b8"></div>
+          </div>
+          <div class="prod-price"><span class="p-new">1.199,90 TL</span></div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- PAGINATION -->
+    <div class="pagination" id="collectionPagination">
+      <button class="page-btn act">1</button>
+    </div>
+
+    <!-- SEO TEXT -->
+    <div class="seo-text">
+      <h2>Elbise</h2>
+      <p>Giyimin en önemli parçalarından biri olan elbise, her kadının dolabında mutlaka yer alması gereken zamansız bir seçenektir. Hem günlük yaşamda hem de özel davetlerde tercih edilebilecek geniş bir model yelpazesine sahiptir...</p>
+      <span class="read-more" onclick="this.parentElement.querySelector('p').style.webkitLineClamp='unset';this.style.display='none'">Devamını Oku</span>
+    </div>
+  </div>
+</div>
+
+<!-- FOOTER -->
+<footer>
+  <hr class="footer-divider"/>
+  <div class="footer-grid">
+    <div class="footer-brand">
+      <a class="nav-logo" href="index.html">Suvera</a>
+      <p>Modern tesettür giyimde zarafet ve sadelik.</p>
+      <div class="socials">
+        <a href="iletisim.html#iletisim-kanallari" class="social-btn">INSTAGRAM</a> <span style="color:rgba(255,255,255,.15)">·</span>
+        <a href="iletisim.html#iletisim-kanallari" class="social-btn">TIKTOK</a> <span style="color:rgba(255,255,255,.15)">·</span>
+        <a href="iletisim.html#iletisim-kanallari" class="social-btn">PINTEREST</a>
+      </div>
+    </div>
+    <div class="footer-col"><h5>Kategoriler</h5><ul><li><a href="urunler.html">Elbise</a></li><li><a href="urunler.html">Abaya</a></li><li><a href="urunler.html">Takım</a></li><li><a href="urunler.html">Eşarp</a></li><li><a href="urunler.html">Dış Giyim</a></li></ul></div>
+    <div class="footer-col"><h5>Bilgiler</h5><ul><li><a href="kvkk.html">KVKK</a></li><li><a href="kargo.html">Kargo</a></li><li><a href="iade.html">İade & Değişim</a></li><li><a href="uyelik-sozlesmesi.html">Üyelik Sözleşmesi</a></li></ul></div>
+    <div class="footer-col"><h5>Suvera</h5><ul><li><a href="hakkimizda.html">Hakkımızda</a></li><li><a href="blog.html">Blog</a></li><li><a href="iletisim.html#iletisim-kanallari">Mağazalar</a></li></ul></div>
+    <div class="footer-col"><h5>İletişim</h5><ul><li><a href="tel:+908500007872">0850 000 78 72</a></li><li><a href="iletisim.html#iletisim-kanallari">WhatsApp</a></li><li><a href="mailto:destek@suvera.com">destek@suvera.com</a></li></ul></div>
+  </div>
+  <div class="footer-bottom"><span>© 2025 Suvera. Tüm hakları saklıdır.</span><span>SSL Güvenli Alışveriş 🔒</span></div>
+</footer>
+
+<script>
+  // View toggle
+  document.querySelectorAll('.vt-btn').forEach((btn,i) => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.vt-btn').forEach(b => b.classList.remove('act'));
+      btn.classList.add('act');
+      const g = document.getElementById('prodsGrid');
+      const cols = [2,4,5];
+      g.style.gridTemplateColumns = `repeat(${cols[i]},1fr)`;
+    });
+  });
+
+  // Size btn toggle
+  document.querySelectorAll('.size-btn').forEach(btn => {
+    btn.addEventListener('click', () => btn.classList.toggle('act'));
+  });
+
+  // Color filter toggle
+  document.querySelectorAll('.cf-dot').forEach(d => {
+    d.addEventListener('click', () => d.classList.toggle('act'));
+  });
+
+  // Filter section collapse
+  document.querySelectorAll('.filter-section h4').forEach(h => {
+    h.addEventListener('click', () => {
+      const sec = h.parentElement;
+      const content = sec.querySelectorAll(':scope > :not(h4)');
+      h.classList.toggle('closed');
+      content.forEach(el => el.style.display = h.classList.contains('closed') ? 'none' : '');
+    });
+  });
+</script>
+<!-- MOBILE FILTER DRAWER -->
+<div class="filter-drawer-overlay" id="filterDrawerOverlay" onclick="closeFilterDrawer()"></div>
+<div class="filter-drawer" id="filterDrawer">
+  <div class="filter-drawer-head">
+    <h3>Filtrele</h3>
+    <button class="filter-drawer-close" onclick="closeFilterDrawer()">×</button>
+  </div>
+  <div class="filter-drawer-body">
+    <div style="margin-bottom:20px">
+      <p style="font-size:10.5px;letter-spacing:2px;text-transform:uppercase;color:#888;margin-bottom:12px">Sıralama</p>
+      <select style="width:100%;padding:10px 12px;border:1px solid #ddd;font-family:var(--sans,sans-serif);font-size:13px;outline:none;background:#fff">
+        <option>Önerilen</option><option>Fiyat: Artan</option>
+        <option>Fiyat: Azalan</option><option>En Yeni</option><option>En Çok Satan</option>
+      </select>
+    </div>
+    <div style="margin-bottom:20px">
+      <p style="font-size:10.5px;letter-spacing:2px;text-transform:uppercase;color:#888;margin-bottom:12px">Beden</p>
+      <div style="display:flex;gap:6px;flex-wrap:wrap" id="drawerSizes">
+        <button class="drawer-sz" onclick="this.classList.toggle('active');updateDrawerSz(this)">XS</button>
+        <button class="drawer-sz" onclick="this.classList.toggle('active');updateDrawerSz(this)">S</button>
+        <button class="drawer-sz" onclick="this.classList.toggle('active');updateDrawerSz(this)">M</button>
+        <button class="drawer-sz" onclick="this.classList.toggle('active');updateDrawerSz(this)">L</button>
+        <button class="drawer-sz" onclick="this.classList.toggle('active');updateDrawerSz(this)">XL</button>
+        <button class="drawer-sz" onclick="this.classList.toggle('active');updateDrawerSz(this)">XXL</button>
+      </div>
+    </div>
+    <div>
+      <p style="font-size:10.5px;letter-spacing:2px;text-transform:uppercase;color:#888;margin-bottom:12px">Fiyat Aralığı</p>
+      <input type="range" min="0" max="5000" value="3500" style="width:100%;accent-color:#3d6b38" id="drawerPriceRange" oninput="document.getElementById('drawerPriceVal').textContent=this.value+' TL'"/>
+      <div style="display:flex;justify-content:space-between;font-size:12px;color:#888;margin-top:6px"><span>0 TL</span><span id="drawerPriceVal">3.500 TL</span></div>
+    </div>
+  </div>
+  <div class="filter-drawer-foot">
+    <button onclick="resetDrawer()" style="padding:12px;border:1px solid #ddd;background:#fff;font-family:var(--sans,sans-serif);font-size:12px;letter-spacing:1.5px;text-transform:uppercase;cursor:pointer">Sıfırla</button>
+    <button onclick="applyDrawer()" style="padding:12px;background:#1a1a1a;color:#fff;border:none;font-family:var(--sans,sans-serif);font-size:12px;letter-spacing:1.5px;text-transform:uppercase;cursor:pointer">Uygula</button>
+  </div>
+</div>
+
+<style>
+.drawer-sz { padding:8px 12px; border:1px solid #ddd; background:#fff; font-size:12px; cursor:pointer; transition:all .2s; }
+.drawer-sz.active { background:#1a1a1a; color:#fff; border-color:#1a1a1a; }
+</style>
+
+<script>
+function toggleFav(btn) {
+  var isFav = btn.classList.toggle('active');
+  btn.textContent = isFav ? '❤️' : '🤍';
+  if (window.Suvera) Suvera.toast(isFav ? 'Favorilere eklendi' : 'Favorilerden çıkarıldı', isFav ? 'green' : 'dark');
+}
+function addToCartFromCard(btn) {
+  var card = btn.closest('.prod-card');
+  var nameEl = card ? card.querySelector('h4') : null;
+  var name = nameEl ? nameEl.textContent.trim() : 'Ürün';
+  if (window.Suvera) Suvera.addToCart(name, 0, '🧕');
+}
+function updateDrawerSz(btn) {
+  btn.style.background = btn.classList.contains('active') ? '#1a1a1a' : '#fff';
+  btn.style.color = btn.classList.contains('active') ? '#fff' : '#1a1a1a';
+}
+function resetDrawer() {
+  document.querySelectorAll('.drawer-sz').forEach(function(b) {
+    b.classList.remove('active'); updateDrawerSz(b);
+  });
+  var r = document.getElementById('drawerPriceRange');
+  if (r) { r.value = 5000; document.getElementById('drawerPriceVal').textContent = '5.000 TL'; }
+}
+function applyDrawer() {
+  closeFilterDrawer();
+  if (window.Suvera) Suvera.toast('Filtreler uygulandı', 'green');
+}
+</script>
+<script src="js/config.js"></script>
+<script src="js/api.js"></script>
+<script src="js/storefront.js"></script>
+<script src="js/site-seo.js"></script>
+<script src="shared.js"></script>
+</body>
+</html>

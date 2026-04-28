@@ -1,125 +1,89 @@
 # Panelya API
 
-Panelya operations platformunun production gecis API katmani.
+Panelya Operations API is the backend for the multi-tenant operations dashboard.
 
-## Teknoloji
+## Technology
 
 - Node.js + Express
 - PostgreSQL
-- JWT app session + admin oturumu
-- Multer + Sharp ile gorsel yukleme
-- iyzipay Checkout Form SDK
-- PM2/Nginx ile production calisma hedefi
+- JWT access tokens and refresh token rotation
+- Organization-scoped reads and writes
+- Multer + Sharp for image upload support
+- iyzipay Checkout Form SDK integration path
+- Swagger UI under `/api/docs`
 
-## Production Dosyalari
+## Local Setup
 
-- `ecosystem.config.cjs`: PM2 process tanimi
-- `.env.production.example`: sunucu ortam degiskenleri ornegi
-- `../deploy/nginx/maveran.conf`: Nginx frontend/API/uploads config ornegi
-- `../deploy/DEPLOY-CHECKLIST.md`: sunucuya cikis adimlari
+Create a local `panelya` database and a `panelya_user` user. The API reads `DATABASE_URL` from `.env`.
 
-## Yerel Kurulum
-
-Yerel gelistirme icin `panelya` veritabani ve `panelya_user` kullanicisi olustur. API, `.env` dosyasindaki `DATABASE_URL` ile bu veritabanina baglanir.
-
-1. Bagimliliklari kur:
+Install dependencies from the repository root:
 
 ```bash
 npm install
 ```
 
-2. Ortam dosyasini hazirla:
+Create the API env file:
 
 ```bash
-cp .env.example .env
+copy panelya-api\.env.example panelya-api\.env
 ```
 
-3. PostgreSQL veritabanini olustur.
-
-Windows'ta PostgreSQL sifresini biliyorsan:
+Create the database on Windows:
 
 ```powershell
-$env:PGPASSWORD="POSTGRES_ADMIN_SIFRESI"
+$env:PGPASSWORD="POSTGRES_ADMIN_PASSWORD"
 psql -U postgres -d postgres -c "create database panelya;"
-psql -U postgres -d postgres -c "create user panelya_user with password 'guclu_sifre';"
+psql -U postgres -d postgres -c "create user panelya_user with password 'strong_password';"
 psql -U postgres -d postgres -c "grant all privileges on database panelya to panelya_user;"
 psql -U postgres -d postgres -c "alter database panelya owner to panelya_user;"
 ```
 
-SQL olarak ayni islemler:
-
-```sql
-create database panelya;
-create user panelya_user with password 'guclu_sifre';
-grant all privileges on database panelya to panelya_user;
-alter database panelya owner to panelya_user;
-```
-
-4. `.env` icindeki `DATABASE_URL`, `JWT_SECRET`, `CORS_ORIGIN` alanlarini guncelle. Production icin `JWT_SECRET` en az 64 karakterlik kriptografik random deger olmali.
-
-5. Tablolari ve ornek verileri yukle:
+Run schema, migrations and demo seed:
 
 ```bash
-npm run db:schema
-npm run db:seed
+npm run db:setup
 npm run db:migrate
 npm run demo:seed
+npm run suvera:seed
 ```
 
-6. Admin kullanicisini bcrypt hash ile olustur:
+Start the API:
 
 ```bash
-ADMIN_BOOTSTRAP_PASSWORD="cok-guclu-bir-sifre" npm run admin:create -- admin super_admin
+npm run dev:api
 ```
 
-7. API'yi baslat:
-
-```bash
-npm run dev
-```
-
-Saglik kontrolu:
+Health check:
 
 ```bash
 curl http://localhost:3000/api/health
 ```
 
-Swagger dokumani:
+Swagger:
 
-```bash
+```text
 http://localhost:3000/api/docs
 http://localhost:3000/api/docs-json
 ```
 
-Swagger spec auth, catalog, order, customer, organization, payment and content endpointslerini kapsar.
+## Demo Login
 
-Smoke kontrolleri:
-
-```bash
-npm run smoke:auth
-npm run smoke:payment
-npm run production:check
-npm run secrets:generate
-```
-
-Demo login bilgileri:
-
-- Organization slug: `maveran`
+- Organization slug: `panelya`
 - Email: `demo@panelya.dev`
 - Password: `PanelyaDemo!123`
 
-Public staging ortami icin `DEMO_OWNER_*` degiskenleriyle bu degerleri override et.
+Public staging can override these through `DEMO_OWNER_*` variables.
 
-## Endpointler
+## Main Endpoints
 
-- `POST /api/auth/login`
 - `POST /api/auth/register`
 - `POST /api/auth/session/login`
 - `POST /api/auth/session/refresh`
 - `POST /api/auth/session/logout`
 - `GET /api/auth/me`
+- `GET /api/organizations/current`
+- `GET /api/organizations/current/summary`
 - `GET /api/products`
-- `GET /api/products/:id`
 - `POST /api/products`
 - `PUT /api/products/:id`
 - `DELETE /api/products/:id`
@@ -129,75 +93,65 @@ Public staging ortami icin `DEMO_OWNER_*` degiskenleriyle bu degerleri override 
 - `POST /api/orders`
 - `PUT /api/orders/:id/status`
 - `PUT /api/orders/:id/shipping`
+- `GET /api/customers`
+- `GET /api/slider`
+- `POST /api/slider`
+- `GET /api/campaigns`
+- `POST /api/campaigns`
 - `POST /api/payment/initialize`
 - `POST /api/payment/callback`
-- `GET /api/customers`
-- `GET /api/organizations/current`
-- `GET /api/organizations/current/summary`
 - `POST /api/upload`
-- `GET /api/slider`
-- `GET /api/slider/admin/all`
-- `POST /api/slider`
-- `PUT /api/slider/:id`
-- `DELETE /api/slider/:id`
-- `GET /api/campaigns`
-- `GET /api/campaigns/admin/all`
-- `POST /api/campaigns`
-- `PUT /api/campaigns/:id`
-- `DELETE /api/campaigns/:id`
 
-Admin korumali endpointler icin:
+Protected endpoints require:
 
 ```http
 Authorization: Bearer JWT_TOKEN
 ```
 
-## Odeme Akisi
+## Payment Flow
 
-Odeme altyapisi su anda `PAYMENT_PROVIDER=mock` ile test edilebilir durumdadir. Bu mod, checkout ekranindan siparisi veritabanina `paid` olarak kaydeder ve kullaniciyi basari sayfasina yonlendirir.
+Local smoke tests can use mock/manual payment behavior. Production must not run with `PAYMENT_PROVIDER=mock`.
 
-Gercek odeme icin Iyzico Checkout Form SDK projeye eklendi. `PAYMENT_PROVIDER=iyzico` yapildiginda `/api/payment/initialize` Iyzico checkout formunu baslatir, `paymentPageUrl` dondurur ve siparisi `payment_pending` durumunda bekletir. Iyzico callback `PAYMENT_CALLBACK_URL` adresine geldiginde `/api/payment/callback` token ile sonucu sorgular, siparisi `paid` veya `cancelled` durumuna ceker.
-
-Iyzico bilgileri geldikten sonra production `.env` icinde su alanlar doldurulacak:
+For iyzico, set:
 
 ```env
 PAYMENT_PROVIDER=iyzico
 IYZICO_API_KEY=...
 IYZICO_SECRET_KEY=...
 IYZICO_BASE_URL=https://api.iyzipay.com
-```
-
-Production ortamda `PAYMENT_PROVIDER=mock` kullanilmaz; canli odeme icin `PAYMENT_PROVIDER=iyzico` zorunludur. Canli odemeye gecmeden once Iyzico panelindeki callback URL, `PAYMENT_CALLBACK_URL` degeriyle ayni olmalidir.
-
-Mock flow icin callback guvenlik testi yapmak istersen:
-
-```bash
+PAYMENT_CALLBACK_URL=https://api.panelya.com.tr/api/payment/callback
 PAYMENT_CALLBACK_SECRET_REQUIRED=true
-PAYMENT_CALLBACK_SECRET=32plus-char-random-secret
-npm run smoke:payment
 ```
 
-## Stok Akisi
+When iyzico sends the callback, `/api/payment/callback` verifies the payment token and moves the order to `paid` or `cancelled`.
 
-Siparis veya odeme baslatilirken urun ID'si olan kalemler icin stok kontrolu yapilir. Stok yeterliyse miktar dusulur; stok 0'a inerse urun otomatik `out` durumuna gecer. Siparis `cancelled` durumuna alinirsa ayni kalemler stoga geri eklenir. Iptal edilen siparis tekrar aktif bir duruma cekilirse stok yeniden rezerve edilir.
+For Suvera, set payment return URLs to the storefront:
 
-Odeme beklemede kalip tamamlanmayan siparisler icin zaman asimi gorevi:
+```env
+PUBLIC_SITE_URL=https://suvera.com.tr
+PAYMENT_SUCCESS_URL=https://suvera.com.tr/tesekkur.html
+PAYMENT_FAILURE_URL=https://suvera.com.tr/tesekkur.html?payment=failed
+```
+
+If checkout sends `payment_method=iban` or `paymentMethod=iban`, Panelya creates a `manual` provider order without redirecting to the card provider. Legacy values like `transfer`, `havale`, `eft` and `manual` are normalized to `iban`.
+
+## Stock Flow
+
+Order/payment changes and stock changes are coupled. Product stock is reserved when an order/payment starts, returned when an order is cancelled, and reserved again if a cancelled order returns to an active status.
+
+Expire stale pending payments:
 
 ```bash
-npm run orders:expire-pending
+npm --prefix panelya-api run orders:expire-pending
 ```
 
-Varsayilan olarak `PAYMENT_PENDING_TIMEOUT_MINUTES=30` dakikadan eski `payment_pending` siparisleri `cancelled` yapar ve stoklarini geri ekler. Production PM2 config bu gorevi her 10 dakikada bir calistiracak sekilde hazirdir.
+## Validation
 
-## Kargo Akisi
+From the repository root:
 
-Admin panelinden kargo firmasi, takip numarasi, takip linki ve kargoya verilme tarihi kaydedilebilir. Takip numarasi girilen `new`, `paid` veya `processing` durumundaki siparisler otomatik `shipped` durumuna gecer.
-
-## Frontend Gecis Notu
-
-Frontend tarafinda `js/api.js` eklendi. Siparis sayfasi once odeme/siparis API'sine kaydetmeyi dener, API ulasilamazsa localStorage yedegine duser. Admin panelinin tam API'ye gecisi icin siradaki isler:
-
-1. `doLogin()` fonksiyonunu `/api/auth/login` ile degistir.
-2. `DATA` objesini kaldirip urun/siparis/kategori verilerini API'den cek.
-3. Karakter kodlamasi bozukluklarini ve tekrar eden scriptleri temizle.
-4. Production icin `deploy/DEPLOY-CHECKLIST.md` adimlarini uygula.
+```bash
+npm run check:api
+npm run smoke:auth
+npm run smoke:payment
+npm run check:production
+```

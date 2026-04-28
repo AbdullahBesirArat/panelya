@@ -1,6 +1,16 @@
 create extension if not exists pgcrypto;
 create extension if not exists pg_trgm;
 
+create table if not exists organizations (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  slug text not null unique,
+  plan text not null default 'starter' check (plan in ('starter', 'growth', 'business', 'enterprise')),
+  status text not null default 'active' check (status in ('active', 'trialing', 'past_due', 'suspended', 'cancelled')),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 create table if not exists categories (
   id bigserial primary key,
   name text not null unique,

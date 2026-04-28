@@ -1,71 +1,68 @@
-# Panelya Operations Uygulama Notlari
+# Panelya Operations Notes
 
-Panelya Operations hedefi mevcut e-ticaret cekirdegini cok kiracili bir SaaS operations platformuna tasimaktir. Maveran bu platformdaki ilk magazadir.
+Panelya Operations is the only product in this repository. The old commerce-site files have been removed from this codebase so the project can move forward as a focused SaaS operations platform.
 
-## Baslatilan Degisimler
+## Current Scope
 
-- Production ortaminda `PAYMENT_PROVIDER=mock` ile API'nin acilmasi engellendi.
-- Payment callback secret kontrolu timing-safe hale getirildi.
-- Mock odemede otomatik `paid` davranisi `PAYMENT_MOCK_AUTO_PAY` ile acik hale getirildi.
-- `organizations`, `app_users`, `memberships`, `subscriptions` ve `activity_logs` tablolari icin SaaS migrasyonu eklendi.
-- `refresh_tokens` tablosu ve access/refresh token session akisi eklendi.
-- `GET /api/organizations/current` ve temel organization admin endpointleri eklendi.
-- `GET /api/organizations/current/summary` ile tenant dashboard ozeti, activity log, subscription ve status dagilimi eklendi.
-- `POST /api/auth/register`, `POST /api/auth/session/login`, `POST /api/auth/session/refresh`, `POST /api/auth/session/logout` ve `GET /api/auth/me` endpointleri eklendi.
-- Next.js login ekrani gercek auth endpointlerine baglandi.
-- Next.js + TypeScript + Tailwind + React Query + Zustand tabanli dashboard iskeleti `apps/web` altinda baslatildi.
-- Dashboard, products, orders, customers, analytics ve settings ekranlari gercek API verisi ve mutasyonlariyla canli hale getirildi.
-- Products ekraninda kategori/urun olusturma, urun duzenleme ve owner rolunde silme akisi tamamlandi.
-- `smoke:auth`, `smoke:payment`, `check:production` ve `secrets:generate` komutlari eklendi.
-- Koken `README.md` ve API README'si hiring-ready / operator-friendly komutlarla guncellendi.
-- Web tarafina toast feedback, retry butonlari, daha iyi loading skeleton ve mobil navigation polish eklendi.
-- Tek komutla recruiter demo workspace'i kuran `demo:seed` akisi eklendi.
-- Docker Compose ve GitHub Actions CI eklendi.
-- CI hattina web lint, typecheck ve build quality gate'leri eklendi.
-- `docs/SHOWCASE-VERIFICATION.md` ile local kalite kapisi, payment sandbox E2E, secret rotation ve live demo kabul kriterleri yazildi.
-- Neon + Railway + Vercel public demo akisi icin `deploy:staging`, `deploy:production`, Railway/Vercel config ve `docs/VERCEL-RAILWAY-NEON-DEPLOY.md` eklendi.
+- Multi-tenant organizations, memberships, subscriptions and activity logs
+- JWT session login, refresh and logout
+- Organization-scoped dashboard, products, orders, customers, content, analytics and settings
+- Product/category create, update and delete workflows
+- Order status, shipping and stock synchronization flows
+- Payment initialization and callback handling with production safety checks
+- Swagger/OpenAPI documentation
+- Vercel dashboard deployment and Railway API deployment
 
-## Yerel Calisma
-
-API:
+## Local Workflow
 
 ```bash
-cd panelya-api
-npm run db:setup
-npm run check:syntax
-npm run dev
-```
-
-Web:
-
-```bash
-cd apps/web
 npm install
-npm run dev
-```
-
-Docker:
-
-```bash
-docker compose up --build
-```
-
-Recruiter demo verisi:
-
-```bash
+npm run db:setup
+npm run db:migrate
 npm run demo:seed
+npm run dev:api
+npm run dev:web
 ```
 
-Bu komut `maveran` slug'i altinda dolu dashboard, urunler, musteriler, siparisler ve aktivite kayitlari olusturur.
+The demo workspace slug is `panelya`.
 
-Railway public demo start command:
+## Quality Gate
 
 ```bash
-npm run start:api
+npm run check:api
+npm run lint:web
+npm run typecheck:web
+npm run build:web
 ```
 
-## Siradaki Faz
+With API and database available:
 
-- Slider ve campaign modullerini tenant-safe endpoint ve UI akisina tasima.
-- Membership, invite ve rol yonetimini settings alanina ekleme.
-- Swagger/OpenAPI, e-posta bildirimleri ve Redis cache ekleme.
+```bash
+npm run smoke:auth
+npm run smoke:payment
+```
+
+## Deployment
+
+- Vercel project: `panelya-web`
+- Railway service: `panelya-api`
+- Railway healthcheck: `/api/health`
+- Production API start command: `npm --prefix panelya-api run db:migrate && node panelya-api/server.js`
+
+Production must keep `PAYMENT_PROVIDER=mock` disabled. Use `manual` while iyzico is not connected, then switch to `iyzico` after sandbox success and failure/cancel paths are tested.
+
+## Uploads (Product Images)
+
+Product/category images uploaded via `/api/upload` are stored on disk under `UPLOAD_DIR` and served publicly from `/uploads/*`.
+
+Important for Railway: container filesystems are ephemeral by default. If you do not mount a persistent volume and point `UPLOAD_DIR` to it, uploaded images will disappear after a deploy/restart and Suvera will see `404` for `/uploads/...` URLs.
+
+- **Recommended**: mount a Railway volume and set `UPLOAD_DIR` to the mounted path (absolute).
+- **Sanity check**: after an upload, verify the file is reachable at `GET /uploads/<filename>.webp` on the API domain.
+
+## Next Phase
+
+- Team invite and role management in Settings
+- Email notifications
+- Redis/cache layer for heavier dashboards
+- iyzico sandbox and production sign-off

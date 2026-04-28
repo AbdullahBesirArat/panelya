@@ -7,6 +7,10 @@ function normalizeQuantity(value) {
 }
 
 async function priceCartItems(client, rawItems, { organizationId = null } = {}) {
+  if (!organizationId) {
+    throw Object.assign(new Error('organizationId zorunlu'), { status: 500 });
+  }
+
   const requested = (rawItems || [])
     .map((item) => ({
       product_id: Number(item.product_id || item.id || 0),
@@ -19,14 +23,12 @@ async function priceCartItems(client, rawItems, { organizationId = null } = {}) 
   }
 
   const ids = [...new Set(requested.map((item) => item.product_id))];
-  const params = [ids];
-  const organizationFilter = organizationId ? 'and organization_id = $2' : '';
-  if (organizationId) params.push(organizationId);
+  const params = [ids, organizationId];
 
   const result = await client.query(
     `select id, name, price, sale_price, status
      from products
-     where id = any($1::int[]) ${organizationFilter}`,
+     where id = any($1::int[]) and organization_id = $2`,
     params
   );
   const products = new Map(result.rows.map((product) => [Number(product.id), product]));

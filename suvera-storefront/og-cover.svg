@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" role="img" aria-label="Suvera sosyal paylasim kapagi">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f5efe5"/>
+      <stop offset="100%" stop-color="#dfd6c8"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#355f3c"/>
+      <stop offset="100%" stop-color="#243e24"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <rect x="64" y="64" width="1072" height="502" rx="28" fill="#fff" opacity="0.86"/>
+  <rect x="720" y="96" width="352" height="438" rx="24" fill="url(#panel)"/>
+  <circle cx="896" cy="230" r="84" fill="#f7f1e7" opacity="0.14"/>
+  <circle cx="958" cy="340" r="112" fill="#f7f1e7" opacity="0.08"/>
+  <text x="132" y="192" fill="#6d876a" font-family="Georgia, serif" font-size="28" letter-spacing="8">SUVERA</text>
+  <text x="132" y="292" fill="#161616" font-family="Georgia, serif" font-size="88">Modern tesettur</text>
+  <text x="132" y="384" fill="#161616" font-family="Georgia, serif" font-size="88">giyimde rafine</text>
+  <text x="132" y="476" fill="#161616" font-family="Georgia, serif" font-size="88">ve guvenli akış</text>
+  <text x="132" y="538" fill="#67615a" font-family="Arial, sans-serif" font-size="28">Koleksiyon, checkout ve musteri akisi tek yerde bulusur.</text>
+  <text x="804" y="254" fill="#f6f0e6" font-family="Georgia, serif" font-size="74" text-anchor="middle">Suvera</text>
+  <text x="804" y="318" fill="#f6f0e6" font-family="Arial, sans-serif" font-size="24" text-anchor="middle" letter-spacing="6">SECILI PARCALAR</text>
+  <text x="804" y="402" fill="#f6f0e6" font-family="Arial, sans-serif" font-size="28" text-anchor="middle">600 TL uzeri</text>
+  <text x="804" y="446" fill="#f6f0e6" font-family="Georgia, serif" font-size="56" text-anchor="middle">ucretsiz kargo</text>
+  <text x="804" y="494" fill="#d3dfcf" font-family="Arial, sans-serif" font-size="22" text-anchor="middle">suvera.com.tr</text>
+</svg>

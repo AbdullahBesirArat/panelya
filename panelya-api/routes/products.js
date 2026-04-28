@@ -3,9 +3,15 @@ const db = require('../db');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { auditLog } = require('../services/audit');
 const { resolveOrganization } = require('../services/tenant');
+const { assertPlanCapacity } = require('../services/planLimits');
 
 const router = express.Router();
 const PRODUCT_STATUSES = ['active', 'draft', 'out'];
+
+function normalizeProductIds(ids) {
+  const uniqueIds = [...new Set((Array.isArray(ids) ? ids : []).map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))];
+  return uniqueIds.slice(0, 200);
+}
 
 function safePaging(limit, offset, defaultLimit = 50) {
   return {
@@ -215,6 +221,7 @@ router.get('/:id', async (req, res, next) => {
 router.post('/', requireAuth, requireRole(['super_admin', 'owner', 'admin']), async (req, res, next) => {
   try {
     const organization = await resolveOrganization(req);
+    await assertPlanCapacity(db, organization.id, 'products');
     const result = await db.query(
       `insert into products
        (organization_id, name, category_id, price, sale_price, stock, status, colors, sizes, images, details, tags, description, emoji)
@@ -232,6 +239,98 @@ router.post('/', requireAuth, requireRole(['super_admin', 'owner', 'admin']), as
     res.status(201).json(result.rows[0]);
   } catch (err) {
     next(err);
+  }
+});
+
+router.post('/bulk', requireAuth, requireRole(['super_admin', 'owner', 'admin']), async (req, res, next) => {
+  const client = await db.pool.connect();
+
+  try {
+    const organization = await resolveOrganization(req, client);
+    const ids = normalizeProductIds(req.body.ids);
+    const action = String(req.body.action || '').trim();
+
+    if (!ids.length) return res.status(400).json({ error: 'En az bir urun secin' });
+    if (!['status', 'category', 'delete'].includes(action)) return res.status(400).json({ error: 'Toplu islem gecersiz' });
+    if (action === 'delete' && !['owner', 'super_admin'].includes(req.auth.role)) {
+      return res.status(403).json({ error: 'Toplu silme icin sahip rolu gerekir' });
+    }
+
+    await client.query('begin');
+    const oldResult = await client.query(
+      'select id, name, status, category_id from products where organization_id = $1 and id = any($2::bigint[]) order by id',
+      [organization.id, ids]
+    );
+
+    let result;
+    if (action === 'status') {
+      const status = PRODUCT_STATUSES.includes(req.body.status) ? req.body.status : '';
+      if (!status) {
+        await client.query('rollback');
+        return res.status(400).json({ error: 'Durum gecersiz' });
+      }
+      result = await client.query(
+        `update products
+         set status = $1,
+             updated_at = now()
+         where organization_id = $2 and id = any($3::bigint[])
+         returning id, name, status, category_id`,
+        [status, organization.id, ids]
+      );
+    } else if (action === 'category') {
+      const categoryId = req.body.category_id ? Number(req.body.category_id) : null;
+      if (categoryId) {
+        const categoryResult = await client.query(
+          'select id from categories where id = $1 and organization_id = $2 limit 1',
+          [categoryId, organization.id]
+        );
+        if (!categoryResult.rows[0]) {
+          await client.query('rollback');
+          return res.status(400).json({ error: 'Kategori bulunamadi' });
+        }
+      }
+      result = await client.query(
+        `update products
+         set category_id = $1,
+             updated_at = now()
+         where organization_id = $2 and id = any($3::bigint[])
+         returning id, name, status, category_id`,
+        [categoryId, organization.id, ids]
+      );
+    } else {
+      result = await client.query(
+        `delete from products
+         where organization_id = $1 and id = any($2::bigint[])
+         returning id, name, status, category_id`,
+        [organization.id, ids]
+      );
+    }
+
+    await auditLog(req, {
+      action: `BULK_${action.toUpperCase()}`,
+      resourceType: 'product',
+      newValue: {
+        requestedIds: ids,
+        affectedCount: result.rows.length,
+        action,
+        status: req.body.status || null,
+        category_id: req.body.category_id || null,
+      },
+      oldValue: oldResult.rows,
+    });
+    await client.query('commit');
+
+    res.json({
+      ok: true,
+      action,
+      affectedCount: result.rows.length,
+      products: result.rows,
+    });
+  } catch (err) {
+    await client.query('rollback');
+    next(err);
+  } finally {
+    client.release();
   }
 });
 

@@ -18,10 +18,18 @@ async function main() {
   }
 
   try {
-    const adminCount = await tableCount('admins');
-    if (!adminCount) issues.push('Admin kullanicisi yok; npm run admin:create calistirin.');
+    const ownerResult = await db.query(
+      `select count(*)::int as count
+       from app_users u
+       join memberships m on m.user_id = u.id
+       where m.status = 'active'
+         and m.role in ('owner', 'admin')`
+    );
+    if (!ownerResult.rows[0].count) {
+      issues.push('Aktif owner/admin SaaS kullanicisi yok; npm run demo:seed veya davet akisini calistirin.');
+    }
   } catch (err) {
-    issues.push(`Admin kontrolu yapilamadi: ${err.message}`);
+    issues.push(`SaaS kullanici kontrolu yapilamadi: ${err.message}`);
   }
 
   try {
@@ -34,6 +42,24 @@ async function main() {
     await db.query('select id from refresh_tokens limit 1');
   } catch (err) {
     issues.push(`Session tablolari eksik gorunuyor: ${err.message}`);
+  }
+
+  try {
+    await db.query('select public_access_token from organizations limit 1');
+  } catch (err) {
+    issues.push(`Organization public access token alani eksik gorunuyor: ${err.message}`);
+  }
+
+  try {
+    await db.query('select key from api_rate_limits limit 1');
+  } catch (err) {
+    issues.push(`Rate limit tablosu eksik gorunuyor: ${err.message}`);
+  }
+
+  try {
+    await db.query('select id from payment_callback_events limit 1');
+  } catch (err) {
+    issues.push(`Payment callback queue tablosu eksik gorunuyor: ${err.message}`);
   }
 
   try {
@@ -60,7 +86,7 @@ async function main() {
     return;
   }
 
-  console.log('Production check basarili: env, admin ve SaaS semasi hazir.');
+  console.log('Production check basarili: env, SaaS kullanicisi ve sema hazir.');
 }
 
 main()

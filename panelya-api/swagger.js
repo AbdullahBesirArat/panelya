@@ -49,8 +49,8 @@ const options = {
           type: 'object',
           properties: {
             id: { type: 'integer', example: 1 },
-            name: { type: 'string', example: 'Maveran' },
-            slug: { type: 'string', example: 'maveran' },
+            name: { type: 'string', example: 'Panelya' },
+            slug: { type: 'string', example: 'panelya' },
             plan: { type: 'string', example: 'growth' },
             status: { type: 'string', example: 'active' },
             role: { type: 'string', example: 'owner' },
@@ -61,7 +61,7 @@ const options = {
           properties: {
             id: { type: 'integer', example: 1 },
             email: { type: 'string', format: 'email', example: 'demo@panelya.dev' },
-            name: { type: 'string', example: 'Maveran Owner' },
+            name: { type: 'string', example: 'Panelya Owner' },
           },
         },
         Session: {
@@ -124,7 +124,7 @@ const options = {
             id: { type: 'integer', example: 1 },
             organization_id: { type: 'string', format: 'uuid' },
             tag: { type: 'string', example: 'Panelya Operations' },
-            title: { type: 'string', example: 'Maveran vitrin akisi' },
+            title: { type: 'string', example: 'Panelya vitrin akisi' },
             sub: { type: 'string', example: 'Siparis, stok ve kampanya yonetimi.' },
             btn: { type: 'string', example: 'Katalogu ac' },
             image_url: { type: 'string', example: 'https://images.unsplash.com/photo.jpg' },

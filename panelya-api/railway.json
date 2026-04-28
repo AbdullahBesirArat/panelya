@@ -4,8 +4,8 @@
     "buildCommand": "npm install"
   },
   "deploy": {
-    "startCommand": "node panelya-api/server.js",
-    "healthcheckPath": null,
+    "startCommand": "npm run db:migrate && node server.js",
+    "healthcheckPath": "/api/health",
     "healthcheckTimeout": 300,
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 3

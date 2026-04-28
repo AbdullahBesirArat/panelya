@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta name="description" content="Suvera sepet sayfasi, siparis ozeti ve odeme oncesi guvenli kontrol adimlarini sunar." />
+  <link rel="canonical" href="https://suvera.com.tr/sepet.html" />
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="Sepetim | Suvera" />
+  <meta property="og:description" content="Suvera sepet sayfasi, siparis ozeti ve odeme oncesi guvenli kontrol adimlarini sunar." />
+  <meta property="og:url" content="https://suvera.com.tr/sepet.html" />
+  <meta property="og:image" content="https://suvera.com.tr/og-cover.svg" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Sepetim | Suvera" />
+  <meta name="twitter:description" content="Suvera sepet sayfasi, siparis ozeti ve odeme oncesi guvenli kontrol adimlarini sunar." />
+  <meta name="twitter:image" content="https://suvera.com.tr/og-cover.svg" />
+  <meta name="theme-color" content="#2a4827" />
+  <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+  <link rel="manifest" href="site.webmanifest" />
+  <title>Sepetim – Suvera</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400&family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="shared.css"/>
+  <style>
+    :root{
+      --bg:#f7f5f1;--white:#fff;--black:#1a1a1a;--mid:#5e5a54;--light:#ddd7cd;
+      --lighter:#f1ede6;--accent:#3d6b38;--accent-soft:#6c8a5f;--green-dark:#2a4827;
+      --serif:'Cormorant Garamond',serif;--sans:'Jost',sans-serif;
+    }
+    *,*::before,*::after{box-sizing:border-box}
+    html{scroll-behavior:smooth}
+    body{margin:0;font-family:var(--sans);background:var(--bg);color:var(--black);overflow-x:hidden;padding-top:102px}
+    .page-shell{padding:28px 40px 0}
+    .breadcrumb{font-size:12px;color:#8d877f;letter-spacing:.5px;margin-bottom:18px}
+    .breadcrumb a{color:inherit;text-decoration:none}
+    .breadcrumb span{margin:0 6px;opacity:.55}
+    .cart-hero{display:grid;grid-template-columns:minmax(0,1.2fr) 320px;gap:24px;margin-bottom:26px}
+    .hero-card,.hero-side{background:var(--white);border:1px solid var(--light)}
+    .hero-card{padding:30px 34px}
+    .hero-kicker{font-size:10px;letter-spacing:2.8px;text-transform:uppercase;color:var(--accent-soft);margin-bottom:16px}
+    .hero-title{font-family:var(--serif);font-size:52px;font-weight:300;line-height:.95;margin-bottom:14px}
+    .hero-copy{max-width:620px;font-size:14px;line-height:1.9;color:var(--mid)}
+    .hero-meta{display:flex;flex-wrap:wrap;gap:12px;margin-top:22px}
+    .meta-pill{display:inline-flex;align-items:center;gap:8px;padding:10px 14px;border:1px solid var(--light);font-size:11px;letter-spacing:1.6px;text-transform:uppercase;background:#faf8f4}
+    .hero-side{padding:24px;background:linear-gradient(180deg,#f7f3ed 0%,#efe9df 100%)}
+    .hero-side-icon{height:160px;border-radius:6px;background:linear-gradient(140deg,#ded3c4,#cdbdaa);display:flex;align-items:center;justify-content:center;font-size:72px;margin-bottom:18px}
+    .hero-side small{display:block;font-size:10px;letter-spacing:2px;text-transform:uppercase;color:var(--accent-soft);margin-bottom:10px}
+    .hero-side h2{font-family:var(--serif);font-size:34px;font-weight:300;line-height:1.02;margin-bottom:10px}
+    .hero-side p{font-size:13px;line-height:1.8;color:var(--mid)}
+    .cart-layout{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:28px;align-items:start}
+    .cart-main,.checkout-card,.section-card{background:var(--white);border:1px solid var(--light)}
+    .cart-main{padding:26px 30px}
+    .cart-head{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;padding-bottom:18px;border-bottom:1px solid var(--light);margin-bottom:10px}
+    .page-title{font-family:var(--serif);font-size:36px;font-weight:300;margin:0 0 4px}
+    .page-count{font-size:12px;letter-spacing:1px;color:#8f8981;text-transform:uppercase}
+    .clear-btn{background:none;border:none;padding:0;font:inherit;font-size:11px;letter-spacing:1.7px;text-transform:uppercase;color:#9d958b;cursor:pointer}
+    .clear-btn:hover{color:#c44}
+    .cart-list-head{display:grid;grid-template-columns:minmax(0,1fr) 140px;padding:12px 0 6px;font-size:10px;letter-spacing:2px;text-transform:uppercase;color:#978f85}
+    .cart-item{display:grid;grid-template-columns:120px minmax(0,1fr) 140px;gap:22px;padding:24px 0;border-bottom:1px solid var(--light);align-items:start}
+    .cart-item-img{width:120px;height:152px;background:linear-gradient(150deg,#e9e3d9,#d9cfc0);display:flex;align-items:center;justify-content:center;font-size:48px;overflow:hidden}
+    .cart-item-body{min-width:0}
+    .cart-item-brand{font-size:10px;letter-spacing:2.2px;text-transform:uppercase;color:#9d958b;margin:0 0 7px}
+    .cart-item-name{font-family:var(--serif);font-size:25px;font-weight:300;line-height:1.05;margin:0 0 8px}
+    .cart-item-variant{font-size:12px;color:#7d7770;margin:0 0 12px;letter-spacing:.4px}
+    .cart-item-unit{font-size:12px;color:#9b9389;margin:0 0 16px}
+    .qty-row{display:flex;align-items:center;gap:10px}
+    .qty-btn,.del-btn{width:34px;height:34px;border:1px solid var(--light);background:#fff;color:var(--black);cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center;transition:.2s}
+    .qty-btn:hover,.del-btn:hover{border-color:var(--black)}
+    .del-btn:hover{color:#c44;border-color:#d7b6b6;background:#fff6f6}
+    .qty-num{min-width:24px;text-align:center;font-size:14px;font-weight:500}
+    .cart-item-price{text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:8px;padding-top:4px}
+    .cart-item-price strong{font-size:18px;font-weight:500}
+    .cart-item-price small{font-size:11px;letter-spacing:1.6px;text-transform:uppercase;color:#9d958b}
+    .cart-empty{padding:56px 12px 48px;text-align:center}
+    .cart-empty h3{font-family:var(--serif);font-size:36px;font-weight:300;margin-bottom:10px}
+    .cart-empty p{font-size:14px;color:#817a73;margin-bottom:20px}
+    .empty-cta{display:inline-block;padding:14px 22px;background:#1f1f1f;color:#fff;text-decoration:none;font-size:11px;letter-spacing:2px;text-transform:uppercase}
+    .section-stack{display:grid;gap:18px;margin-top:18px}
+    .section-card{padding:22px 24px}
+    .section-title{font-family:var(--serif);font-size:28px;font-weight:300;margin:0 0 14px}
+    .shipping-progress{display:grid;gap:12px}
+    .progress-copy{font-size:13px;line-height:1.7;color:var(--mid)}
+    .progress-bar{height:10px;background:#efebe3;border-radius:999px;overflow:hidden}
+    .progress-fill{height:100%;width:0;background:linear-gradient(90deg,#6c8a5f,#2a4827);transition:width .3s ease}
+    .service-list{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+    .service-box{border:1px solid var(--light);padding:14px;background:#faf8f4}
+    .service-box strong{display:block;font-size:11px;letter-spacing:1.7px;text-transform:uppercase;margin-bottom:6px}
+    .service-box span{font-size:12px;color:#7d7770;line-height:1.7}
+    .order-note-btn{display:inline-flex;align-items:center;gap:8px;background:none;border:none;padding:0;font:inherit;font-size:11px;letter-spacing:1.8px;text-transform:uppercase;color:#8c857d;cursor:pointer}
+    .order-note-btn:hover{color:var(--accent)}
+    .order-note-wrap{display:none;margin-top:14px}
+    .order-note-wrap.open{display:block}
+    .order-note-area{width:100%;min-height:92px;padding:14px 16px;border:1px solid var(--light);outline:none;font:inherit;font-size:13px;resize:vertical;background:#fcfbf8}
+    .gift-card{display:grid;grid-template-columns:74px minmax(0,1fr) auto;gap:16px;align-items:center;border:1px solid var(--light);background:#faf8f4;padding:16px}
+    .gift-visual{height:86px;background:linear-gradient(140deg,#e2d8ca,#d5c6b4);display:flex;align-items:center;justify-content:center;font-size:34px}
+    .gift-card h4{font-family:var(--serif);font-size:21px;font-weight:300;margin:0 0 4px}
+    .gift-card p{font-size:12px;color:#7b756d;line-height:1.7;margin:0 0 8px}
+    .gift-prices{display:flex;gap:8px;align-items:baseline}
+    .gift-prices del{font-size:12px;color:#aaa}
+    .gift-prices span{font-size:14px;font-weight:500;color:var(--accent)}
+    .gift-add-btn{height:42px;padding:0 18px;border:1px solid var(--black);background:#fff;font:inherit;font-size:11px;letter-spacing:1.8px;text-transform:uppercase;cursor:pointer}
+    .gift-add-btn:hover{background:#1f1f1f;color:#fff}
+    .suggestions-head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:16px}
+    .suggestions-note{font-size:11px;letter-spacing:1.8px;text-transform:uppercase;color:#91897f}
+    .suggestion-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px}
+    .suggest-card{text-decoration:none;color:inherit}
+    .suggest-card-media{aspect-ratio:3/4;background:linear-gradient(150deg,#dfd8cc,#cdc3b5);display:flex;align-items:center;justify-content:center;font-size:46px;overflow:hidden}
+    .suggest-card:nth-child(2) .suggest-card-media{background:linear-gradient(150deg,#d8e0d0,#b8c2b0)}
+    .suggest-card:nth-child(3) .suggest-card-media{background:linear-gradient(150deg,#e6ded3,#cdbbaa)}
+    .suggest-card:nth-child(4) .suggest-card-media{background:linear-gradient(150deg,#d7d7d7,#bebebe)}
+    .suggest-card p{font-family:var(--serif);font-size:18px;font-weight:300;margin:10px 0 4px}
+    .suggest-card span{font-size:12px;color:#6d665f}
+    .checkout-card{padding:24px;position:sticky;top:100px}
+    .checkout-kicker{font-size:10px;letter-spacing:2.4px;text-transform:uppercase;color:#8e867d;margin-bottom:12px}
+    .summary-title{font-family:var(--serif);font-size:30px;font-weight:300;margin:0 0 20px}
+    .summary-panel{padding:18px;background:#faf8f4;border:1px solid var(--light);margin-bottom:18px}
+    .summary-row{display:flex;justify-content:space-between;gap:14px;align-items:flex-start;font-size:13px;margin-bottom:12px}
+    .summary-row:last-child{margin-bottom:0}
+    .summary-row span{color:#6f6861}
+    .summary-row strong{font-weight:500}
+    .summary-divider{border:none;border-top:1px solid var(--light);margin:16px 0}
+    .summary-total{display:flex;justify-content:space-between;gap:14px;align-items:flex-end;margin-bottom:18px}
+    .summary-total span{font-size:12px;letter-spacing:1.6px;text-transform:uppercase;color:#8e867d}
+    .summary-total strong{font-size:28px;font-weight:500}
+    .coupon-input-row{margin-bottom:14px;padding:14px 16px;border:1px dashed var(--light);background:#fcfaf6;font-size:12px;line-height:1.7;color:#7b756d}
+    .coupon-input-row strong{display:block;font-size:10px;letter-spacing:1.8px;text-transform:uppercase;color:#8e867d;margin-bottom:6px}
+    .btn-checkout{display:block;width:100%;padding:16px;background:#202020;color:#fff;text-decoration:none;text-align:center;font-size:11px;letter-spacing:2px;text-transform:uppercase;margin-bottom:12px}
+    .btn-checkout:hover{background:#2a4827}
+    .alt-pay{border:1px solid #d7def5;background:#fbfcff;padding:14px 16px;font-size:12px;line-height:1.7;color:#445}
+    .alt-pay strong{display:block;font-size:10px;letter-spacing:1.8px;text-transform:uppercase;margin-bottom:6px;color:#5d6c86}
+    .summary-foot{margin-top:16px;font-size:11px;color:#9a9188;line-height:1.8;text-align:center}
+    footer{background:#2a4827;padding:0 40px 28px;margin-top:56px}
+    .footer-divider{border:none;border-top:1px solid rgba(255,255,255,.08);margin-bottom:40px}
+    .footer-grid{display:grid;grid-template-columns:1.6fr 1fr 1fr 1fr 1fr;gap:42px;margin-bottom:40px}
+    .footer-brand .nav-logo{color:#fff;display:block;margin-bottom:14px}
+    .footer-brand p{font-size:12px;line-height:1.9;color:rgba(255,255,255,.42)}
+    .footer-col h5{font-size:10px;letter-spacing:2.4px;text-transform:uppercase;color:#fff;margin:0 0 16px}
+    .footer-col ul{list-style:none;padding:0;margin:0}
+    .footer-col li{margin-bottom:10px}
+    .footer-col a{font-size:13px;color:rgba(255,255,255,.48);text-decoration:none}
+    .footer-bottom{border-top:1px solid rgba(255,255,255,.07);padding-top:22px;display:flex;justify-content:space-between;gap:14px;font-size:11px;color:rgba(255,255,255,.32)}
+    @media(max-width:1100px){
+      .cart-hero,.cart-layout{grid-template-columns:1fr}
+      .checkout-card{position:static}
+      .service-list,.suggestion-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+    }
+    @media(max-width:760px){
+      body{padding-top:102px}
+      .page-shell{padding:20px 20px 0}
+      .hero-card{padding:24px 20px}
+      .hero-title{font-size:38px}
+      .cart-main,.checkout-card,.section-card{padding:20px}
+      .cart-item{grid-template-columns:86px minmax(0,1fr);gap:16px}
+      .cart-item-img{width:86px;height:116px}
+      .cart-item-price{grid-column:2;align-items:flex-start;text-align:left;padding-top:0}
+      .gift-card{grid-template-columns:1fr;justify-items:start}
+      .service-list,.suggestion-grid,.footer-grid{grid-template-columns:1fr}
+      .footer-bottom{flex-direction:column}
+    }
+  </style>
+</head>
+<body>
+  <div class="announce">✦ Yeni sezon geldi — tüm siparişlerde ücretsiz kargo 600 TL ve üzeri ✦</div>
+
+  <nav id="mainNav">
+    <a class="nav-logo" href="index.html">Suvera</a>
+    <ul class="nav-menu-wrap">
+      <li><a href="urunler.html">Yeni <span class="nav-chevron">▾</span></a><div class="simple-drop"><a href="urunler.html">Yeni Gelenler</a><a href="urunler.html">Çok Satanlar</a><a href="urunler.html">Editörün Seçimleri</a></div></li>
+      <li><a href="urunler.html">Giyim <span class="nav-chevron">▾</span></a><div class="simple-drop"><a href="urunler.html">Elbise</a><a href="urunler.html">Bluz & Gömlek</a><a href="urunler.html">Pantolon & Etek</a><a href="urunler.html">Takım & Kombin</a></div></li>
+      <li><a href="urunler.html">Dış Giyim <span class="nav-chevron">▾</span></a><div class="simple-drop"><a href="urunler.html">Kaban & Mont</a><a href="urunler.html">Trençkot</a><a href="urunler.html">Ceket & Blazer</a></div></li>
+      <li><a href="urunler.html">Abaya <span class="nav-chevron">▾</span></a><div class="simple-drop"><a href="urunler.html">Abaya</a><a href="urunler.html">Ferace</a><a href="urunler.html">Kuşaklı Modeller</a></div></li>
+      <li><a href="urunler.html">Eşarp & Aksesuar</a></li>
+      <li><a href="urunler.html">Koleksiyonlar</a></li>
+      <li><a href="urunler.html" class="outlet">Outlet</a></li>
+    </ul>
+    <div class="nav-right">
+      <div class="nav-search-wrap">
+        <button class="nav-search-icon" aria-label="Ara">🔍</button>
+        <div class="nav-search-box" id="navSearchBox">
+          <input type="text" placeholder="Ürün ara..." onkeydown="if(event.key==='Enter')location.href='urunler.html'"/>
+        </div>
+      </div>
+      <a href="giris.html" class="nav-icon-btn">HESABIM</a>
+      <a href="sepet.html" class="nav-icon-btn" style="position:relative">SEPETİM <span class="cart-dot">0</span></a>
+      <button class="hamburger" aria-label="Menü" onclick="openMobileNav()"><span></span><span></span><span></span></button>
+    </div>
+  </nav>
+
+  <main class="page-shell">
+    <div class="breadcrumb">
+      <a href="index.html">Ana Sayfa</a><span>›</span>
+      <a href="sepet.html">Sepet</a>
+    </div>
+
+    <section class="cart-hero">
+      <div class="hero-card">
+        <div class="hero-kicker">Sepet Özeti</div>
+        <h1 class="hero-title">Seçtiklerin hazır,
+          <br/>son dokunuş kaldı.</h1>
+      <p class="hero-copy">Sepetinizdeki Suvera parçalarını kontrol edin, sipariş notunuzu ekleyin ve güvenli alışveriş akışına devam edin.</p>
+        <div class="hero-meta">
+          <div class="meta-pill">Güvenli ödeme</div>
+          <div class="meta-pill">Hızlı kargo</div>
+          <div class="meta-pill">Kolay iade</div>
+        </div>
+      </div>
+      <aside class="hero-side">
+        <div class="hero-side-icon">🛍️</div>
+        <small>Sepette Ayrıcalık</small>
+        <h2>Her adımda
+          <br/>daha net,
+          <br/>daha düzenli.</h2>
+        <p>Ücretsiz kargo eşiği, not alanı ve tamamlayıcı ürün önerileri tek akışta görünür durumda.</p>
+      </aside>
+    </section>
+
+    <section class="cart-layout">
+      <div>
+        <div class="cart-main">
+          <div class="cart-head">
+            <div>
+              <h2 class="page-title">Sepetim</h2>
+              <div class="page-count">(0 Ürün)</div>
+            </div>
+            <button class="clear-btn" onclick="clearCart()">Sepeti Temizle</button>
+          </div>
+
+          <div class="cart-list-head">
+            <span>Ürünler</span>
+            <span style="text-align:right">Toplam</span>
+          </div>
+
+          <div id="cartItems">
+            <div class="cart-empty">
+              <h3>Sepetiniz boş</h3>
+              <p>Yeni sezon seçkisinden birkaç parça ekleyerek devam edebilirsiniz.</p>
+              <a class="empty-cta" href="urunler.html">Alışverişe Dön</a>
+            </div>
+          </div>
+        </div>
+
+        <div class="section-stack">
+          <div class="section-card">
+            <h3 class="section-title">Kargo Avantajı</h3>
+            <div class="shipping-progress">
+              <div class="progress-copy" id="freeShippingCopy">Ücretsiz kargo için sepetinizi güncelliyoruz.</div>
+              <div class="progress-bar"><div class="progress-fill" id="freeShippingBar"></div></div>
+              <div class="service-list">
+                <div class="service-box"><strong>24 Saatte Hazırlık</strong><span>Onaylanan siparişler hızlıca paketlenir.</span></div>
+                <div class="service-box"><strong>Kolay Değişim</strong><span>Beden ve model değişiminde yalın süreç.</span></div>
+                <div class="service-box"><strong>Güvenli Paketleme</strong><span>Her sipariş korumalı ve düzenli hazırlanır.</span></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="section-card">
+            <button class="order-note-btn" type="button" onclick="toggleOrderNote()">Sipariş Notu Ekle</button>
+            <div class="order-note-wrap" id="orderNoteWrap">
+              <textarea class="order-note-area" id="orderNoteArea" placeholder="Siparişinizle ilgili notunuzu buraya yazabilirsiniz..."></textarea>
+            </div>
+          </div>
+
+          <div class="section-card">
+            <h3 class="section-title">Hediye Paketi</h3>
+            <div class="gift-card">
+              <div class="gift-visual">🎁</div>
+              <div>
+                <h4>Standart Hediye Paketi</h4>
+                <p>Sade dokulu kutu, korumalı iç ambalaj ve zarif kart eşliğiyle hazırlanır.</p>
+                <div class="gift-prices"><del>50,00 TL</del><span>45,00 TL</span></div>
+              </div>
+              <button class="gift-add-btn" id="giftAddBtn" type="button" onclick="toggleGift()">Sepete Ekle</button>
+            </div>
+          </div>
+
+          <div class="section-card">
+            <div class="suggestions-head">
+              <h3 class="section-title" style="margin:0">Birlikte Güzel Durur</h3>
+              <div class="suggestions-note">Tamamlayıcı parçalar</div>
+            </div>
+            <div class="suggestion-grid">
+              <a class="suggest-card" href="urun.html">
+                <div class="suggest-card-media">🧕</div>
+                <p>Bağlama Yaka Bluz</p>
+                <span>1.799,90 TL</span>
+              </a>
+              <a class="suggest-card" href="urun.html">
+                <div class="suggest-card-media">🥻</div>
+                <p>Palazzo Keten Takım</p>
+                <span>1.099,90 TL</span>
+              </a>
+              <a class="suggest-card" href="urun.html">
+                <div class="suggest-card-media">👘</div>
+                <p>Krep Dokulu Abaya</p>
+                <span>1.249,90 TL</span>
+              </a>
+              <a class="suggest-card" href="urun.html">
+                <div class="suggest-card-media">🧣</div>
+                <p>İpek Modal Eşarp</p>
+                <span>349,90 TL</span>
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <aside class="checkout-card">
+        <div class="checkout-kicker">Ödeme Öncesi</div>
+        <h3 class="summary-title">Sipariş Özeti</h3>
+        <div class="summary-panel">
+          <div class="summary-row"><span>Sepet Toplamı</span><strong id="subtotal">0,00 TL</strong></div>
+          <div class="summary-row"><span>Kargo</span><strong style="color:#4a7c59">Ücretsiz</strong></div>
+          <hr class="summary-divider"/>
+          <div class="summary-total"><span>Genel Toplam</span><strong id="total">0,00 TL</strong></div>
+        </div>
+
+        <div class="coupon-input-row">
+          <strong>İndirim Kodları</strong>
+          Kampanyalar şu anda ürün ve sepet toplamına doğrudan yansıtılır. Ayrı kupon girişi bu adımda aktif değildir.
+        </div>
+
+        <a href="siparis.html" class="btn-checkout">Satın Al →</a>
+
+        <div class="alt-pay">
+          <strong>Ödeme Bilgisi</strong>
+          Kart ve havale seçenekleri bir sonraki adımda güvenli ödeme akışında sunulur.
+        </div>
+
+        <div class="summary-foot">🔒 Tüm işlemler SSL ile şifrelenir. Siparişinizi güvenle tamamlayabilirsiniz.</div>
+      </aside>
+    </section>
+  </main>
+
+  <footer>
+    <hr class="footer-divider"/>
+    <div class="footer-grid">
+      <div class="footer-brand">
+        <a class="nav-logo" href="index.html">Suvera</a>
+        <p>Modern tesettür giyimde rafine, sakin ve güçlü parçalar.</p>
+      </div>
+      <div class="footer-col"><h5>Kategoriler</h5><ul><li><a href="urunler.html">Elbise</a></li><li><a href="urunler.html">Abaya</a></li><li><a href="urunler.html">Takım</a></li><li><a href="urunler.html">Eşarp</a></li></ul></div>
+      <div class="footer-col"><h5>Bilgiler</h5><ul><li><a href="kvkk.html">KVKK</a></li><li><a href="kargo.html">Kargo</a></li><li><a href="iade.html">İade & Değişim</a></li></ul></div>
+      <div class="footer-col"><h5>Suvera</h5><ul><li><a href="hakkimizda.html">Hakkımızda</a></li><li><a href="iletisim.html#iletisim-kanallari">Mağazalar</a></li></ul></div>
+      <div class="footer-col"><h5>İletişim</h5><ul><li><a href="tel:+908500007872">0850 000 78 72</a></li><li><a href="iletisim.html#iletisim-kanallari">WhatsApp</a></li></ul></div>
+    </div>
+    <div class="footer-bottom"><span>© 2026 Suvera. Tüm hakları saklıdır.</span><span>SSL Güvenli Alışveriş</span></div>
+  </footer>
+
+  <script src="js/site-seo.js"></script>
+<script src="shared.js"></script>
+  <script src="js/cart-ui.js"></script>
+  <script>
+    const CHECKOUT_NOTE_KEY = 'suveraCheckoutNote';
+    const GIFT_WRAP_KEY = 'suveraGiftWrap';
+
+    function cartItems() {
+      return window.SuveraCartUI ? window.SuveraCartUI.loadCart() : [];
+    }
+
+    function cartSubtotalValue() {
+      return window.SuveraCartUI ? window.SuveraCartUI.cartSubtotal(cartItems()) : 0;
+    }
+
+    function freeShippingLimit() {
+      try {
+        const saved = JSON.parse(localStorage.getItem('suveraSiteSettings') || 'null');
+        return Number(saved?.freeShippingLimit || 600);
+      } catch (_) {
+        return 600;
+      }
+    }
+
+    function toggleOrderNote() {
+      document.getElementById('orderNoteWrap').classList.toggle('open');
+    }
+
+    function saveCheckoutNote() {
+      const field = document.getElementById('orderNoteArea');
+      if (!field) return;
+      localStorage.setItem(CHECKOUT_NOTE_KEY, field.value.trim());
+    }
+
+    function saveGiftWrapState(active) {
+      localStorage.setItem(GIFT_WRAP_KEY, active ? 'true' : 'false');
+    }
+
+    function toggleGift() {
+      const btn = document.getElementById('giftAddBtn');
+      const added = btn.dataset.added === 'true';
+      btn.dataset.added = added ? 'false' : 'true';
+      btn.textContent = added ? 'Sepete Ekle' : 'Eklendi';
+      saveGiftWrapState(!added);
+      if (window.showToast) window.showToast(added ? 'Hediye paketi çıkarıldı' : 'Hediye paketi eklendi', added ? 'dark' : 'green');
+    }
+
+    function hydrateCheckoutPreferences() {
+      const noteField = document.getElementById('orderNoteArea');
+      const noteWrap = document.getElementById('orderNoteWrap');
+      const note = localStorage.getItem(CHECKOUT_NOTE_KEY) || '';
+      if (noteField) noteField.value = note;
+      if (note && noteWrap) noteWrap.classList.add('open');
+
+      const btn = document.getElementById('giftAddBtn');
+      const giftAdded = localStorage.getItem(GIFT_WRAP_KEY) === 'true';
+      if (btn) {
+        btn.dataset.added = giftAdded ? 'true' : 'false';
+        btn.textContent = giftAdded ? 'Eklendi' : 'Sepete Ekle';
+      }
+    }
+
+    function updateFreeShippingStatus() {
+      const subtotal = cartSubtotalValue();
+      const limit = freeShippingLimit();
+      const remaining = Math.max(limit - subtotal, 0);
+      const progress = limit ? Math.min((subtotal / limit) * 100, 100) : 100;
+      const copy = document.getElementById('freeShippingCopy');
+      const bar = document.getElementById('freeShippingBar');
+      if (!copy || !bar) return;
+
+      if (!subtotal) {
+        copy.textContent = `Sepetinizi oluşturarak ${limit.toLocaleString('tr-TR')} TL üzeri ücretsiz kargodan yararlanın.`;
+      } else if (remaining > 0) {
+        copy.textContent = `Ücretsiz kargo için sadece ${remaining.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} TL daha ekleyin.`;
+      } else {
+        copy.textContent = 'Harika, siparişiniz ücretsiz kargo avantajına ulaştı.';
+      }
+
+      bar.style.width = progress + '%';
+    }
+
+    function enhanceEmptyState() {
+      const container = document.getElementById('cartItems');
+      if (!container) return;
+      if (cartItems().length) return;
+      container.innerHTML = `
+        <div class="cart-empty">
+          <h3>Sepetiniz boş</h3>
+          <p>Yeni sezon seçkisinden birkaç parça ekleyerek alışverişe devam edebilirsiniz.</p>
+          <a class="empty-cta" href="urunler.html">Alışverişe Dön</a>
+        </div>`;
+    }
+
+    function refreshCartExperience() {
+      updateFreeShippingStatus();
+      enhanceEmptyState();
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      hydrateCheckoutPreferences();
+      const noteField = document.getElementById('orderNoteArea');
+      if (noteField) {
+        noteField.addEventListener('input', saveCheckoutNote);
+      }
+      setTimeout(refreshCartExperience, 0);
+    });
+
+    const originalChangeQty = window.changeQty;
+    window.changeQty = function(indexOrBtn, delta) {
+      if (typeof originalChangeQty === 'function') originalChangeQty(indexOrBtn, delta);
+      refreshCartExperience();
+    };
+
+    const originalRemoveCartItem = window.removeCartItem;
+    window.removeCartItem = function(index) {
+      if (typeof originalRemoveCartItem === 'function') originalRemoveCartItem(index);
+      refreshCartExperience();
+    };
+
+    const originalClearCart = window.clearCart;
+    window.clearCart = function() {
+      if (typeof originalClearCart === 'function') originalClearCart();
+      refreshCartExperience();
+    };
+  </script>
+</body>
+</html>

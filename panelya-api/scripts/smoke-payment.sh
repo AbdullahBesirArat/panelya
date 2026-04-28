@@ -59,6 +59,7 @@ initialize_order() {
   local product_id="$1"
   post_json "/api/payment/initialize" "{
     \"organizationSlug\": \"${organization_slug}\",
+    \"publicAccessToken\": \"${public_access_token}\",
     \"items\": [{\"product_id\": \"${product_id}\", \"quantity\": 1}],
     \"customer\": {
       \"name\": \"Smoke Customer\",
@@ -97,6 +98,7 @@ session="$(post_json "/api/auth/register" "{
   \"organizationSlug\": \"${organization_slug}\"
 }")"
 access_token="$(printf '%s' "$session" | json_get "accessToken")"
+public_access_token="$(printf '%s' "$session" | json_get "currentOrganization.publicAccessToken")"
 
 category="$(post_json "/api/categories" "{\"name\":\"Smoke Category\"}" -H "Authorization: Bearer ${access_token}")"
 category_id="$(printf '%s' "$category" | json_get "id")"

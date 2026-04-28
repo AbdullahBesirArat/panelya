@@ -1,0 +1,676 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Suvera checkout akisinda teslimat, iletisim ve odeme adimlarini guvenli sekilde tamamlayin." />
+  <link rel="canonical" href="https://suvera.com.tr/siparis.html" />
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="Odeme ve Teslimat | Suvera" />
+  <meta property="og:description" content="Suvera checkout akisinda teslimat, iletisim ve odeme adimlarini guvenli sekilde tamamlayin." />
+  <meta property="og:url" content="https://suvera.com.tr/siparis.html" />
+  <meta property="og:image" content="https://suvera.com.tr/og-cover.svg" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Odeme ve Teslimat | Suvera" />
+  <meta name="twitter:description" content="Suvera checkout akisinda teslimat, iletisim ve odeme adimlarini guvenli sekilde tamamlayin." />
+  <meta name="twitter:image" content="https://suvera.com.tr/og-cover.svg" />
+  <meta name="theme-color" content="#2f6041" />
+  <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+  <link rel="manifest" href="site.webmanifest" />
+  <title>Ödeme | Suvera</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;500&family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="shared.css" />
+  <style>
+    :root{
+      --ink:#151515;
+      --muted:#686c72;
+      --line:#e3e6e8;
+      --soft:#f6f7f5;
+      --panel:#ffffff;
+      --green:#2f6041;
+      --blue:#335fd6;
+      --danger:#b24141;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--soft);color:var(--ink);font-family:'Jost',sans-serif}
+    .checkout-shell{min-height:100vh;display:grid;grid-template-columns:minmax(0,1fr) 460px}
+    .checkout-main{background:#fff;padding:38px 56px 60px}
+    .checkout-side{background:#f3f5f2;border-left:1px solid var(--line);padding:38px 42px;position:relative}
+    .checkout-inner{max-width:720px;margin-left:auto}
+    .brand-row{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:34px}
+    .checkout-logo{font-family:'Cormorant Garamond',serif;font-size:30px;letter-spacing:4px;text-decoration:none;color:var(--ink)}
+    .cart-link{color:var(--muted);font-size:13px;text-decoration:none}
+    .steps{display:flex;gap:10px;align-items:center;color:var(--muted);font-size:12px;margin-bottom:28px;flex-wrap:wrap}
+    .steps strong{color:var(--ink);font-weight:500}
+    .section{padding:26px 0;border-top:1px solid var(--line)}
+    .section:first-of-type{border-top:none;padding-top:0}
+    .section-head{display:flex;align-items:baseline;justify-content:space-between;gap:16px;margin-bottom:16px}
+    .section-title{font-size:22px;font-weight:500;margin:0}
+    .section-note{font-size:13px;color:var(--muted);margin:0}
+    .field-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    .field{display:flex;flex-direction:column;gap:7px}
+    .field.full{grid-column:1/-1}
+    label{font-size:12px;color:var(--muted)}
+    input,select,textarea{width:100%;border:1px solid var(--line);background:#fff;border-radius:5px;font:inherit;font-size:14px;padding:13px 12px;outline:none}
+    textarea{min-height:98px;resize:vertical}
+    input:focus,select:focus,textarea:focus{border-color:#8e9ba9;box-shadow:0 0 0 2px rgba(51,95,214,.08)}
+    .check-row{display:flex;align-items:center;gap:10px;margin-top:12px;color:#34383d;font-size:13px}
+    .check-row input{width:auto}
+    .method-list{display:grid;gap:10px}
+    .method{border:1px solid var(--line);background:#fff;border-radius:6px;overflow:hidden}
+    .method label{display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:center;padding:15px;color:var(--ink);cursor:pointer}
+    .method input{width:auto}
+    .method-title{font-size:14px;font-weight:500}
+    .method-copy{font-size:12px;color:var(--muted);margin-top:3px}
+    .method-tag{font-size:11px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:4px 8px}
+    .method-detail{display:none;border-top:1px solid var(--line);padding:14px 16px;background:#fafafa;color:var(--muted);font-size:13px;line-height:1.55}
+    .method:has(input:checked){border-color:#9cadb9;box-shadow:0 0 0 1px #9cadb9}
+    .method:has(input:checked) .method-detail{display:block}
+    .error{display:none;background:#fff1f1;border:1px solid #efc5c5;color:var(--danger);border-radius:6px;padding:13px 14px;font-size:13px;line-height:1.55;margin-bottom:16px}
+    .trust-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:16px}
+    .trust-card{border:1px solid var(--line);border-radius:6px;background:#fafafa;padding:12px 13px;font-size:12px;color:var(--muted);line-height:1.6}
+    .trust-card strong{display:block;color:var(--ink);font-size:11px;letter-spacing:1.3px;text-transform:uppercase;margin-bottom:6px}
+    .pay-row{display:flex;align-items:center;justify-content:space-between;gap:18px;margin-top:24px}
+    .back-link{color:var(--blue);font-size:14px;text-decoration:none}
+    .pay-btn{border:none;background:var(--green);color:#fff;border-radius:6px;padding:16px 24px;font:inherit;font-size:14px;font-weight:600;cursor:pointer;min-width:190px}
+    .pay-btn:disabled{opacity:.55;cursor:not-allowed}
+    .summary-card{position:sticky;top:24px}
+    .summary-logo{display:none}
+    .summary-list{display:grid;gap:16px;margin-bottom:22px}
+    .summary-item{display:grid;grid-template-columns:66px 1fr auto;gap:13px;align-items:center}
+    .summary-img{width:66px;height:66px;border:1px solid var(--line);border-radius:8px;background:#fff;display:grid;place-items:center;position:relative;overflow:hidden}
+    .summary-img img{width:100%;height:100%;object-fit:cover}
+    .qty-badge{position:absolute;right:-7px;top:-7px;min-width:22px;height:22px;border-radius:999px;background:#68707a;color:#fff;font-size:12px;display:grid;place-items:center;padding:0 6px}
+    .summary-name{font-size:14px;font-weight:500;margin:0 0 4px}
+    .summary-meta{font-size:12px;color:var(--muted);margin:0}
+    .summary-price{font-size:13px;font-weight:600;white-space:nowrap}
+    .discount-row{margin:22px 0;padding:12px 14px;border:1px dashed var(--line);border-radius:6px;background:#fafafa;color:var(--muted);font-size:13px;line-height:1.55}
+    .discount-row strong{display:block;color:var(--ink);font-size:11px;letter-spacing:1.3px;text-transform:uppercase;margin-bottom:6px}
+    .money-row{display:flex;justify-content:space-between;gap:16px;padding:9px 0;color:#34383d;font-size:14px}
+    .money-row.total{border-top:1px solid var(--line);margin-top:12px;padding-top:18px;font-size:20px;color:var(--ink);font-weight:600}
+    .currency{font-size:12px;color:var(--muted);font-weight:400;margin-right:6px}
+    .empty-note{background:#fff;border:1px solid var(--line);border-radius:6px;padding:14px;color:var(--muted);font-size:13px;line-height:1.5}
+    .mobile-summary-toggle{display:none}
+    @media(max-width:980px){
+      .checkout-shell{display:flex;flex-direction:column}
+      .checkout-side{order:-1;border-left:none;border-bottom:1px solid var(--line);padding:0}
+      .checkout-main{padding:28px 20px 44px}
+      .checkout-inner{max-width:none}
+      .summary-card{position:static;padding:18px 20px}
+       .summary-list,.money-lines{display:none}
+       .discount-row{display:none}
+       .checkout-side.open .summary-list,.checkout-side.open .money-lines{display:grid}
+       .checkout-side.open .discount-row{display:block}
+      .mobile-summary-toggle{display:flex;justify-content:space-between;align-items:center;width:100%;border:none;background:#f3f5f2;padding:18px 20px;font:inherit;color:var(--blue)}
+      .summary-logo{display:block;font-family:'Cormorant Garamond',serif;font-size:26px;letter-spacing:4px;padding:22px 20px 0}
+    .field-grid,.trust-grid{grid-template-columns:1fr}
+      .pay-row{flex-direction:column-reverse;align-items:stretch}
+      .pay-btn{width:100%}
+    }
+  </style>
+</head>
+<body>
+  <main class="checkout-shell">
+    <section class="checkout-main">
+      <div class="checkout-inner">
+        <div class="brand-row">
+          <a class="checkout-logo" href="index.html">Suvera</a>
+          <a class="cart-link" href="sepet.html">Sepete dön</a>
+        </div>
+
+        <div class="steps">
+          <span>Sepet</span><span>›</span><strong>Bilgiler</strong><span>›</span><span>Kargo</span><span>›</span><span>Ödeme</span>
+        </div>
+
+        <form id="checkoutForm" novalidate>
+          <div class="error" id="checkoutError" role="alert" aria-live="assertive"></div>
+
+          <section class="section">
+            <div class="section-head">
+              <h2 class="section-title">İletişim</h2>
+            </div>
+            <div class="field-grid">
+              <div class="field full">
+                <label for="customerEmail">E-posta</label>
+                <input id="customerEmail" name="email" type="email" autocomplete="email" required maxlength="200" />
+              </div>
+            </div>
+            <label class="check-row">
+              <input type="checkbox" checked />
+              Haberler ve teklifler hakkında bana e-posta gönder
+            </label>
+          </section>
+
+          <section class="section">
+            <div class="section-head">
+              <h2 class="section-title">Teslimat</h2>
+            </div>
+            <div class="field-grid">
+              <div class="field full">
+                <label for="country">Ülke/Bölge</label>
+                <select id="country" name="country" autocomplete="shipping country-name">
+                  <option value="TR" selected>Türkiye</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="firstName">Ad</label>
+                <input id="firstName" name="firstName" autocomplete="shipping given-name" required maxlength="80" />
+              </div>
+              <div class="field">
+                <label for="lastName">Soyadı</label>
+                <input id="lastName" name="lastName" autocomplete="shipping family-name" required maxlength="80" />
+              </div>
+              <div class="field full">
+                <label for="address">Adres</label>
+                <input id="address" name="address" autocomplete="shipping address-line1" required maxlength="500" />
+              </div>
+              <div class="field">
+                <label for="city">İl</label>
+                <select id="city" name="city" autocomplete="shipping address-level1" required>
+                  <option value="">İl seçin</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="district">İlçe</label>
+                <select id="district" name="district" autocomplete="shipping address-line2" required disabled>
+                  <option value="">Önce il seçin</option>
+                </select>
+              </div>
+              <div class="field full">
+                <label for="customerPhone">Telefon</label>
+                <input id="customerPhone" name="phone" autocomplete="shipping tel-national" required maxlength="40" placeholder="05xx xxx xx xx" />
+              </div>
+            </div>
+            <label class="check-row">
+              <input type="checkbox" />
+              Bir sonraki işlem için bu bilgileri kaydet
+            </label>
+          </section>
+
+          <section class="section">
+            <div class="section-head">
+              <h2 class="section-title">Kargo yöntemi</h2>
+              <p class="section-note">Adres bilgilerine göre hazırlanır</p>
+            </div>
+            <div class="method-list">
+              <div class="method">
+                <label>
+                  <input type="radio" name="shipping" checked />
+                  <span>
+                    <span class="method-title">Standart Kargo</span>
+                    <span class="method-copy">Onaylanan siparişler özenle paketlenir.</span>
+                  </span>
+                  <strong>Ücretsiz</strong>
+                </label>
+              </div>
+            </div>
+          </section>
+
+          <section class="section">
+            <div class="section-head">
+              <h2 class="section-title">Ödeme</h2>
+              <p class="section-note">Kart bilgileri bu sayfada tutulmaz, güvenli ödeme adımına yönlendirilirsiniz.</p>
+            </div>
+            <div class="method-list">
+              <div class="method">
+                <label>
+                  <input type="radio" name="paymentMethod" value="card" checked />
+                  <span>
+                    <span class="method-title">Kart ile ödeme</span>
+                    <span class="method-copy">Güvenli ödeme sayfasına yönlendirilirsiniz.</span>
+                  </span>
+                  <span class="method-tag">Sağlayıcı</span>
+                </label>
+                <div class="method-detail">Kart numarası bu sayfada saklanmaz veya işlenmez. Ödeme sağlayıcısının güvenli ekranında tamamlanır.</div>
+              </div>
+              <div class="method">
+                <label>
+                  <input type="radio" name="paymentMethod" value="iban" />
+                  <span>
+                    <span class="method-title">IBAN / havale ile ödeme</span>
+                    <span class="method-copy">Sipariş sonrasında ödeme bilgileri paylaşılır.</span>
+                  </span>
+                  <span class="method-tag">Manuel</span>
+                </label>
+                <div class="method-detail">Sipariş numaranızı açıklama alanına ekleyerek ödeme yapabilirsiniz. Onaydan sonra siparişiniz hazırlanır.</div>
+              </div>
+            </div>
+            <div class="trust-grid">
+              <div class="trust-card"><strong>SSL</strong>Form verileri güvenli bağlantı üzerinden iletilir.</div>
+              <div class="trust-card"><strong>3D Secure</strong>Sağlayıcı aktif olduğunda doğrulama ekranında tamamlanır.</div>
+              <div class="trust-card"><strong>Kart Saklama Yok</strong>Kart numarası Suvera tarafında tutulmaz.</div>
+            </div>
+          </section>
+
+          <div class="pay-row">
+            <a class="back-link" href="sepet.html">Sepete geri dön</a>
+            <button class="pay-btn" id="payButton" type="submit">Siparişi Tamamla</button>
+          </div>
+        </form>
+      </div>
+    </section>
+
+    <aside class="checkout-side" id="checkoutSide">
+      <div class="summary-logo">Suvera</div>
+      <button class="mobile-summary-toggle" type="button" onclick="toggleSummary()">
+        <span>Sipariş özetini göster</span>
+        <strong id="mobileTotal">0,00 TL</strong>
+      </button>
+      <div class="summary-card">
+        <div class="summary-list" id="summaryList"></div>
+        <div class="discount-row">
+          <strong>İndirim kodları</strong>
+          Kampanyalar şu anda ürün ve sepet toplamına doğrudan yansıtılır. Ayrı kupon girişi bu adımda aktif değildir.
+        </div>
+        <div class="money-lines">
+          <div class="money-row"><span>Alt toplam</span><strong id="summarySubtotal">0,00 TL</strong></div>
+          <div class="money-row"><span>Kargo</span><strong>Ücretsiz</strong></div>
+          <div class="money-row total"><span>Toplam</span><span><span class="currency">TRY</span><strong id="summaryTotal">0,00 TL</strong></span></div>
+        </div>
+      </div>
+    </aside>
+  </main>
+
+  <script src="js/tr-address-data.js"></script>
+  <script src="js/config.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/site-seo.js"></script>
+  <script>
+    const CART_KEY = 'suveraCart';
+    const CHECKOUT_NOTE_KEY = 'suveraCheckoutNote';
+    const GIFT_WRAP_KEY = 'suveraGiftWrap';
+    const SHIPPING_FEE = 0;
+    const CARD_PAYMENT_SUCCESS_URL = 'https://suvera.com.tr/tesekkur.html';
+    const CARD_PAYMENT_FAILURE_URL = 'https://suvera.com.tr/tesekkur.html?payment=failed';
+
+    function escapeHtml(value) {
+      return String(value || '').replace(/[&<>"']/g, (char) => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#039;',
+      }[char]));
+    }
+
+    function money(value) {
+      return Number(value || 0).toLocaleString('tr-TR', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      }) + ' TL';
+    }
+
+    function loadCart() {
+      try {
+        return JSON.parse(localStorage.getItem(CART_KEY) || '[]');
+      } catch (_) {
+        return [];
+      }
+    }
+
+    function cartSubtotal(cart) {
+      return cart.reduce((sum, item) => sum + Number(item.price || 0) * Number(item.qty || 1), 0);
+    }
+
+    function orderCodeFromResult(result) {
+      return result && (
+        result.orderCode ||
+        result.order_code ||
+        result.id ||
+        (result.order && (result.order.orderCode || result.order.order_code || result.order.id)) ||
+        ''
+      );
+    }
+
+    function itemImage(item, qty) {
+      const src = item.image && window.SuveraAPI ? window.SuveraAPI.assetUrl(item.image) : item.image;
+      const media = src
+        ? '<img src="' + escapeHtml(src) + '" alt="' + escapeHtml(item.name) + '" loading="lazy" decoding="async">'
+        : escapeHtml(item.emoji || '👗');
+      return media + '<span class="qty-badge">' + qty + '</span>';
+    }
+
+    function showCheckoutMessage(message) {
+      const error = document.getElementById('checkoutError');
+      error.textContent = message;
+      error.style.display = 'block';
+      error.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+
+    function clearCheckoutMessage() {
+      const error = document.getElementById('checkoutError');
+      error.textContent = '';
+      error.style.display = 'none';
+    }
+
+    function getCheckoutErrorMessage(error) {
+      const raw = String(error && error.message || '').trim();
+      const message = raw.toLocaleLowerCase('tr-TR');
+
+      if (!raw) {
+        return 'Ödeme başlatılamadı. Lütfen bilgilerinizi kontrol edip tekrar deneyin.';
+      }
+
+      if (
+        message.includes('failed to fetch') ||
+        message.includes('network') ||
+        message.includes('cors') ||
+        message.includes('timeout')
+      ) {
+        return 'Ödeme servisine şu anda ulaşılamıyor. Bağlantınızı kontrol edip kısa bir süre sonra tekrar deneyin.';
+      }
+
+      if (message.includes('stok') || message.includes('inventory')) {
+        return 'Sepetinizdeki ürünlerden birinin stoğu güncellenmiş olabilir. Sepetinizi yenileyip tekrar deneyin.';
+      }
+
+      if (
+        message.includes('kart') ||
+        message.includes('card') ||
+        message.includes('payment') ||
+        message.includes('ödeme') ||
+        message.includes('odeme') ||
+        message.includes('3d')
+      ) {
+        return 'Ödeme başlatılamadı. Kart bilgilerinizi ve banka onay adımını kontrol ederek tekrar deneyin.';
+      }
+
+      if (message.includes('api hatası: 4') || message.includes('api hatasi: 4')) {
+        return 'Sipariş bilgileriniz eksik veya geçersiz görünüyor. Teslimat ve iletişim alanlarını kontrol edip tekrar deneyin.';
+      }
+
+      if (message.includes('api hatası: 5') || message.includes('api hatasi: 5')) {
+        return 'Ödeme altyapısında geçici bir yoğunluk var. Lütfen birkaç dakika sonra tekrar deneyin.';
+      }
+
+      return 'Sipariş oluşturulamadı. Bilgilerinizi kontrol edip tekrar deneyin.';
+    }
+
+    function toggleSummary() {
+      document.getElementById('checkoutSide').classList.toggle('open');
+    }
+
+    function normalizePhone(value) {
+      return String(value || '').replace(/\D/g, '');
+    }
+
+    function validateCheckoutForm() {
+      const firstName = document.getElementById('firstName').value.trim();
+      const lastName = document.getElementById('lastName').value.trim();
+      const address = document.getElementById('address').value.trim();
+      const city = document.getElementById('city').value.trim();
+      const district = document.getElementById('district').value.trim();
+      const email = document.getElementById('customerEmail').value.trim();
+      const phone = normalizePhone(document.getElementById('customerPhone').value);
+
+      if (firstName.length < 2) return 'Lütfen geçerli bir ad girin.';
+      if (lastName.length < 2) return 'Lütfen geçerli bir soyadı girin.';
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return 'Lütfen geçerli bir e-posta adresi girin.';
+      if (address.length < 10) return 'Lütfen teslimat adresini daha detaylı yazın.';
+      if (!city) return 'Lütfen il seçin.';
+      if (!district) return 'Lütfen ilçe seçin.';
+      if (!(phone.length === 10 || phone.length === 11)) return 'Telefon numaranızı eksiksiz girin.';
+      if (phone.length === 11 && !phone.startsWith('0')) return 'Telefon numarası 0 ile başlamalıdır.';
+      if (phone.length === 10 && !phone.startsWith('5')) return 'Telefon numarası 5xx ile başlamalıdır.';
+
+      return '';
+    }
+
+    function loadCheckoutPreferences() {
+      return {
+        note: (localStorage.getItem(CHECKOUT_NOTE_KEY) || '').trim(),
+        giftWrap: localStorage.getItem(GIFT_WRAP_KEY) === 'true',
+      };
+    }
+
+    function hydrateCheckoutProfile() {
+      const profile = window.Suvera && window.Suvera.loadProfile ? window.Suvera.loadProfile() : {};
+      const [firstName, ...rest] = String(profile.name || '').trim().split(/\s+/).filter(Boolean);
+      const lastName = rest.join(' ');
+
+      if (firstName && !document.getElementById('firstName').value.trim()) {
+        document.getElementById('firstName').value = firstName;
+      }
+      if (lastName && !document.getElementById('lastName').value.trim()) {
+        document.getElementById('lastName').value = lastName;
+      }
+      if (profile.email && !document.getElementById('customerEmail').value.trim()) {
+        document.getElementById('customerEmail').value = profile.email;
+      }
+      if (profile.phone && !document.getElementById('customerPhone').value.trim()) {
+        document.getElementById('customerPhone').value = profile.phone;
+      }
+      if (profile.address && !document.getElementById('address').value.trim()) {
+        document.getElementById('address').value = profile.address;
+      }
+    }
+
+    function titleCaseAddress(value) {
+      return String(value || '')
+        .toLocaleLowerCase('tr-TR')
+        .replace(/(^|[\s/-])\S/g, (part) => part.toLocaleUpperCase('tr-TR'));
+    }
+
+    function populateCities() {
+      const citySelect = document.getElementById('city');
+      const cities = Array.isArray(window.TR_ADDRESS_DATA) ? window.TR_ADDRESS_DATA : [];
+      citySelect.innerHTML = '<option value="">İl seçin</option>' + cities.map((city) => {
+        const name = titleCaseAddress(city.name);
+        return '<option value="' + escapeHtml(name) + '">' + escapeHtml(name) + '</option>';
+      }).join('');
+    }
+
+    function populateDistricts() {
+      const citySelect = document.getElementById('city');
+      const districtSelect = document.getElementById('district');
+      const cities = Array.isArray(window.TR_ADDRESS_DATA) ? window.TR_ADDRESS_DATA : [];
+      const selectedCity = citySelect.value;
+      const city = cities.find((item) => titleCaseAddress(item.name) === selectedCity);
+
+      if (!city) {
+        districtSelect.innerHTML = '<option value="">Önce il seçin</option>';
+        districtSelect.disabled = true;
+        return;
+      }
+
+      districtSelect.disabled = false;
+      districtSelect.innerHTML = '<option value="">İlçe seçin</option>' + city.districts.map((district) => {
+        const name = titleCaseAddress(district.name);
+        return '<option value="' + escapeHtml(name) + '">' + escapeHtml(name) + '</option>';
+      }).join('');
+    }
+
+    function renderSummary() {
+      const cart = loadCart();
+      const list = document.getElementById('summaryList');
+      const subtotal = cartSubtotal(cart);
+      const missingProductIds = cart.filter((item) => !(item.product_id || item.id));
+      const checkoutPrefs = loadCheckoutPreferences();
+      const extraRows = [];
+
+      document.getElementById('summarySubtotal').textContent = money(subtotal);
+      document.getElementById('summaryTotal').textContent = money(subtotal);
+      document.getElementById('mobileTotal').textContent = money(subtotal);
+
+      if (!cart.length) {
+        list.innerHTML = '<div class="empty-note">Sepetiniz boş. Sipariş oluşturmak için önce ürün ekleyin.</div>';
+        document.getElementById('payButton').disabled = true;
+        return;
+      }
+
+      list.innerHTML = cart.map((item) => {
+        const qty = Number(item.qty || 1);
+        const price = Number(item.price || 0);
+        return `
+          <div class="summary-item">
+            <div class="summary-img">${itemImage(item, qty)}</div>
+            <div>
+              <p class="summary-name">${escapeHtml(item.name || 'Ürün')}</p>
+              <p class="summary-meta">${escapeHtml(item.variant || item.size || 'Standart')}</p>
+            </div>
+            <div class="summary-price">${money(price * qty)}</div>
+          </div>`;
+      }).join('');
+
+      if (checkoutPrefs.giftWrap) {
+        extraRows.push('<div class="empty-note">Hediye paketi tercihi checkout ile birlikte kaydedildi.</div>');
+      }
+
+      if (checkoutPrefs.note) {
+        extraRows.push('<div class="empty-note"><strong>Sipariş notu:</strong><br>' + escapeHtml(checkoutPrefs.note) + '</div>');
+      }
+
+      if (extraRows.length) {
+        list.insertAdjacentHTML('beforeend', extraRows.join(''));
+      }
+
+      if (missingProductIds.length) {
+        document.getElementById('payButton').disabled = true;
+        showCheckoutMessage('Sepette eski/demo ürünler var. Güvenli ödeme için ürünleri Ürünler sayfasından yeniden ekleyin.');
+      }
+    }
+
+    document.getElementById('checkoutForm').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const payButton = document.getElementById('payButton');
+      const cart = loadCart();
+      const checkoutPrefs = loadCheckoutPreferences();
+      clearCheckoutMessage();
+
+      if (!cart.length) {
+        showCheckoutMessage('Sepetiniz boş.');
+        return;
+      }
+
+      const validationMessage = validateCheckoutForm();
+      if (validationMessage) {
+        showCheckoutMessage(validationMessage);
+        return;
+      }
+
+      const addressParts = [
+        document.getElementById('address').value.trim(),
+        document.getElementById('district').value.trim(),
+        document.getElementById('city').value.trim(),
+      ].filter(Boolean);
+
+      const selectedPaymentMethod = (document.querySelector('input[name="paymentMethod"]:checked') || {}).value || 'card';
+      const isIbanPayment = selectedPaymentMethod === 'iban';
+      const payload = {
+        customer: {
+          name: [
+            document.getElementById('firstName').value.trim(),
+            document.getElementById('lastName').value.trim(),
+          ].filter(Boolean).join(' '),
+          email: document.getElementById('customerEmail').value.trim(),
+          phone: normalizePhone(document.getElementById('customerPhone').value),
+          address: addressParts.join(' / '),
+        },
+        items: cart.map((item) => ({
+          product_id: item.product_id || item.id,
+          quantity: item.qty || item.quantity || 1,
+        })),
+        shipping_fee: SHIPPING_FEE,
+        paymentMethod: selectedPaymentMethod === 'iban' ? 'iban' : 'card',
+      };
+
+      if (checkoutPrefs.note) payload.note = checkoutPrefs.note;
+      if (checkoutPrefs.giftWrap) payload.gift_wrap = true;
+
+      const snapshot = {
+        orderCode: '',
+        provider: isIbanPayment ? 'manual' : 'provider',
+        status: 'payment_pending',
+        paymentMethod: payload.paymentMethod,
+        total: cartSubtotal(cart) + SHIPPING_FEE,
+        shipping_fee: SHIPPING_FEE,
+        customer: payload.customer,
+        note: checkoutPrefs.note,
+        giftWrap: checkoutPrefs.giftWrap,
+        items: cart.map((item) => ({
+          id: item.product_id || item.id || '',
+          name: item.name || 'Urun',
+          qty: Number(item.qty || item.quantity || 1),
+          price: Number(item.price || 0),
+          variant: item.variant || item.size || 'Standart',
+          image: item.image || '',
+          emoji: item.emoji || '',
+        })),
+      };
+
+      try {
+        payButton.disabled = true;
+        payButton.textContent = 'Sipariş oluşturuluyor...';
+        const result = await window.SuveraAPI.payment.initialize({
+          ...payload,
+          successUrl: CARD_PAYMENT_SUCCESS_URL,
+          failureUrl: CARD_PAYMENT_FAILURE_URL,
+          success_url: CARD_PAYMENT_SUCCESS_URL,
+          failure_url: CARD_PAYMENT_FAILURE_URL,
+        });
+        const orderCode = orderCodeFromResult(result);
+        const provider = result && result.provider || snapshot.provider || 'provider';
+        const savedOrder = {
+          ...snapshot,
+          orderCode,
+          provider,
+          status: snapshot.status,
+          paymentPageUrl: result && result.paymentPageUrl || '',
+        };
+        if (window.Suvera && window.Suvera.recordOrder) {
+          window.Suvera.recordOrder(savedOrder);
+        }
+        localStorage.removeItem(CART_KEY);
+        localStorage.removeItem(CHECKOUT_NOTE_KEY);
+        localStorage.removeItem(GIFT_WRAP_KEY);
+        if (isIbanPayment) {
+          window.location.href = 'tesekkur.html?order=' + encodeURIComponent(orderCode);
+          return;
+        }
+
+        if (result && result.paymentPageUrl) {
+          window.location.href = result.paymentPageUrl;
+          return;
+        }
+
+        window.location.href = 'tesekkur.html?order=' + encodeURIComponent(orderCode);
+      } catch (err) {
+        console.error('Checkout payment initialize failed:', err);
+        showCheckoutMessage(getCheckoutErrorMessage(err));
+        payButton.disabled = false;
+        payButton.textContent = 'Siparişi Tamamla';
+      }
+    });
+
+    document.addEventListener('DOMContentLoaded', () => {
+      if (window.SuveraSEO) {
+        window.SuveraSEO.applyPageMeta({
+          title: 'Odeme ve Teslimat | Suvera',
+          description: 'Suvera checkout akisinda teslimat, iletisim ve odeme adimlarini guvenli sekilde tamamlayin.',
+          path: 'siparis.html',
+        });
+        window.SuveraSEO.applyBaseSchemas({
+          path: 'siparis.html',
+          name: 'Odeme ve Teslimat | Suvera',
+          description: 'Suvera checkout akisinda teslimat, iletisim ve odeme adimlarini guvenli sekilde tamamlayin.',
+        });
+      }
+      const sections = Array.from(document.querySelectorAll('.section'));
+      const shippingSection = sections.find((section) => section.querySelector('input[name="shipping"]'));
+      const paymentSection = sections.find((section) => section.querySelector('input[name="paymentMethod"]'));
+      const trustGrid = shippingSection && shippingSection.querySelector('.trust-grid');
+      const paymentList = paymentSection && paymentSection.querySelector('.method-list');
+      if (trustGrid && paymentList && trustGrid.parentElement !== paymentSection) {
+        paymentList.insertAdjacentElement('afterend', trustGrid);
+      }
+      hydrateCheckoutProfile();
+      populateCities();
+      document.getElementById('city').addEventListener('change', populateDistricts);
+      renderSummary();
+    });
+  </script>
+  <script src="shared.js"></script>
+</body>
+</html>

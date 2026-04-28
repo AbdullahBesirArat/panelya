@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const db = require('../db');
 
 const WEAK_SECRET_MARKERS = [
   'change_to',
@@ -13,7 +14,15 @@ const WEAK_SECRET_MARKERS = [
   'password',
 ];
 
-let ephemeralJwtSecret = null;
+const SECRET_TYPES = {
+  admin: { envName: 'JWT_SECRET_ADMIN', fallbackEnvName: 'JWT_SECRET' },
+  app: { envName: 'JWT_SECRET_APP', fallbackEnvName: 'JWT_SECRET' },
+};
+
+const ephemeralJwtSecrets = {
+  admin: null,
+  app: null,
+};
 
 function isProduction() {
   return process.env.NODE_ENV === 'production';
@@ -26,27 +35,29 @@ function parseCsv(value) {
     .filter(Boolean);
 }
 
-function ensureJwtSecret() {
-  const configuredSecret = process.env.JWT_SECRET || '';
-  const secret = configuredSecret || ephemeralJwtSecret || '';
+function ensureJwtSecret(type = 'app') {
+  const secretType = SECRET_TYPES[type] || SECRET_TYPES.app;
+  const configuredSecret = process.env[secretType.envName] || '';
+  const fallbackSecret = process.env[secretType.fallbackEnvName] || '';
+  const secret = configuredSecret || fallbackSecret || ephemeralJwtSecrets[type] || '';
   const weakMarker = hasWeakMarker(secret);
 
   if (!secret) {
     if (isProduction()) {
-      throw new Error('JWT_SECRET zorunlu');
+      throw new Error(`${secretType.envName} zorunlu`);
     }
 
-    ephemeralJwtSecret = randomToken(64);
-    console.warn('JWT_SECRET tanimli degil; development/staging icin gecici secret uretildi. Restart sonrasi oturumlar gecersiz olur.');
-    return ephemeralJwtSecret;
+    ephemeralJwtSecrets[type] = randomToken(64);
+    console.warn(`${secretType.envName} tanimli degil; development/staging icin gecici secret uretildi. Restart sonrasi oturumlar gecersiz olur.`);
+    return ephemeralJwtSecrets[type];
   }
 
   if (isProduction() && (secret.length < 64 || weakMarker)) {
-    throw new Error('Production icin en az 64 karakterlik guvenli JWT_SECRET zorunlu');
+    throw new Error(`Production icin en az 64 karakterlik guvenli ${secretType.envName} zorunlu`);
   }
 
   if (!isProduction() && (secret.length < 32 || weakMarker)) {
-    console.warn('JWT_SECRET development icin zayif gorunuyor; production oncesi 64+ karakter random secret kullanin.');
+    console.warn(`${secretType.envName} development icin zayif gorunuyor; production oncesi 64+ karakter random secret kullanin.`);
   }
 
   return secret;
@@ -72,9 +83,14 @@ function requireConfiguredEnv(name, { minLength = 1 } = {}) {
 }
 
 function ensureProductionReady() {
-  ensureJwtSecret();
+  const appJwtSecret = ensureJwtSecret('app');
+  const adminJwtSecret = ensureJwtSecret('admin');
 
   if (!isProduction()) return;
+
+  if (appJwtSecret === adminJwtSecret) {
+    throw new Error('JWT_SECRET_APP ve JWT_SECRET_ADMIN farkli olmali');
+  }
 
   requireConfiguredEnv('DATABASE_URL', { minLength: 20 });
   requireConfiguredEnv('CORS_ORIGIN', { minLength: 8 });
@@ -120,7 +136,7 @@ function corsOptions() {
   return {
     credentials: true,
     origin(origin, callback) {
-      if (!origin && !isProduction()) return callback(null, true);
+      if (!origin) return callback(null, true);
       if (allowedOrigins.includes(origin)) return callback(null, true);
       if (!isProduction() && /^https:\/\/[a-z0-9-]+\.vercel\.app$/i.test(String(origin || ''))) {
         return callback(null, true);
@@ -131,7 +147,7 @@ function corsOptions() {
 }
 
 function isCorsOriginAllowed(origin) {
-  if (!origin && !isProduction()) return true;
+  if (!origin) return true;
   if (parseCsv(process.env.CORS_ORIGIN).includes(origin)) return true;
   return !isProduction() && /^https:\/\/[a-z0-9-]+\.vercel\.app$/i.test(String(origin || ''));
 }
@@ -148,37 +164,60 @@ function handleCorsPreflight(req, res, next) {
   return res.sendStatus(204);
 }
 
+function maybeCleanupRateLimits() {
+  if (Math.random() > 0.01) return;
+
+  db.query(
+    `delete from api_rate_limits
+     where reset_at < now() - interval '1 hour'`
+  ).catch((error) => {
+    console.error('Rate limit cleanup hatasi:', error.message);
+  });
+}
+
 function rateLimit({ windowMs, max, message }) {
-  const hits = new Map();
+  return async (req, res, next) => {
+    try {
+      const key = `${req.ip}:${req.baseUrl || ''}:${req.path}`;
+      const resetAt = new Date(Date.now() + windowMs);
+      const result = await db.query(
+        `insert into api_rate_limits (key, hit_count, reset_at)
+         values ($1, 1, $2)
+         on conflict (key)
+         do update set
+           hit_count = case
+             when api_rate_limits.reset_at <= now() then 1
+             else api_rate_limits.hit_count + 1
+           end,
+           reset_at = case
+             when api_rate_limits.reset_at <= now() then excluded.reset_at
+             else api_rate_limits.reset_at
+           end,
+           updated_at = now()
+         returning hit_count, extract(epoch from reset_at)::bigint as reset_at_epoch`,
+        [key, resetAt.toISOString()]
+      );
 
-  return (req, res, next) => {
-    const now = Date.now();
-    const key = `${req.ip}:${req.baseUrl || ''}:${req.path}`;
-    const current = hits.get(key) || { count: 0, resetAt: now + windowMs };
+      const current = result.rows[0];
+      const count = Number(current.hit_count || 0);
+      const resetAtEpoch = Number(current.reset_at_epoch || 0);
 
-    if (current.resetAt <= now) {
-      current.count = 0;
-      current.resetAt = now + windowMs;
-    }
+      res.set('RateLimit-Limit', String(max));
+      res.set('RateLimit-Remaining', String(Math.max(0, max - count)));
+      res.set('RateLimit-Reset', String(resetAtEpoch));
 
-    current.count += 1;
-    hits.set(key, current);
+      maybeCleanupRateLimits();
 
-    if (hits.size > 10000) {
-      for (const [hitKey, value] of hits) {
-        if (value.resetAt <= now) hits.delete(hitKey);
+      if (count > max) {
+        return res.status(429).json({ error: message || 'Cok fazla istek. Lutfen biraz sonra tekrar deneyin.' });
       }
+
+      return next();
+    } catch (error) {
+      console.error('Rate limit middleware pas gecildi:', error.message);
+      // Fail-open: transient DB issues should not take down API availability.
+      return next();
     }
-
-    res.set('RateLimit-Limit', String(max));
-    res.set('RateLimit-Remaining', String(Math.max(0, max - current.count)));
-    res.set('RateLimit-Reset', String(Math.ceil(current.resetAt / 1000)));
-
-    if (current.count > max) {
-      return res.status(429).json({ error: message || 'Cok fazla istek. Lutfen biraz sonra tekrar deneyin.' });
-    }
-
-    return next();
   };
 }
 

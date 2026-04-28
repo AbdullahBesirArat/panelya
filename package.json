@@ -18,6 +18,7 @@
     "db:migrate": "npm --prefix panelya-api run db:migrate",
     "db:setup": "npm --prefix panelya-api run db:setup",
     "demo:seed": "npm --prefix panelya-api run demo:seed",
+    "suvera:seed": "npm --prefix panelya-api run suvera:seed",
     "db:seed-demo": "npm --prefix panelya-api run db:seed-demo",
     "deploy:api:staging": "npm --prefix panelya-api run deploy:staging",
     "deploy:api:production": "npm --prefix panelya-api run deploy:production",

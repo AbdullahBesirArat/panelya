@@ -19,7 +19,8 @@ function refreshTokenHash(token) {
 }
 
 function createAccessToken(payload, audience) {
-  return jwt.sign(payload, ensureJwtSecret(), {
+  const tokenType = audience === ADMIN_AUDIENCE ? 'admin' : 'app';
+  return jwt.sign(payload, ensureJwtSecret(tokenType), {
     expiresIn: accessTokenExpiresIn(),
     algorithm: 'HS256',
     issuer: 'panelya-api',
@@ -68,7 +69,7 @@ async function issueRefreshToken(client, { userId, req }) {
   return rawToken;
 }
 
-async function getRefreshSession(client, rawToken) {
+async function getRefreshSession(client, rawToken, { forUpdate = false } = {}) {
   if (!rawToken) return null;
   const result = await client.query(
     `select *
@@ -76,7 +77,8 @@ async function getRefreshSession(client, rawToken) {
      where token_hash = $1
        and revoked_at is null
        and expires_at > now()
-     limit 1`,
+     limit 1
+     ${forUpdate ? 'for update' : ''}`,
     [refreshTokenHash(rawToken)]
   );
   return result.rows[0] || null;
