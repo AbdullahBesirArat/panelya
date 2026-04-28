@@ -4,7 +4,7 @@
     "buildCommand": "npm install"
   },
   "deploy": {
-    "startCommand": "npm run db:migrate && node server.js",
+    "startCommand": "npm run db:migrate && npm start",
     "healthcheckPath": "/api/health",
     "healthcheckTimeout": 300,
     "restartPolicyType": "ON_FAILURE",
