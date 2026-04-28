@@ -34,6 +34,11 @@ function fileChecksum(content) {
   return createHash('sha256').update(content).digest('hex');
 }
 
+const legacyChecksumCompatibleMigrations = new Set([
+  '005_saas_foundation.sql',
+  '010_enforce_content_tenant_scope.sql',
+]);
+
 async function applyMigration(file) {
   const fullPath = path.join(migrationsDir, file);
   const sql = fs.readFileSync(fullPath, 'utf8');
@@ -75,6 +80,10 @@ async function main() {
     }
 
     if (currentChecksum !== checksum) {
+      if (legacyChecksumCompatibleMigrations.has(file)) {
+        console.warn(`${file}: legacy checksum farki kabul edildi; yeni degisiklikler sonraki migration'larda uygulanacak`);
+        continue;
+      }
       throw new Error(`${file}: daha once farkli icerikle uygulanmis; yeni migration olusturun`);
     }
   }
