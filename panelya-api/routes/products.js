@@ -7,6 +7,7 @@ const { assertPlanCapacity } = require('../services/planLimits');
 
 const router = express.Router();
 const PRODUCT_STATUSES = ['active', 'draft', 'out'];
+const VARIANT_STATUSES = ['active', 'out'];
 
 function normalizeProductIds(ids) {
   const uniqueIds = [...new Set((Array.isArray(ids) ? ids : []).map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))];
@@ -23,7 +24,10 @@ function safePaging(limit, offset, defaultLimit = 50) {
 function productParams(body) {
   const price = Number(body.price);
   const salePrice = body.sale_price == null || body.sale_price === '' ? null : Number(body.sale_price);
-  const stock = Number(body.stock || 0);
+  const variants = normalizeVariants(body.variants);
+  const stock = variants.length
+    ? variants.reduce((sum, variant) => sum + variant.stock, 0)
+    : Number(body.stock || 0);
   const status = PRODUCT_STATUSES.includes(body.status) ? body.status : 'draft';
 
   if (!String(body.name || '').trim() || !Number.isFinite(price) || price <= 0) {
@@ -45,6 +49,114 @@ function productParams(body) {
     String(body.description || '').slice(0, 5000),
     String(body.emoji || '').slice(0, 16),
   ];
+}
+
+function normalizeText(value, limit = 120) {
+  return String(value || '').trim().slice(0, limit);
+}
+
+function normalizeVariants(rawVariants) {
+  if (!Array.isArray(rawVariants)) return [];
+
+  const seen = new Set();
+  const variants = [];
+  for (const rawVariant of rawVariants.slice(0, 300)) {
+    const color = normalizeText(rawVariant.color || rawVariant.selected_color || '', 80);
+    const size = normalizeText(rawVariant.size || rawVariant.selected_size || '', 80);
+    const sku = normalizeText(rawVariant.sku || '', 120);
+    const stock = Number(rawVariant.stock || 0);
+    const status = VARIANT_STATUSES.includes(rawVariant.status) ? rawVariant.status : 'active';
+    if (!color && !size) continue;
+    if (!Number.isFinite(stock) || stock < 0) continue;
+
+    const key = `${color.toLowerCase()}::${size.toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    variants.push({
+      color,
+      size,
+      sku,
+      stock: Math.floor(stock),
+      status: Math.floor(stock) <= 0 ? 'out' : status,
+    });
+  }
+
+  return variants;
+}
+
+async function replaceProductVariants(client, organizationId, productId, variants) {
+  await client.query(
+    'delete from product_variants where organization_id = $1 and product_id = $2',
+    [organizationId, productId]
+  );
+
+  if (!variants.length) return;
+
+  await client.query(
+    `insert into product_variants (organization_id, product_id, color, size, sku, stock, status)
+     select $1, $2, color, size, sku, stock, status
+     from jsonb_to_recordset($3::jsonb) as item(
+       color text,
+       size text,
+       sku text,
+       stock int,
+       status text
+     )`,
+    [organizationId, productId, JSON.stringify(variants)]
+  );
+}
+
+function productSelect(whereClause) {
+  return `select
+    p.id,
+    p.name,
+    p.category_id,
+    c.name as category_name,
+    p.price,
+    p.sale_price,
+    p.stock,
+    p.status,
+    p.colors,
+    p.sizes,
+    p.images,
+    p.details,
+    p.tags,
+    p.description,
+    p.emoji,
+    p.created_at,
+    p.updated_at,
+    coalesce(
+      (
+        select jsonb_agg(
+          jsonb_build_object(
+            'id', pv.id,
+            'product_id', pv.product_id,
+            'color', pv.color,
+            'size', pv.size,
+            'sku', pv.sku,
+            'stock', pv.stock,
+            'status', pv.status
+          )
+          order by pv.color, pv.size, pv.id
+        )
+        from product_variants pv
+        where pv.product_id = p.id and pv.organization_id = p.organization_id
+      ),
+      '[]'::jsonb
+    ) as variants
+   from products p
+   left join categories c on c.id = p.category_id and c.organization_id = p.organization_id
+   where ${whereClause}`;
+}
+
+async function fetchProduct(client, productId, organizationId) {
+  const result = await client.query(
+    `${productSelect('p.id = $1 and p.organization_id = $2')}
+     limit 1`,
+    [productId, organizationId]
+  );
+
+  return result.rows[0] || null;
 }
 
 /**
@@ -168,27 +280,7 @@ router.get('/', async (req, res, next) => {
     params.push(paging.limit, paging.offset);
 
     const result = await db.query(
-      `select
-        p.id,
-        p.name,
-        p.category_id,
-        c.name as category_name,
-        p.price,
-        p.sale_price,
-        p.stock,
-        p.status,
-        p.colors,
-        p.sizes,
-        p.images,
-        p.details,
-        p.tags,
-        p.description,
-        p.emoji,
-        p.created_at,
-        p.updated_at
-       from products p
-       left join categories c on c.id = p.category_id and c.organization_id = p.organization_id
-       where ${filters.join(' and ')}
+      `${productSelect(filters.join(' and '))}
        order by p.created_at desc
        limit $${params.length - 1} offset $${params.length}`,
       params
@@ -203,15 +295,11 @@ router.get('/', async (req, res, next) => {
 router.get('/:id', async (req, res, next) => {
   try {
     const organization = await resolveOrganization(req, db, { allowPublic: !req.auth });
-    const result = await db.query(
-      `select p.*, c.name as category_name
-       from products p
-       left join categories c on c.id = p.category_id and c.organization_id = p.organization_id
-       where p.id = $1 and p.organization_id = $2`,
-      [req.params.id, organization.id]
-    );
+    const result = await db.query(`${productSelect('p.id = $1 and p.organization_id = $2')}`, [req.params.id, organization.id]);
 
-    if (!result.rows[0]) return res.status(404).json({ error: 'Urun bulunamadi' });
+    if (!result.rows[0]) {
+      return res.status(404).json({ error: 'Urun bulunamadi' });
+    }
     res.json(result.rows[0]);
   } catch (err) {
     next(err);
@@ -219,26 +307,37 @@ router.get('/:id', async (req, res, next) => {
 });
 
 router.post('/', requireAuth, requireRole(['super_admin', 'owner', 'admin']), async (req, res, next) => {
+  const client = await db.pool.connect();
+
   try {
-    const organization = await resolveOrganization(req);
-    await assertPlanCapacity(db, organization.id, 'products');
-    const result = await db.query(
+    const organization = await resolveOrganization(req, client);
+    await assertPlanCapacity(client, organization.id, 'products');
+    const variants = normalizeVariants(req.body.variants);
+
+    await client.query('begin');
+    const result = await client.query(
       `insert into products
        (organization_id, name, category_id, price, sale_price, stock, status, colors, sizes, images, details, tags, description, emoji)
        values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
        returning *`,
       [organization.id, ...productParams(req.body)]
     );
+    await replaceProductVariants(client, organization.id, result.rows[0].id, variants);
+    const product = await fetchProduct(client, result.rows[0].id, organization.id);
 
     await auditLog(req, {
       action: 'CREATE',
       resourceType: 'product',
-      resourceId: result.rows[0].id,
-      newValue: result.rows[0],
+      resourceId: product.id,
+      newValue: product,
     });
-    res.status(201).json(result.rows[0]);
+    await client.query('commit');
+    res.status(201).json(product);
   } catch (err) {
+    await client.query('rollback');
     next(err);
+  } finally {
+    client.release();
   }
 });
 
@@ -397,13 +496,19 @@ router.post('/bulk', requireAuth, requireRole(['super_admin', 'owner', 'admin'])
  *         $ref: '#/components/responses/Forbidden'
  */
 router.put('/:id', requireAuth, requireRole(['super_admin', 'owner', 'admin']), async (req, res, next) => {
+  const client = await db.pool.connect();
+
   try {
-    const organization = await resolveOrganization(req);
-    const oldResult = await db.query(
+    const organization = await resolveOrganization(req, client);
+    const variants = normalizeVariants(req.body.variants);
+
+    await client.query('begin');
+    const oldProduct = await fetchProduct(client, req.params.id, organization.id);
+    const oldResult = await client.query(
       'select * from products where id = $1 and organization_id = $2',
       [req.params.id, organization.id]
     );
-    const result = await db.query(
+    const result = await client.query(
       `update products set
         name=$1, category_id=$2, price=$3, sale_price=$4, stock=$5, status=$6,
         colors=$7, sizes=$8, images=$9, details=$10, tags=$11, description=$12, emoji=$13,
@@ -414,16 +519,22 @@ router.put('/:id', requireAuth, requireRole(['super_admin', 'owner', 'admin']), 
     );
 
     if (!result.rows[0]) return res.status(404).json({ error: 'Urun bulunamadi' });
+    await replaceProductVariants(client, organization.id, req.params.id, variants);
+    const product = await fetchProduct(client, req.params.id, organization.id);
     await auditLog(req, {
       action: 'UPDATE',
       resourceType: 'product',
       resourceId: req.params.id,
-      oldValue: oldResult.rows[0] || null,
-      newValue: result.rows[0],
+      oldValue: oldProduct || oldResult.rows[0] || null,
+      newValue: product,
     });
-    res.json(result.rows[0]);
+    await client.query('commit');
+    res.json(product);
   } catch (err) {
+    await client.query('rollback');
     next(err);
+  } finally {
+    client.release();
   }
 });
 

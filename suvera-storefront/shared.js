@@ -200,7 +200,18 @@
   }
 
   window.Suvera.addToCart = function(name, price, emoji, meta = {}) {
-    const existing = cart.find(i => i.name === name);
+    const key = [
+      meta.product_id || meta.id || name,
+      meta.variant_id || '',
+      meta.color || '',
+      meta.size || ''
+    ].join('::');
+    const existing = cart.find(i => ([
+      i.product_id || i.id || i.name,
+      i.variant_id || '',
+      i.color || '',
+      i.size || ''
+    ].join('::') === key));
     if (existing) existing.qty++;
     else cart.push({ name, price, emoji: emoji || '🧕', qty: 1, ...meta });
     localStorage.setItem('suveraCart', JSON.stringify(cart));

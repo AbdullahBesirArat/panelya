@@ -39,6 +39,20 @@ create table if not exists products (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists product_variants (
+  id bigserial primary key,
+  organization_id uuid not null references organizations(id) on delete cascade,
+  product_id bigint not null references products(id) on delete cascade,
+  color text not null default '',
+  size text not null default '',
+  sku text not null default '',
+  stock integer not null default 0 check (stock >= 0),
+  status text not null default 'active' check (status in ('active', 'out')),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (product_id, color, size)
+);
+
 create table if not exists customers (
   id bigserial primary key,
   name text not null,
@@ -75,7 +89,11 @@ create table if not exists order_items (
   id bigserial primary key,
   order_id bigint not null references orders(id) on delete cascade,
   product_id bigint references products(id) on delete set null,
+  variant_id bigint references product_variants(id) on delete set null,
   product_name text not null,
+  selected_color text not null default '',
+  selected_size text not null default '',
+  sku text not null default '',
   quantity integer not null default 1 check (quantity > 0),
   unit_price numeric(12,2) not null default 0,
   created_at timestamptz not null default now()
@@ -147,6 +165,8 @@ create table if not exists audit_logs (
 );
 
 create index if not exists idx_products_category on products(category_id);
+create index if not exists idx_product_variants_product on product_variants(product_id);
+create index if not exists idx_product_variants_org_product on product_variants(organization_id, product_id);
 create unique index if not exists idx_collections_org_slug_unique on collections (organization_id, slug);
 create index if not exists idx_collections_org_active_sort on collections (organization_id, active, sort_order, id);
 create index if not exists idx_products_status on products(status);

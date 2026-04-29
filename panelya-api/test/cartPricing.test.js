@@ -36,8 +36,39 @@ test('priceCartItems only prices active organization products', async () => {
   ], { organizationId: 'org-1' });
 
   assert.deepEqual(items, [
-    { product_id: 1, name: 'Urun A', quantity: 2, unit_price: 90 },
-    { product_id: 2, name: 'Urun B', quantity: 1, unit_price: 50 },
+    { product_id: 1, variant_id: null, name: 'Urun A', selected_color: '', selected_size: '', sku: '', quantity: 2, unit_price: 90 },
+    { product_id: 2, variant_id: null, name: 'Urun B', selected_color: '', selected_size: '', sku: '', quantity: 1, unit_price: 50 },
   ]);
   assert.equal(cartTotal(items), 230);
+});
+
+test('priceCartItems preserves selected product variant', async () => {
+  const client = {
+    async query(text, params) {
+      if (text.includes('from products')) {
+        assert.deepEqual(params, [[1], 'org-1']);
+        return {
+          rows: [
+            { id: 1, name: 'Elbise', price: '100', sale_price: null, status: 'active' },
+          ],
+        };
+      }
+
+      assert.match(text, /from product_variants/);
+      assert.deepEqual(params, [[9], 'org-1']);
+      return {
+        rows: [
+          { id: 9, product_id: 1, color: '#111111', size: 'M', sku: 'ELB-SYH-M', stock: 2, status: 'active' },
+        ],
+      };
+    },
+  };
+
+  const items = await priceCartItems(client, [
+    { product_id: 1, variant_id: 9, quantity: 1 },
+  ], { organizationId: 'org-1' });
+
+  assert.deepEqual(items, [
+    { product_id: 1, variant_id: 9, name: 'Elbise', selected_color: '#111111', selected_size: 'M', sku: 'ELB-SYH-M', quantity: 1, unit_price: 100 },
+  ]);
 });

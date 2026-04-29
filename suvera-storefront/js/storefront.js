@@ -567,6 +567,11 @@
 
     try {
       const product = await window.SuveraAPI.products.get(id);
+      const variants = Array.isArray(product.variants) ? product.variants : [];
+      if (variants.length) {
+        location.href = 'urun.html?id=' + encodeURIComponent(id);
+        return;
+      }
       const price = Number(product.sale_price || product.price || 0);
       const image = Array.isArray(product.images) && product.images.length ? window.SuveraAPI.assetUrl(product.images[0]) : '';
       window.Suvera.addToCart(product.name, price, product.emoji || 'SU', {

@@ -48,6 +48,7 @@ export type ApiProduct = {
   status: ProductStatus;
   colors: string[];
   sizes: string[];
+  variants?: ProductVariant[];
   images: string[];
   details: {
     short_description?: string;
@@ -61,6 +62,16 @@ export type ApiProduct = {
   emoji: string;
   created_at: string;
   updated_at: string;
+};
+
+export type ProductVariant = {
+  id?: string | number;
+  product_id?: string | number;
+  color: string;
+  size: string;
+  sku?: string;
+  stock: number;
+  status?: "active" | "out";
 };
 
 export type ApiCustomer = {
@@ -536,6 +547,7 @@ export async function createProduct(payload: {
   status: ProductStatus;
   colors?: string[];
   sizes?: string[];
+  variants?: ProductVariant[];
   images?: string[];
   details?: {
     short_description?: string;
@@ -558,6 +570,7 @@ export async function createProduct(payload: {
       status: payload.status,
       colors: payload.colors ?? [],
       sizes: payload.sizes ?? [],
+      variants: payload.variants ?? [],
       images: payload.images ?? [],
       details: payload.details ?? {},
       tags: payload.tags ?? "",
@@ -576,6 +589,7 @@ export async function updateProduct(id: string, payload: {
   status: ProductStatus;
   colors?: string[];
   sizes?: string[];
+  variants?: ProductVariant[];
   images?: string[];
   details?: {
     short_description?: string;
@@ -598,6 +612,7 @@ export async function updateProduct(id: string, payload: {
       status: payload.status,
       colors: payload.colors ?? [],
       sizes: payload.sizes ?? [],
+      variants: payload.variants ?? [],
       images: payload.images ?? [],
       details: payload.details ?? {},
       tags: payload.tags ?? "",

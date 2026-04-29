@@ -9,6 +9,8 @@
     image: '',
     selectedColor: '',
     selectedSize: '',
+    selectedVariantId: null,
+    variants: [],
     images: [],
     categoryId: null,
   };
@@ -119,7 +121,9 @@
   }
 
   function renderSwatches(product) {
-    const colors = Array.isArray(product.colors) && product.colors.length ? product.colors : ['#e9dfd0'];
+    const variants = Array.isArray(product.variants) ? product.variants : [];
+    const variantColors = [...new Set(variants.map(function (variant) { return variant.color; }).filter(Boolean))];
+    const colors = variantColors.length ? variantColors : (Array.isArray(product.colors) && product.colors.length ? product.colors : ['#e9dfd0']);
     currentProduct.selectedColor = colors[0];
 
     const wrap = document.getElementById('detailColors');
@@ -138,23 +142,44 @@
         button.classList.add('active');
         currentProduct.selectedColor = button.dataset.color || '';
         if (label) label.textContent = currentProduct.selectedColor;
+        renderSizes(product);
+        updateSelectedVariant();
       });
     });
   }
 
   function renderSizes(product) {
-    const sizes = Array.isArray(product.sizes) && product.sizes.length ? product.sizes : ['Standart'];
-    currentProduct.selectedSize = sizes[0];
+    const variants = Array.isArray(product.variants) ? product.variants : [];
+    const variantSizes = variants
+      .filter(function (variant) { return !currentProduct.selectedColor || variant.color === currentProduct.selectedColor; })
+      .map(function (variant) { return variant.size; })
+      .filter(Boolean);
+    const sizes = [...new Set(variantSizes)].length ? [...new Set(variantSizes)] : (Array.isArray(product.sizes) && product.sizes.length ? product.sizes : ['Standart']);
+    if (!sizes.includes(currentProduct.selectedSize)) currentProduct.selectedSize = sizes[0];
+    const currentVariant = variants.find(function (variant) {
+      return variant.color === currentProduct.selectedColor && variant.size === currentProduct.selectedSize;
+    });
+    if (currentVariant && Number(currentVariant.stock || 0) <= 0) {
+      const availableVariant = variants.find(function (variant) {
+        return variant.color === currentProduct.selectedColor && Number(variant.stock || 0) > 0;
+      });
+      if (availableVariant) currentProduct.selectedSize = availableVariant.size;
+    }
 
     const wrap = document.getElementById('detailSizes');
     const label = document.getElementById('detailSizeLabel');
     if (!wrap) return;
 
     wrap.innerHTML = sizes.map(function (size, index) {
-      return '<button class="size-btn' + (index === 0 ? ' active' : '') + '" type="button" data-size="' + escapeHtml(size) + '">' + escapeHtml(size) + '</button>';
+      const active = size === currentProduct.selectedSize;
+      const variant = variants.find(function (item) {
+        return item.color === currentProduct.selectedColor && item.size === size;
+      });
+      const disabled = variant && Number(variant.stock || 0) <= 0;
+      return '<button class="size-btn' + (active ? ' active' : '') + '" type="button" data-size="' + escapeHtml(size) + '"' + (disabled ? ' disabled' : '') + '>' + escapeHtml(size) + '</button>';
     }).join('');
 
-    if (label) label.textContent = sizes[0];
+    if (label) label.textContent = currentProduct.selectedSize;
 
     wrap.querySelectorAll('.size-btn').forEach(function (button) {
       button.addEventListener('click', function () {
@@ -162,8 +187,25 @@
         button.classList.add('active');
         currentProduct.selectedSize = button.dataset.size || '';
         if (label) label.textContent = currentProduct.selectedSize;
+        updateSelectedVariant();
       });
     });
+    updateSelectedVariant();
+  }
+
+  function updateSelectedVariant() {
+    const variant = (currentProduct.variants || []).find(function (item) {
+      return item.color === currentProduct.selectedColor && item.size === currentProduct.selectedSize;
+    });
+    currentProduct.selectedVariantId = variant ? variant.id : null;
+
+    const stockNode = document.getElementById('detailStockText');
+    const badge = document.getElementById('stockBadge');
+    if (variant && stockNode && badge) {
+      const stock = Number(variant.stock || 0);
+      stockNode.innerHTML = '<strong>Stok durumu</strong> ' + (stock > 0 ? stock + ' adet hazır' : 'Tükendi');
+      badge.textContent = stock > 0 ? 'Stokta' : 'Tükendi';
+    }
   }
 
   function renderInfo(product) {
@@ -187,6 +229,7 @@
     currentProduct.price = finalPrice;
     currentProduct.emoji = product.emoji || '👗';
     currentProduct.categoryId = product.category_id || null;
+    currentProduct.variants = Array.isArray(product.variants) ? product.variants : [];
 
     document.title = currentProduct.name + ' – Suvera';
     document.getElementById('detailProductTitle').textContent = currentProduct.name;
@@ -382,13 +425,22 @@
 
   window.addToCart = function () {
     if (!window.Suvera) return;
+    const selectedVariant = (currentProduct.variants || []).find(function (item) {
+      return String(item.id) === String(currentProduct.selectedVariantId);
+    });
+    if (selectedVariant && Number(selectedVariant.stock || 0) <= 0) {
+      if (window.showToast) window.showToast('Bu renk/beden tükendi', 'red');
+      return;
+    }
 
     window.Suvera.addToCart(currentProduct.name, currentProduct.price, currentProduct.emoji, {
       id: currentProduct.id,
       product_id: currentProduct.id,
       image: currentProduct.image,
+      variant_id: currentProduct.selectedVariantId,
       color: currentProduct.selectedColor,
       size: currentProduct.selectedSize,
+      variant: [currentProduct.selectedColor, currentProduct.selectedSize].filter(Boolean).join(' / '),
     });
   };
 

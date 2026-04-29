@@ -172,7 +172,15 @@ router.get('/', requireAuth, requireRole(['super_admin', 'owner', 'admin', 'memb
     const result = await db.query(
       `select o.*, c.name as customer, c.email, c.phone, c.address,
         coalesce(
-          string_agg(oi.product_name || ' x' || oi.quantity, ', ' order by oi.id),
+          string_agg(
+            oi.product_name ||
+            case when oi.selected_color <> '' or oi.selected_size <> ''
+              then ' (' || concat_ws(' / ', nullif(oi.selected_color, ''), nullif(oi.selected_size, '')) || ')'
+              else ''
+            end ||
+            ' x' || oi.quantity,
+            ', ' order by oi.id
+          ),
           'Siparis kalemi yok'
         ) as items
        from orders o
@@ -339,7 +347,11 @@ router.get('/:id', requireAuth, requireRole(['super_admin', 'owner', 'admin', 'm
              json_build_object(
                'id', oi.id,
                'product_id', oi.product_id,
+               'variant_id', oi.variant_id,
                'name', oi.product_name,
+               'color', oi.selected_color,
+               'size', oi.selected_size,
+               'sku', oi.sku,
                'quantity', oi.quantity,
                'unit_price', oi.unit_price,
                'line_total', oi.quantity * oi.unit_price

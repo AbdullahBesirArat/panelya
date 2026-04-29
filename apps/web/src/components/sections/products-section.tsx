@@ -18,6 +18,7 @@ import {
   updateProduct,
   type ApiCategory,
   type ApiProduct,
+  type ProductVariant,
   type ProductStatus,
   uploadProductImages,
 } from "@/lib/api";
@@ -51,6 +52,7 @@ type ProductPayload = {
   status: ProductStatus;
   colors: string[];
   sizes: string[];
+  variants: ProductVariant[];
   images: string[];
   details: {
     short_description: string;
@@ -79,6 +81,7 @@ function createEmptyProductForm() {
     status: "draft" as ProductStatus,
     colorsText: "",
     sizesText: "",
+    variantsText: "",
     imagesText: "",
     tags: "",
     description: "",
@@ -107,6 +110,39 @@ function splitCsvLines(value: string) {
 
 function joinLines(values: string[] | null | undefined) {
   return Array.isArray(values) ? values.filter(Boolean).join("\n") : "";
+}
+
+function parseVariantLines(value: string): ProductVariant[] {
+  const variants = value
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [color = "", size = "", stock = "0", sku = ""] = line.split("|").map((part) => part.trim());
+      return {
+        color,
+        size,
+        stock: Math.max(0, Math.floor(Number(stock) || 0)),
+        sku,
+        status: (Number(stock) > 0 ? "active" : "out") as ProductVariant["status"],
+      };
+    })
+    .filter((variant) => variant.color || variant.size);
+
+  const seen = new Set<string>();
+  return variants.filter((variant) => {
+    const key = `${variant.color.toLowerCase()}::${variant.size.toLowerCase()}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function joinVariantLines(variants: ProductVariant[] | null | undefined) {
+  if (!Array.isArray(variants)) return "";
+  return variants
+    .map((variant) => [variant.color || "", variant.size || "", String(variant.stock ?? 0), variant.sku || ""].join(" | "))
+    .join("\n");
 }
 
 function assetUrl(url: string | null | undefined) {
@@ -376,6 +412,7 @@ export function ProductsSection({
       status: product.status,
       colorsText: joinLines(product.colors),
       sizesText: joinLines(product.sizes),
+      variantsText: joinVariantLines(product.variants),
       imagesText: joinLines(product.images),
       tags: product.tags || "",
       description: product.description || "",
@@ -409,7 +446,10 @@ export function ProductsSection({
 
     const price = Number(productForm.price);
     const salePrice = productForm.salePrice === "" ? null : Number(productForm.salePrice);
-    const stock = Number(productForm.stock);
+    const variants = parseVariantLines(productForm.variantsText);
+    const stock = variants.length
+      ? variants.reduce((sum, variant) => sum + Number(variant.stock || 0), 0)
+      : Number(productForm.stock);
 
     if (!productForm.name.trim() || !Number.isFinite(price) || price <= 0 || !Number.isFinite(stock) || stock < 0) {
       return;
@@ -424,6 +464,7 @@ export function ProductsSection({
       status: productForm.status,
       colors: splitCsvLines(productForm.colorsText),
       sizes: splitCsvLines(productForm.sizesText),
+      variants,
       images: splitCsvLines(productForm.imagesText),
       details: {
         short_description: productForm.shortDescription.trim(),
@@ -874,6 +915,17 @@ export function ProductsSection({
                     />
                     <InlineHint>Liste virgülle de ayrılabilir.</InlineHint>
                   </div>
+                </div>
+                <div className="space-y-2">
+                  <FieldLabel htmlFor="product-variants">Renk / beden stoklari</FieldLabel>
+                  <textarea
+                    className="focus-ring min-h-32 rounded-lg border border-line bg-white px-3 py-3 font-mono text-xs"
+                    id="product-variants"
+                    onChange={(event) => setProductForm((current) => ({ ...current, variantsText: event.target.value }))}
+                    placeholder={"Her satira: renk | beden | stok | sku\n#111111 | S | 4 | ELB-SYH-S\n#111111 | M | 2 | ELB-SYH-M\n#d8c6b0 | S | 0 | ELB-EKRU-S"}
+                    value={productForm.variantsText}
+                  />
+                  <InlineHint>Bu alan doluysa toplam stok, varyant satirlarindaki stok toplamina gore hesaplanir.</InlineHint>
                 </div>
                 <div className="space-y-2">
                   <div className="flex items-center justify-between gap-3">

@@ -77,6 +77,9 @@
   function cartToOrderPayload(cart, customer) {
     const items = (cart || []).map((item) => ({
       product_id: item.product_id || item.id || null,
+      variant_id: item.variant_id || item.variantId || null,
+      color: item.color || '',
+      size: item.size || '',
       name: item.name || 'Ürün',
       quantity: item.qty || item.quantity || 1,
       unit_price: item.price || item.unit_price || 0,
