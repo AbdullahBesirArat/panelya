@@ -4,7 +4,7 @@ import type { FormEvent } from "react";
 import Image from "next/image";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { loginSession, registerWorkspace } from "@/lib/api";
+import { loginAdminSession, loginSession, registerWorkspace } from "@/lib/api";
 import { PLATFORM_NAME } from "@/lib/branding";
 import { useSessionStore } from "@/store/session";
 import { useToastStore } from "@/store/toast";
@@ -14,8 +14,10 @@ type Mode = "login" | "register";
 export default function LoginPage() {
   const router = useRouter();
   const accessToken = useSessionStore((state) => state.accessToken);
+  const actorType = useSessionStore((state) => state.actorType);
   const hydrated = useSessionStore((state) => state.hydrated);
   const applySession = useSessionStore((state) => state.applySession);
+  const applyAdminSession = useSessionStore((state) => state.applyAdminSession);
   const pushToast = useToastStore((state) => state.pushToast);
   const [mode, setMode] = useState<Mode>("login");
   const [loading, setLoading] = useState(false);
@@ -35,9 +37,9 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (hydrated && accessToken) {
-      router.replace("/dashboard");
+      router.replace(actorType === "admin" ? "/superadmin" : "/dashboard");
     }
-  }, [hydrated, accessToken, router]);
+  }, [hydrated, accessToken, actorType, router]);
 
   async function handleLogin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -45,6 +47,21 @@ export default function LoginPage() {
     setError("");
 
     try {
+      if (!loginForm.organizationSlug.trim()) {
+        const adminSession = await loginAdminSession({
+          username: loginForm.email,
+          password: loginForm.password,
+        });
+        applyAdminSession(adminSession);
+        pushToast({
+          title: "Superadmin oturumu acildi",
+          description: "Platform paneli hazir.",
+          tone: "success",
+        });
+        router.replace("/superadmin");
+        return;
+      }
+
       const session = await loginSession(loginForm);
       applySession(session);
       pushToast({

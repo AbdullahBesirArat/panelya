@@ -22,9 +22,21 @@ type SessionResponse = {
   actorType?: "app";
 };
 
+export type AdminSessionResponse = {
+  actorType: "admin";
+  accessToken: string;
+  role: "super_admin" | "admin" | "viewer";
+  admin: {
+    id: string;
+    username: string;
+    role: "super_admin" | "admin" | "viewer";
+  };
+};
+
 export type MeResponse = {
   actorType: "app" | "admin";
   user?: SessionUser;
+  admin?: AdminSessionResponse["admin"];
   currentOrganization?: SessionOrganization;
   organizations?: SessionOrganization[];
   role?: string;
@@ -309,6 +321,54 @@ export type ApiOrganizationInvite = {
   inviteToken?: string;
 };
 
+export type SuperAdminOverview = {
+  metrics: {
+    shop_count: number;
+    live_shop_count: number;
+    suspended_shop_count: number;
+    order_count: number;
+    today_orders: number;
+    month_orders: number;
+    gross_revenue: string;
+    month_revenue: string;
+  };
+  shops: Array<{
+    id: string;
+    name: string;
+    slug: string;
+    plan: string;
+    status: string;
+    owners: string;
+    owner_emails: string;
+    product_count: number;
+    customer_count: number;
+    order_count: number;
+    today_orders: number;
+    month_orders: number;
+    pending_orders: number;
+    shipped_orders: number;
+    delivered_orders: number;
+    cancelled_orders: number;
+    gross_revenue: string;
+    month_revenue: string;
+    last_order_at: string | null;
+    created_at: string;
+    updated_at: string;
+  }>;
+  recentOrders: Array<{
+    id: string;
+    order_code: string;
+    total: string;
+    status: OrderStatus;
+    created_at: string;
+    organization_id: string;
+    organization_name: string;
+    organization_slug: string;
+    customer_name: string | null;
+    customer_email: string | null;
+  }>;
+};
+
 async function parseResponse<T>(response: Response): Promise<T> {
   if (response.status === 204) {
     return undefined as T;
@@ -446,6 +506,16 @@ export async function loginSession(payload: {
   organizationSlug?: string;
 }) {
   return publicRequest<SessionResponse>("/auth/session/login", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function loginAdminSession(payload: {
+  username: string;
+  password: string;
+}) {
+  return publicRequest<AdminSessionResponse>("/auth/admin/session/login", {
     method: "POST",
     body: JSON.stringify(payload),
   });
@@ -936,6 +1006,10 @@ export async function deleteBlogPost(id: string) {
 
 export async function fetchOrganizationSummary() {
   return authenticatedRequest<OrganizationSummary>("/organizations/current/summary");
+}
+
+export async function fetchSuperAdminOverview() {
+  return authenticatedRequest<SuperAdminOverview>("/organizations/superadmin/overview");
 }
 
 export async function updateOrganizationSettings(payload: { name: string; slug: string; settings?: StoreSettings }) {

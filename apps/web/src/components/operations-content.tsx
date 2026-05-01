@@ -35,6 +35,10 @@ const SettingsSection = dynamic(
   () => import("@/components/sections/settings-section").then((mod) => mod.SettingsSection),
   { loading }
 );
+const SuperAdminSection = dynamic(
+  () => import("@/components/sections/superadmin-section").then((mod) => mod.SuperAdminSection),
+  { loading }
+);
 const TeamSection = dynamic(
   () => import("@/components/sections/team-section").then((mod) => mod.TeamSection),
   { loading }
@@ -50,6 +54,8 @@ export function OperationsContent({ sectionKey }: { sectionKey: string }) {
   );
 
   switch (sectionKey) {
+    case "superadmin":
+      return <SuperAdminSection />;
     case "dashboard":
       return <DashboardSection organizationSlug={activeOrganizationSlug} />;
     case "products":

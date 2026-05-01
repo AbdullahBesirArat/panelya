@@ -1,4 +1,5 @@
 export const navigationItems = [
+  { key: "superadmin", label: "Superadmin" },
   { key: "dashboard", label: "Genel Bakış" },
   { key: "products", label: "Ürünler" },
   { key: "orders", label: "Siparişler" },
@@ -17,6 +18,12 @@ export const sectionMeta: Record<string, {
   description: string;
   image: string;
 }> = {
+  superadmin: {
+    kicker: "Platform Yonetimi",
+    title: "Tum dukkanlarin merkezi",
+    description: "Kayitli dukkanlari, sahiplerini, siparis hacmini ve operasyon durumunu tek ekrandan izle.",
+    image: "https://images.unsplash.com/photo-1551288049-bebda4e38f71?auto=format&fit=crop&w=900&q=80",
+  },
   dashboard: {
     kicker: "Türkiye E-Ticaret Operasyonu",
     title: "Bugünün operasyon nabzı",

@@ -21,6 +21,8 @@ export function AppShell({
   const router = useRouter();
   const queryClient = useQueryClient();
   const accessToken = useSessionStore((state) => state.accessToken);
+  const storedActorType = useSessionStore((state) => state.actorType);
+  const storedAdmin = useSessionStore((state) => state.admin);
   const hydrated = useSessionStore((state) => state.hydrated);
   const organizationSlug = useSessionStore((state) => state.organizationSlug);
   const syncProfile = useSessionStore((state) => state.syncProfile);
@@ -37,16 +39,28 @@ export function AppShell({
     staleTime: 60_000,
   });
   const profile = data?.actorType === "app" ? data : null;
+  const adminProfile = data?.actorType === "admin" ? data.admin : null;
   const displayUser = profile?.user ?? null;
   const displayOrganization = profile?.currentOrganization ?? null;
   const displayOrganizations = profile?.organizations ?? [];
   const activeOrganizationSlug = displayOrganization?.slug || organizationSlug;
+  const isAdminSession = data?.actorType === "admin" || storedActorType === "admin";
+  const visibleNavigation = navigationItems.filter((item) => {
+    if (item.key === "superadmin") return isAdminSession && (adminProfile?.role || storedAdmin?.role) === "super_admin";
+    return !isAdminSession;
+  });
 
   useEffect(() => {
     if (hydrated && !accessToken) {
       router.replace("/login");
     }
   }, [hydrated, accessToken, router]);
+
+  useEffect(() => {
+    if (hydrated && accessToken && storedActorType === "admin" && activeSection !== "superadmin") {
+      router.replace("/superadmin");
+    }
+  }, [hydrated, accessToken, storedActorType, activeSection, router]);
 
   useEffect(() => {
     if (data?.actorType === "app" && data.user && data.currentOrganization && data.organizations) {
@@ -70,11 +84,11 @@ export function AppShell({
   }, [isError, hydrated, clearSession, router]);
 
   useEffect(() => {
-    if (data && data.actorType !== "app") {
+    if (data?.actorType === "app" && activeSection === "superadmin") {
       clearSession();
       router.replace("/login");
     }
-  }, [data, clearSession, router]);
+  }, [data, activeSection, clearSession, router]);
 
   async function handleOrganizationChange(nextSlug: string) {
     if (!nextSlug || nextSlug === activeOrganizationSlug) return;
@@ -116,7 +130,76 @@ export function AppShell({
     }
   }
 
-  const waitingForVerifiedSession = hydrated && Boolean(accessToken) && (isLoading || !profile);
+  const waitingForVerifiedSession = hydrated && Boolean(accessToken) && isLoading;
+
+  if (
+    hydrated
+    && accessToken
+    && isAdminSession
+    && activeSection === "superadmin"
+    && (adminProfile || storedAdmin)
+  ) {
+    const admin = adminProfile || storedAdmin;
+
+    return (
+      <div className="min-h-screen bg-paper text-ink">
+        <aside className="fixed inset-y-0 left-0 z-20 hidden w-64 border-r border-line bg-white px-5 py-6 lg:block">
+          <Link className="focus-ring block rounded-lg" href="/superadmin">
+            <p className="text-sm font-semibold uppercase text-mint">{PLATFORM_NAME}</p>
+            <p className="mt-1 text-xl font-bold">Superadmin</p>
+          </Link>
+          <nav className="mt-8 space-y-2">
+            {visibleNavigation.map((item) => (
+              <Link
+                className="focus-ring flex h-11 items-center rounded-lg bg-mint px-3 text-sm font-semibold text-white"
+                href={`/${item.key}`}
+                key={item.key}
+              >
+                {item.label}
+              </Link>
+            ))}
+          </nav>
+        </aside>
+
+        <div className="lg:pl-64">
+          <header className="sticky top-0 z-10 border-b border-line bg-white/95 px-4 py-4 backdrop-blur sm:px-6">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div>
+                <p className="text-xs font-semibold uppercase text-zinc-500">Platform</p>
+                <p className="text-lg font-bold">Tum dukkanlar</p>
+                <p className="text-sm text-zinc-500">{admin?.username} ({roleLabel(admin?.role || "super_admin")})</p>
+              </div>
+              <button
+                className="focus-ring inline-flex h-10 items-center justify-center rounded-lg border border-line bg-white px-4 text-sm font-semibold"
+                disabled={loggingOut}
+                onClick={() => void handleLogout()}
+                type="button"
+              >
+                {loggingOut ? "Cikis yapiliyor" : "Cikis"}
+              </button>
+            </div>
+            <nav className="mt-4 flex gap-2 overflow-x-auto pb-1 lg:hidden">
+              {visibleNavigation.map((item) => (
+                <Link
+                  className="focus-ring inline-flex h-10 shrink-0 items-center rounded-lg bg-mint px-3 text-sm font-semibold text-white"
+                  href={`/${item.key}`}
+                  key={item.key}
+                >
+                  {item.label}
+                </Link>
+              ))}
+            </nav>
+          </header>
+
+          <main className="app-shell-safe-bottom px-4 py-6 sm:px-6 lg:px-8">
+            <div className="mx-auto max-w-7xl space-y-5">
+              {children}
+            </div>
+          </main>
+        </div>
+      </div>
+    );
+  }
 
   if (
     !hydrated
@@ -125,7 +208,7 @@ export function AppShell({
     || !displayUser
     || !displayOrganization
     || displayOrganizations.length === 0
-    || data?.actorType === "admin"
+    || isAdminSession
   ) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-paper px-6">
@@ -145,7 +228,7 @@ export function AppShell({
           <p className="mt-1 text-xl font-bold">Operasyon Merkezi</p>
         </Link>
         <nav className="mt-8 space-y-2">
-          {navigationItems.map((item) => {
+          {visibleNavigation.map((item) => {
             const active = activeSection === item.key;
             return (
               <Link
@@ -194,7 +277,7 @@ export function AppShell({
             </div>
           </div>
           <nav className="mt-4 flex gap-2 overflow-x-auto pb-1 lg:hidden">
-            {navigationItems.map((item) => {
+            {visibleNavigation.map((item) => {
               const active = activeSection === item.key;
               return (
                 <Link
@@ -231,6 +314,8 @@ function roleLabel(role: string) {
       return "Ekip Üyesi";
     case "viewer":
       return "Salt Okur";
+    case "super_admin":
+      return "Superadmin";
     default:
       return role;
   }

@@ -6,6 +6,7 @@ const { isProduction, rateLimit } = require('../middleware/security');
 const { auditLog } = require('../services/audit');
 const {
   buildSessionPayload,
+  createAdminAccessToken,
   createAppAccessToken,
   getRefreshSession,
   issueRefreshToken,
@@ -124,6 +125,76 @@ function legacyAdminDisabled(res) {
 
 router.post('/login', loginLimiter, async (req, res) => legacyAdminDisabled(res));
 router.post('/admin/login', loginLimiter, async (req, res) => legacyAdminDisabled(res));
+
+router.post('/admin/session/login', loginLimiter, async (req, res, next) => {
+  try {
+    const username = String(req.body.username || '').trim().slice(0, 80);
+    const password = cleanPassword(req.body.password);
+
+    if (!username || !password) {
+      return res.status(400).json({ error: 'Kullanici adi ve sifre zorunlu' });
+    }
+
+    const result = await db.query(
+      `select id, username, password_hash, role
+       from admins
+       where lower(username) = lower($1)
+       limit 1`,
+      [username]
+    );
+    const admin = result.rows[0];
+    const passwordHashToCompare = admin?.password_hash || DUMMY_PASSWORD_HASH;
+    const passwordMatches = await bcrypt.compare(password, passwordHashToCompare);
+
+    if (!admin || !admin.password_hash || !passwordMatches) {
+      await auditLog(req, {
+        action: 'ADMIN_LOGIN',
+        resourceType: 'session',
+        resourceId: username,
+        success: false,
+        errorMessage: 'invalid admin credentials',
+        actorType: 'admin',
+      });
+      return res.status(401).json({ error: 'Giris bilgileri hatali' });
+    }
+
+    if (admin.role !== 'super_admin') {
+      req.admin = { sub: admin.id, actorType: 'admin' };
+      await auditLog(req, {
+        action: 'ADMIN_LOGIN',
+        resourceType: 'session',
+        resourceId: admin.id,
+        success: false,
+        errorMessage: 'super_admin role required',
+        actorType: 'admin',
+        actorAdminId: admin.id,
+      });
+      return res.status(403).json({ error: 'Superadmin yetkisi gerekli' });
+    }
+
+    req.admin = { sub: admin.id, actorType: 'admin' };
+    await auditLog(req, {
+      action: 'ADMIN_LOGIN',
+      resourceType: 'session',
+      resourceId: admin.id,
+      actorType: 'admin',
+      actorAdminId: admin.id,
+    });
+
+    res.json({
+      actorType: 'admin',
+      accessToken: createAdminAccessToken(admin),
+      role: admin.role,
+      admin: {
+        id: admin.id,
+        username: admin.username,
+        role: admin.role,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
 
 /**
  * @swagger

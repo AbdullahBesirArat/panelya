@@ -2,7 +2,7 @@ const express = require('express');
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const db = require('../db');
-const { requireAuth, requireRole } = require('../middleware/auth');
+const { requireActorType, requireAuth, requireRole } = require('../middleware/auth');
 const { auditLog } = require('../services/audit');
 const { sendInviteEmail } = require('../services/email');
 const { assertPlanCapacity } = require('../services/planLimits');
@@ -73,6 +73,126 @@ router.get('/current', async (req, res, next) => {
     next(err);
   }
 });
+
+router.get(
+  '/superadmin/overview',
+  requireAuth,
+  requireActorType(['admin']),
+  requireRole(['super_admin']),
+  async (req, res, next) => {
+    try {
+      const [metricsResult, shopsResult, recentOrdersResult] = await Promise.all([
+        db.query(
+          `select
+             count(*)::int as shop_count,
+             (count(*) filter (where status in ('active', 'trialing', 'past_due')))::int as live_shop_count,
+             (count(*) filter (where status = 'suspended'))::int as suspended_shop_count,
+             (select count(*)::int from orders) as order_count,
+             (select count(*)::int from orders where created_at >= date_trunc('day', now())) as today_orders,
+             (select count(*)::int from orders where created_at >= date_trunc('month', now())) as month_orders,
+             (select coalesce(sum(total), 0)::numeric(12,2)
+              from orders
+              where status in ('paid', 'processing', 'shipped', 'delivered')) as gross_revenue,
+             (select coalesce(sum(total), 0)::numeric(12,2)
+              from orders
+              where created_at >= date_trunc('month', now())
+                and status in ('paid', 'processing', 'shipped', 'delivered')) as month_revenue
+           from organizations`
+        ),
+        db.query(
+          `select
+             o.id,
+             o.name,
+             o.slug,
+             o.plan,
+             o.status,
+             o.created_at,
+             o.updated_at,
+             coalesce(owner_info.owners, '') as owners,
+             coalesce(owner_info.owner_emails, '') as owner_emails,
+             coalesce(product_metrics.product_count, 0)::int as product_count,
+             coalesce(customer_metrics.customer_count, 0)::int as customer_count,
+             coalesce(order_metrics.order_count, 0)::int as order_count,
+             coalesce(order_metrics.today_orders, 0)::int as today_orders,
+             coalesce(order_metrics.month_orders, 0)::int as month_orders,
+             coalesce(order_metrics.pending_orders, 0)::int as pending_orders,
+             coalesce(order_metrics.shipped_orders, 0)::int as shipped_orders,
+             coalesce(order_metrics.delivered_orders, 0)::int as delivered_orders,
+             coalesce(order_metrics.cancelled_orders, 0)::int as cancelled_orders,
+             coalesce(order_metrics.gross_revenue, 0)::numeric(12,2) as gross_revenue,
+             coalesce(order_metrics.month_revenue, 0)::numeric(12,2) as month_revenue,
+             order_metrics.last_order_at
+           from organizations o
+           left join lateral (
+             select
+               string_agg(coalesce(nullif(u.name, ''), u.email), ', ' order by u.email) as owners,
+               string_agg(u.email, ', ' order by u.email) as owner_emails
+             from memberships m
+             join app_users u on u.id = m.user_id
+             where m.organization_id = o.id
+               and m.status = 'active'
+               and m.role = 'owner'
+           ) owner_info on true
+           left join lateral (
+             select count(*)::int as product_count
+             from products p
+             where p.organization_id = o.id
+           ) product_metrics on true
+           left join lateral (
+             select count(*)::int as customer_count
+             from customers c
+             where c.organization_id = o.id
+           ) customer_metrics on true
+           left join lateral (
+             select
+               count(*)::int as order_count,
+               (count(*) filter (where created_at >= date_trunc('day', now())))::int as today_orders,
+               (count(*) filter (where created_at >= date_trunc('month', now())))::int as month_orders,
+               (count(*) filter (where status = 'payment_pending'))::int as pending_orders,
+               (count(*) filter (where status = 'shipped'))::int as shipped_orders,
+               (count(*) filter (where status = 'delivered'))::int as delivered_orders,
+               (count(*) filter (where status = 'cancelled'))::int as cancelled_orders,
+               coalesce(sum(total) filter (where status in ('paid', 'processing', 'shipped', 'delivered')), 0)::numeric(12,2) as gross_revenue,
+               coalesce(sum(total) filter (
+                 where created_at >= date_trunc('month', now())
+                   and status in ('paid', 'processing', 'shipped', 'delivered')
+               ), 0)::numeric(12,2) as month_revenue,
+               max(created_at) as last_order_at
+             from orders ord
+             where ord.organization_id = o.id
+           ) order_metrics on true
+           order by o.created_at desc`
+        ),
+        db.query(
+          `select
+             ord.id,
+             ord.order_code,
+             ord.total,
+             ord.status,
+             ord.created_at,
+             o.id as organization_id,
+             o.name as organization_name,
+             o.slug as organization_slug,
+             c.name as customer_name,
+             c.email as customer_email
+           from orders ord
+           join organizations o on o.id = ord.organization_id
+           left join customers c on c.id = ord.customer_id and c.organization_id = ord.organization_id
+           order by ord.created_at desc
+           limit 12`
+        ),
+      ]);
+
+      res.json({
+        metrics: metricsResult.rows[0],
+        shops: shopsResult.rows,
+        recentOrders: recentOrdersResult.rows,
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
 
 /**
  * @swagger
