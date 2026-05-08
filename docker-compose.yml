@@ -4,7 +4,7 @@ services:
     environment:
       POSTGRES_DB: panelya
       POSTGRES_USER: panelya_user
-      POSTGRES_PASSWORD: panelya_dev_password
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-panelya_local_pg_9f5b7c2d4a6e8f10}
     ports:
       - "5432:5432"
     volumes:
@@ -21,13 +21,16 @@ services:
     environment:
       NODE_ENV: development
       PORT: 3000
-      DATABASE_URL: postgresql://panelya_user:panelya_dev_password@postgres:5432/panelya
-      JWT_SECRET: 7a9f9b3c6d8e4f1a2b5c7d9e0f3a4b6c8d1e2f4a6b8c0d2e4f6a8b0c2d4e6f8
+      DATABASE_URL: postgresql://panelya_user:${POSTGRES_PASSWORD:-panelya_local_pg_9f5b7c2d4a6e8f10}@postgres:5432/panelya
+      JWT_SECRET_APP: ${JWT_SECRET_APP:-panelya_app_dev_9f2d7a8c4b6e1f03a5c8d0e2f4b6a8c1d3e5f709b2c4d6e8f0a1b3c5d7e9f102}
+      JWT_SECRET_ADMIN: ${JWT_SECRET_ADMIN:-panelya_admin_dev_6c1e9a4f2b8d0c7e5a3f1d9b6c4e2a807f5d3b1c9e6a4f2d0b8c7e5a3f1d9b6c}
       JWT_EXPIRES_IN: 2h
       CORS_ORIGIN: http://localhost:3001
-      API_RATE_LIMIT: 600
+      DEFAULT_ORGANIZATION_PLAN: growth
+      API_RATE_LIMIT: 1200
       LOGIN_RATE_LIMIT: 10
       UPLOAD_RATE_LIMIT: 40
+      DB_POOL_MAX: 40
       UPLOAD_DIR: /app/uploads
       PAYMENT_PROVIDER: mock
       PAYMENT_MOCK_AUTO_PAY: "false"

@@ -3,6 +3,7 @@ const db = require('../db');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { auditLog } = require('../services/audit');
 const { resolveOrganization, slugify } = require('../services/tenant');
+const { assertPlanCapacity } = require('../services/planLimits');
 
 const router = express.Router();
 const managerOnly = [requireAuth, requireRole(['super_admin', 'owner', 'admin'])];
@@ -15,7 +16,7 @@ function collectionPayload(body) {
     slug: slugify(body.slug || title),
     description: String(body.description || '').trim().slice(0, 320),
     image_url: String(body.image_url || '').trim().slice(0, 500),
-    link_url: String(body.link_url || 'urunler.html').trim().slice(0, 500),
+    link_url: String(body.link_url || 'urunler').trim().slice(0, 500),
     active: body.active !== false,
     sort_order: Number.isFinite(sortOrder) ? Math.max(0, Math.floor(sortOrder)) : 0,
   };
@@ -58,6 +59,7 @@ router.post('/', ...managerOnly, async (req, res, next) => {
     const organization = await resolveOrganization(req);
     const payload = collectionPayload(req.body);
     if (!payload.title || !payload.slug) return res.status(400).json({ error: 'Koleksiyon basligi zorunlu' });
+    await assertPlanCapacity(db, organization.id, 'collections');
 
     const result = await db.query(
       `insert into collections (organization_id, title, slug, description, image_url, link_url, active, sort_order)

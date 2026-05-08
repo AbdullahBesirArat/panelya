@@ -11,10 +11,15 @@ create table if not exists organizations (
   updated_at timestamptz not null default now()
 );
 
+insert into organizations (name, slug, plan, status)
+values ('Suvera', 'suvera', 'growth', 'active')
+on conflict (slug) do nothing;
+
 create table if not exists categories (
   id bigserial primary key,
-  name text not null unique,
-  slug text not null unique,
+  organization_id uuid not null references organizations(id) on delete cascade,
+  name text not null,
+  slug text not null,
   image_url text not null default '',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -22,6 +27,7 @@ create table if not exists categories (
 
 create table if not exists products (
   id bigserial primary key,
+  organization_id uuid not null references organizations(id) on delete cascade,
   name text not null,
   category_id bigint references categories(id) on delete set null,
   price numeric(12,2) not null check (price >= 0),
@@ -55,6 +61,7 @@ create table if not exists product_variants (
 
 create table if not exists customers (
   id bigserial primary key,
+  organization_id uuid not null references organizations(id) on delete cascade,
   name text not null,
   email text not null default '',
   phone text not null default '',
@@ -65,6 +72,7 @@ create table if not exists customers (
 
 create table if not exists orders (
   id bigserial primary key,
+  organization_id uuid not null references organizations(id) on delete cascade,
   order_code text not null unique,
   customer_id bigint references customers(id) on delete set null,
   total numeric(12,2) not null default 0,
@@ -101,6 +109,7 @@ create table if not exists order_items (
 
 create table if not exists campaigns (
   id bigserial primary key,
+  organization_id uuid not null references organizations(id) on delete cascade,
   name text not null,
   type text not null,
   value numeric(12,2) not null default 0,
@@ -117,7 +126,7 @@ create table if not exists collections (
   slug text not null,
   description text not null default '',
   image_url text not null default '',
-  link_url text not null default 'urunler.html',
+  link_url text not null default 'urunler',
   active boolean not null default true,
   sort_order integer not null default 0,
   created_at timestamptz not null default now(),
@@ -126,6 +135,7 @@ create table if not exists collections (
 
 create table if not exists slider_items (
   id bigserial primary key,
+  organization_id uuid not null references organizations(id) on delete cascade,
   tag text not null default '',
   title text not null,
   sub text not null default '',
@@ -164,7 +174,25 @@ create table if not exists audit_logs (
   error_message text
 );
 
+create table if not exists upload_assets (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references organizations(id) on delete cascade,
+  url text not null unique,
+  filename text not null,
+  byte_size bigint not null default 0 check (byte_size >= 0),
+  mime_type text not null default 'image/webp',
+  created_by uuid,
+  created_at timestamptz not null default now()
+);
+
 create index if not exists idx_products_category on products(category_id);
+create unique index if not exists idx_categories_org_slug_unique on categories (organization_id, slug);
+create unique index if not exists idx_categories_org_name_unique on categories (organization_id, lower(name));
+create index if not exists idx_products_org on products(organization_id);
+create index if not exists idx_customers_org on customers(organization_id);
+create index if not exists idx_orders_org on orders(organization_id);
+create index if not exists idx_campaigns_org on campaigns(organization_id);
+create index if not exists idx_slider_items_org on slider_items(organization_id);
 create index if not exists idx_product_variants_product on product_variants(product_id);
 create index if not exists idx_product_variants_org_product on product_variants(organization_id, product_id);
 create unique index if not exists idx_collections_org_slug_unique on collections (organization_id, slug);
@@ -182,3 +210,4 @@ create index if not exists idx_order_items_order on order_items(order_id);
 create index if not exists idx_audit_logs_timestamp on audit_logs(timestamp desc);
 create index if not exists idx_audit_logs_admin on audit_logs(admin_id);
 create index if not exists idx_audit_logs_resource on audit_logs(resource_type, resource_id);
+create index if not exists idx_upload_assets_org_created on upload_assets(organization_id, created_at desc);

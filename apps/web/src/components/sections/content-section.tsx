@@ -69,7 +69,7 @@ const emptyCollectionForm = {
   slug: "",
   description: "",
   imageUrl: "",
-  linkUrl: "urunler.html",
+  linkUrl: "",
   sortOrder: "0",
   active: true,
 };
@@ -85,10 +85,45 @@ const emptyBlogForm = {
   active: true,
 };
 
+type ContentTab = "slides" | "campaigns" | "collections" | "blog";
+
+const contentTabs: Array<{ key: ContentTab; label: string; description: string }> = [
+  { key: "slides", label: "Slaytlar", description: "Ana sayfa vitrini" },
+  { key: "campaigns", label: "Kampanyalar", description: "Üst bant ve indirimler" },
+  { key: "collections", label: "Koleksiyonlar", description: "Ürün grupları" },
+  { key: "blog", label: "Blog", description: "SEO içerikleri" },
+];
+
 function assetUrl(url: string | null | undefined) {
-  if (!url) return "";
-  if (/^https?:\/\//i.test(url)) return url;
-  return `${API_BASE.replace(/\/api\/?$/, "")}${url}`;
+  const value = String(url || "").trim();
+  if (!value) return "";
+  if (/^https?:\/\//i.test(value)) return value;
+  const assetBase = API_BASE.replace(/\/api\/?$/, "").replace(/\/$/, "");
+  if (value.startsWith("/uploads/")) return `${assetBase}${value}`;
+  if (value.startsWith("uploads/")) return `${assetBase}/${value}`;
+  if (value.startsWith("/")) return `${assetBase}${value}`;
+  return `${assetBase}/uploads/${value}`;
+}
+
+function collectionKey(value: string) {
+  return value
+    .trim()
+    .toLocaleLowerCase("tr-TR")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/ı/g, "i")
+    .replace(/ğ/g, "g")
+    .replace(/ü/g, "u")
+    .replace(/ş/g, "s")
+    .replace(/ö/g, "o")
+    .replace(/ç/g, "c")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function collectionLink(form: typeof emptyCollectionForm) {
+  const slug = collectionKey(form.slug || form.title);
+  return slug ? `urunler?collection=${slug}` : "urunler";
 }
 
 export function ContentSection({
@@ -108,6 +143,7 @@ export function ContentSection({
   const [campaignForm, setCampaignForm] = useState(emptyCampaignForm);
   const [collectionForm, setCollectionForm] = useState(emptyCollectionForm);
   const [blogForm, setBlogForm] = useState(emptyBlogForm);
+  const [activeContentTab, setActiveContentTab] = useState<ContentTab>("slides");
 
   const slidesQuery = useQuery({
     queryKey: ["slides", organizationSlug],
@@ -314,6 +350,20 @@ export function ContentSection({
     },
   });
 
+  const uploadBlogImageMutation = useMutation({
+    mutationFn: uploadProductImages,
+    onSuccess: (response) => {
+      const uploaded = response.files[0]?.url || "";
+      if (!uploaded) return;
+      setBlogForm((current) => ({ ...current, imageUrl: uploaded }));
+      pushToast({
+        title: "Blog kapak görseli yüklendi",
+        description: "Görsel blog yazısı formuna eklendi.",
+        tone: "success",
+      });
+    },
+  });
+
   if (slidesQuery.isLoading || campaignsQuery.isLoading || collectionsQuery.isLoading || blogQuery.isLoading) return <SectionLoading />;
   if (slidesQuery.isError || campaignsQuery.isError || collectionsQuery.isError || blogQuery.isError || !slidesQuery.data || !campaignsQuery.data || !collectionsQuery.data || !blogQuery.data) {
     return (
@@ -400,7 +450,7 @@ export function ContentSection({
       slug: collection.slug,
       description: collection.description || "",
       imageUrl: collection.image_url || "",
-      linkUrl: collection.link_url || "urunler.html",
+      linkUrl: collection.link_url || "",
       sortOrder: String(collection.sort_order || 0),
       active: collection.active,
     });
@@ -468,13 +518,14 @@ export function ContentSection({
     event.preventDefault();
     const sortOrder = Number(collectionForm.sortOrder || 0);
     if (!collectionForm.title.trim() || !Number.isFinite(sortOrder) || sortOrder < 0) return;
+    const slug = collectionForm.slug.trim() || collectionKey(collectionForm.title);
 
     const payload = {
       title: collectionForm.title.trim(),
-      slug: collectionForm.slug.trim(),
+      slug,
       description: collectionForm.description.trim(),
       imageUrl: collectionForm.imageUrl.trim(),
-      linkUrl: collectionForm.linkUrl.trim() || "urunler.html",
+      linkUrl: collectionForm.linkUrl.trim() || collectionLink({ ...collectionForm, slug }),
       sortOrder,
       active: collectionForm.active,
     };
@@ -522,6 +573,31 @@ export function ContentSection({
         ]}
       />
 
+      <div className="rounded-2xl border border-line bg-white p-2 shadow-sm">
+        <div className="grid gap-2 md:grid-cols-4">
+          {contentTabs.map((tab) => {
+            const active = activeContentTab === tab.key;
+            return (
+              <button
+                className={[
+                  "focus-ring rounded-xl px-4 py-3 text-left transition",
+                  active ? "bg-ink text-white shadow-sm" : "bg-zinc-50 text-zinc-600 hover:bg-zinc-100",
+                ].join(" ")}
+                key={tab.key}
+                onClick={() => setActiveContentTab(tab.key)}
+                type="button"
+              >
+                <span className="block text-sm font-semibold">{tab.label}</span>
+                <span className={["mt-1 block text-xs", active ? "text-white/70" : "text-zinc-500"].join(" ")}>
+                  {tab.description}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {activeContentTab === "slides" ? (
       <div className="grid gap-5 xl:grid-cols-[1.2fr_0.8fr]">
         <Panel
           title="Vitrin slaytları"
@@ -577,7 +653,7 @@ export function ContentSection({
           description="Vitrin başlığı, buton ve görsel bağlantısı"
         >
           <form className="grid gap-3" onSubmit={submitSlide}>
-            <FieldLabel htmlFor="slide-title">Başlık</FieldLabel>
+            <FieldLabel htmlFor="slide-title">Başlık (ana sayfa vitrininde büyük yazı olarak görünür)</FieldLabel>
             <input
               className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
               id="slide-title"
@@ -587,7 +663,7 @@ export function ContentSection({
             />
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="grid gap-2">
-                <span className="text-sm font-semibold text-zinc-700">Etiket</span>
+                <span className="text-sm font-semibold text-zinc-700">Etiket (başlığın üstündeki küçük vurgu metni)</span>
                 <input
                   className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
                   onChange={(event) => setSlideForm((current) => ({ ...current, tag: event.target.value }))}
@@ -596,7 +672,7 @@ export function ContentSection({
                 />
               </label>
               <label className="grid gap-2">
-                <span className="text-sm font-semibold text-zinc-700">Buton</span>
+                <span className="text-sm font-semibold text-zinc-700">Buton (vitrindeki aksiyon düğmesinin yazısı)</span>
                 <input
                   className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
                   onChange={(event) => setSlideForm((current) => ({ ...current, btn: event.target.value }))}
@@ -606,7 +682,7 @@ export function ContentSection({
               </label>
             </div>
             <label className="grid gap-2">
-              <span className="text-sm font-semibold text-zinc-700">Alt metin</span>
+              <span className="text-sm font-semibold text-zinc-700">Alt metin (başlığın altında görünen kısa açıklama)</span>
               <textarea
                 className="focus-ring min-h-24 rounded-lg border border-line bg-white px-3 py-2 text-sm"
                 onChange={(event) => setSlideForm((current) => ({ ...current, sub: event.target.value }))}
@@ -615,7 +691,7 @@ export function ContentSection({
               />
             </label>
             <label className="grid gap-2">
-              <span className="text-sm font-semibold text-zinc-700">Görsel URL</span>
+              <span className="text-sm font-semibold text-zinc-700">Görsel URL (vitrin arka plan fotoğrafı)</span>
               <input
                 className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
                 onChange={(event) => setSlideForm((current) => ({ ...current, imageUrl: event.target.value }))}
@@ -625,7 +701,7 @@ export function ContentSection({
             </label>
             <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
               <label className="grid gap-2">
-                <span className="text-sm font-semibold text-zinc-700">Sıra</span>
+                <span className="text-sm font-semibold text-zinc-700">Sıra (slaytların gösterim sırası)</span>
                 <input
                   className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
                   inputMode="numeric"
@@ -640,7 +716,7 @@ export function ContentSection({
                   onChange={(event) => setSlideForm((current) => ({ ...current, active: event.target.checked }))}
                   type="checkbox"
                 />
-                Aktif
+                Aktif (kapalıysa sitede görünmez)
               </label>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -669,7 +745,9 @@ export function ContentSection({
           </form>
         </Panel>
       </div>
+      ) : null}
 
+      {activeContentTab === "campaigns" ? (
       <div className="grid gap-5 xl:grid-cols-[1.2fr_0.8fr]">
         <Panel
           title="Kampanyalar"
@@ -723,7 +801,7 @@ export function ContentSection({
             description="Vitrin ve mağaza promosyon akışı"
           >
             <form className="grid gap-3" onSubmit={submitCampaign}>
-              <FieldLabel htmlFor="campaign-name">Kampanya adı</FieldLabel>
+              <FieldLabel htmlFor="campaign-name">Kampanya adı (duyuru ve kampanya listesinde görünen isim)</FieldLabel>
               <input
                 className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
                 id="campaign-name"
@@ -733,7 +811,7 @@ export function ContentSection({
               />
               <div className="grid gap-3 sm:grid-cols-2">
                 <label className="grid gap-2">
-                  <span className="text-sm font-semibold text-zinc-700">Tip</span>
+                  <span className="text-sm font-semibold text-zinc-700">Tip (yüzde, tutar veya kampanya türü)</span>
                   <input
                     className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
                     onChange={(event) => setCampaignForm((current) => ({ ...current, type: event.target.value }))}
@@ -742,7 +820,7 @@ export function ContentSection({
                   />
                 </label>
                 <label className="grid gap-2">
-                  <span className="text-sm font-semibold text-zinc-700">Değer</span>
+                  <span className="text-sm font-semibold text-zinc-700">Değer (indirim oranı/tutarı gibi sayısal etki)</span>
                   <input
                     className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
                     inputMode="decimal"
@@ -753,7 +831,7 @@ export function ContentSection({
               </div>
               <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
                 <label className="grid gap-2">
-                  <span className="text-sm font-semibold text-zinc-700">Bitiş tarihi</span>
+                  <span className="text-sm font-semibold text-zinc-700">Bitiş tarihi (kampanyanın sitede sona ereceği gün)</span>
                   <input
                     className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
                     onChange={(event) => setCampaignForm((current) => ({ ...current, endDate: event.target.value }))}
@@ -768,7 +846,7 @@ export function ContentSection({
                     onChange={(event) => setCampaignForm((current) => ({ ...current, active: event.target.checked }))}
                     type="checkbox"
                   />
-                  Aktif
+                  Aktif (kapalıysa kampanya sitede yayınlanmaz)
                 </label>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -796,13 +874,18 @@ export function ContentSection({
               {updateCampaignMutation.isError && <InlineError message={updateCampaignMutation.error.message} />}
             </form>
           </Panel>
+        </div>
+      </div>
+      ) : null}
 
+      {activeContentTab === "collections" ? (
+      <div className="grid gap-5 xl:grid-cols-[0.9fr_1.1fr]">
           <Panel
             title={editingCollectionId ? "Koleksiyonu güncelle" : "Yeni koleksiyon"}
-            description="Ürün listeleme sayfasındaki koleksiyon bağlantıları"
+            description="Kampanya bandında ve ürün listeleme sayfasında görünen ürün grupları"
           >
             <form className="grid gap-3" onSubmit={submitCollection}>
-              <FieldLabel htmlFor="collection-title">Koleksiyon adı</FieldLabel>
+              <FieldLabel htmlFor="collection-title">Koleksiyon adı (kampanya bandında ve koleksiyon sayfasında görünür)</FieldLabel>
               <input
                 className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
                 id="collection-title"
@@ -812,16 +895,17 @@ export function ContentSection({
               />
               <div className="grid gap-3 sm:grid-cols-2">
                 <label className="grid gap-2">
-                  <span className="text-sm font-semibold text-zinc-700">Kısa ad</span>
+                  <span className="text-sm font-semibold text-zinc-700">Kısa ad (URL, ürün etiketi ve koleksiyon eşleşmesi için kullanılır)</span>
                   <input
                     className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
                     onChange={(event) => setCollectionForm((current) => ({ ...current, slug: event.target.value }))}
                     placeholder="yeni-gelenler"
                     value={collectionForm.slug}
                   />
+                  <InlineHint>Ürünleri bu koleksiyona bağlamak için ürünün Etiketler alanına bu kısa adı yazın; örn: sepette-20.</InlineHint>
                 </label>
                 <label className="grid gap-2">
-                  <span className="text-sm font-semibold text-zinc-700">Sıra</span>
+                  <span className="text-sm font-semibold text-zinc-700">Sıra (koleksiyonların ekranda dizilişi)</span>
                   <input
                     className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
                     inputMode="numeric"
@@ -831,7 +915,7 @@ export function ContentSection({
                 </label>
               </div>
               <label className="grid gap-2">
-                <span className="text-sm font-semibold text-zinc-700">Açıklama</span>
+                <span className="text-sm font-semibold text-zinc-700">Açıklama (koleksiyon sayfasındaki tanıtım metni olarak görünür)</span>
                 <textarea
                   className="focus-ring min-h-20 rounded-lg border border-line bg-white px-3 py-2 text-sm"
                   onChange={(event) => setCollectionForm((current) => ({ ...current, description: event.target.value }))}
@@ -840,13 +924,14 @@ export function ContentSection({
                 />
               </label>
               <label className="grid gap-2">
-                <span className="text-sm font-semibold text-zinc-700">Link</span>
+                <span className="text-sm font-semibold text-zinc-700">Link (boş kalırsa otomatik koleksiyon sayfasına gider)</span>
                 <input
                   className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
                   onChange={(event) => setCollectionForm((current) => ({ ...current, linkUrl: event.target.value }))}
-                  placeholder="urunler.html?collection=yeni-gelenler"
+                  placeholder="urunler?collection=yeni-gelenler"
                   value={collectionForm.linkUrl}
                 />
+                <InlineHint>Önerilen otomatik link: {collectionLink(collectionForm)}</InlineHint>
               </label>
               <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
                 <input
@@ -888,7 +973,7 @@ export function ContentSection({
                   onChange={(event) => setCollectionForm((current) => ({ ...current, active: event.target.checked }))}
                   type="checkbox"
                 />
-                Aktif
+                Aktif (kapalıysa koleksiyon sitede görünmez)
               </label>
               <div className="flex flex-wrap gap-2">
                 <Button
@@ -953,7 +1038,7 @@ export function ContentSection({
                       </div>
                     </div>
                   </DataCell>
-                  <DataCell>{collection.link_url || "urunler.html"}</DataCell>
+                  <DataCell>{collection.link_url || "urunler"}</DataCell>
                   <DataCell>
                     <StatusPill tone={collection.active ? "mint" : "sun"}>
                       {collection.active ? "Aktif" : "Pasif"}
@@ -985,12 +1070,31 @@ export function ContentSection({
             />
           </Panel>
 
+      </div>
+      ) : null}
+
+      {activeContentTab === "blog" ? (
+      <div className="grid gap-5 xl:grid-cols-[0.9fr_1.1fr]">
           <Panel
             title={editingBlogId ? "Blog yazısını güncelle" : "Yeni blog yazısı"}
-            description="Suvera blog sayfasında yayınlanan içerikler"
+            description="SEO, müşteri güveni ve içerik pazarlaması için detaylı blog editörü"
           >
             <form className="grid gap-3" onSubmit={submitBlog}>
-              <FieldLabel htmlFor="blog-title">Başlık</FieldLabel>
+              <div className="grid gap-3 rounded-lg border border-line bg-zinc-50 p-3 sm:grid-cols-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-500">1. Kapak</p>
+                  <p className="mt-1 text-sm font-semibold text-ink">Yatay, aydınlık görsel</p>
+                </div>
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-500">2. SEO</p>
+                  <p className="mt-1 text-sm font-semibold text-ink">Başlık, kısa ad, özet</p>
+                </div>
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-500">3. İçerik</p>
+                  <p className="mt-1 text-sm font-semibold text-ink">Rehber, bakım, kombin</p>
+                </div>
+              </div>
+              <FieldLabel htmlFor="blog-title">Başlık (Google sonuçlarında, blog kartında ve yazı sayfasında görünür)</FieldLabel>
               <input
                 className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
                 id="blog-title"
@@ -1000,7 +1104,7 @@ export function ContentSection({
               />
               <div className="grid gap-3 sm:grid-cols-2">
                 <label className="grid gap-2">
-                  <span className="text-sm font-semibold text-zinc-700">Kısa ad</span>
+                  <span className="text-sm font-semibold text-zinc-700">Kısa ad (blog yazısının URL anahtarı)</span>
                   <input
                     className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
                     onChange={(event) => setBlogForm((current) => ({ ...current, slug: event.target.value }))}
@@ -1009,7 +1113,7 @@ export function ContentSection({
                   />
                 </label>
                 <label className="grid gap-2">
-                  <span className="text-sm font-semibold text-zinc-700">Yayın tarihi</span>
+                  <span className="text-sm font-semibold text-zinc-700">Yayın tarihi (blog listesi ve detay sayfasında gösterilir)</span>
                   <input
                     className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
                     onChange={(event) => setBlogForm((current) => ({ ...current, publishedAt: event.target.value }))}
@@ -1019,7 +1123,7 @@ export function ContentSection({
                 </label>
               </div>
               <label className="grid gap-2">
-                <span className="text-sm font-semibold text-zinc-700">Özet</span>
+                <span className="text-sm font-semibold text-zinc-700">SEO özeti (blog kartında ve meta açıklama olarak kullanılır)</span>
                 <textarea
                   className="focus-ring min-h-20 rounded-lg border border-line bg-white px-3 py-2 text-sm"
                   onChange={(event) => setBlogForm((current) => ({ ...current, excerpt: event.target.value }))}
@@ -1027,27 +1131,56 @@ export function ContentSection({
                   value={blogForm.excerpt}
                 />
               </label>
-              <label className="grid gap-2">
-                <span className="text-sm font-semibold text-zinc-700">İçerik</span>
-                <textarea
-                  className="focus-ring min-h-32 rounded-lg border border-line bg-white px-3 py-2 text-sm"
-                  onChange={(event) => setBlogForm((current) => ({ ...current, content: event.target.value }))}
-                  placeholder="Yazının ana içeriğini girin"
-                  value={blogForm.content}
-                />
-              </label>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <label className="grid gap-2">
-                  <span className="text-sm font-semibold text-zinc-700">Görsel URL</span>
+              <div className="grid gap-3">
+                <span className="text-sm font-semibold text-zinc-700">Kapak görseli (blog kartında ve tekil yazı hero alanında kullanılır)</span>
+                <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
                   <input
                     className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
                     onChange={(event) => setBlogForm((current) => ({ ...current, imageUrl: event.target.value }))}
                     placeholder="/uploads/blog.webp"
                     value={blogForm.imageUrl}
                   />
-                </label>
+                  <label className="focus-ring inline-flex h-10 cursor-pointer items-center justify-center rounded-lg border border-line px-3 text-xs font-semibold text-ink">
+                    <input
+                      accept="image/png,image/jpeg,image/webp"
+                      className="hidden"
+                      onChange={(event) => {
+                        const files = Array.from(event.target.files || []);
+                        if (files.length > 0) {
+                          uploadBlogImageMutation.mutate(files.slice(0, 1));
+                        }
+                        event.currentTarget.value = "";
+                      }}
+                      type="file"
+                    />
+                    {uploadBlogImageMutation.isPending ? "Yükleniyor" : "Kapak görseli yükle"}
+                  </label>
+                </div>
+                <InlineHint>Öneri: yatay 1600x900, ürün/konu net görünen aydınlık bir görsel kullan. Suvera detay sayfasında bu görsel üst kapak olur.</InlineHint>
+                {blogForm.imageUrl ? (
+                  <Image
+                    alt=""
+                    className="aspect-[16/9] w-full rounded-lg border border-line object-cover"
+                    height={360}
+                    src={assetUrl(blogForm.imageUrl)}
+                    unoptimized
+                    width={640}
+                  />
+                ) : null}
+              </div>
+              <label className="grid gap-2">
+                <span className="text-sm font-semibold text-zinc-700">Ana içerik (başlıklar, paragraflar ve listelerle detaylı rehber metni)</span>
+                <textarea
+                  className="focus-ring min-h-72 rounded-lg border border-line bg-white px-3 py-3 text-sm leading-6"
+                  onChange={(event) => setBlogForm((current) => ({ ...current, content: event.target.value }))}
+                  placeholder={"Örnek yapı:\n## Keten tunik nasıl kombinlenir?\nKısa giriş paragrafı...\n\n- Günlük kullanım için açık ton şal\n- Yaz aylarında nefes alan içlik\n\n## Bakım önerisi\nDüşük ısıda yıkama ve gölgede kurutma önerilir."}
+                  value={blogForm.content}
+                />
+              </label>
+              <InlineHint>Satır başında “##” ara başlık, “-” madde listesi olarak Suvera blog detayında profesyonel biçimde görünür.</InlineHint>
+              <div className="grid gap-3 sm:grid-cols-2">
                 <label className="grid gap-2">
-                  <span className="text-sm font-semibold text-zinc-700">Sıra</span>
+                  <span className="text-sm font-semibold text-zinc-700">Sıra (blog yazılarının dizilişi)</span>
                   <input
                     className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
                     inputMode="numeric"
@@ -1063,7 +1196,7 @@ export function ContentSection({
                   onChange={(event) => setBlogForm((current) => ({ ...current, active: event.target.checked }))}
                   type="checkbox"
                 />
-                Aktif
+                Aktif (kapalıysa blog yazısı sitede görünmez)
               </label>
               <div className="flex flex-wrap gap-2">
                 <Button
@@ -1088,6 +1221,7 @@ export function ContentSection({
               {!canManageContent ? <InlineHint>Bu alanda yazma yetkisi için sahip veya yönetici rolüne ihtiyaç var.</InlineHint> : null}
               {blogMutation.isError && <InlineError message={blogMutation.error.message} />}
               {updateBlogMutation.isError && <InlineError message={updateBlogMutation.error.message} />}
+              {uploadBlogImageMutation.isError && <InlineError message={uploadBlogImageMutation.error.message} />}
             </form>
           </Panel>
 
@@ -1104,8 +1238,28 @@ export function ContentSection({
                 <tr key={post.id}>
                   <DataCell>{formatCount(post.sort_order)}</DataCell>
                   <DataCell>
-                    <p className="font-semibold text-ink">{post.title}</p>
-                    <p className="line-clamp-1 text-xs text-zinc-500">{post.excerpt || post.slug}</p>
+                    <div className="flex items-center gap-3">
+                      <div className="h-11 w-11 shrink-0 overflow-hidden rounded-md border border-line bg-zinc-100">
+                        {post.image_url ? (
+                          <Image
+                            alt=""
+                            className="h-full w-full object-cover"
+                            height={88}
+                            src={assetUrl(post.image_url)}
+                            unoptimized
+                            width={88}
+                          />
+                        ) : (
+                          <div className="flex h-full w-full items-center justify-center text-xs font-bold text-zinc-400">
+                            {post.title.slice(0, 2).toLocaleUpperCase("tr-TR")}
+                          </div>
+                        )}
+                      </div>
+                      <div>
+                        <p className="font-semibold text-ink">{post.title}</p>
+                        <p className="line-clamp-1 text-xs text-zinc-500">{post.excerpt || post.slug}</p>
+                      </div>
+                    </div>
                   </DataCell>
                   <DataCell>{post.published_at ? formatDateTime(post.published_at) : "-"}</DataCell>
                   <DataCell>
@@ -1151,8 +1305,8 @@ export function ContentSection({
                 : "Tarihli kampanya yok.",
             ]}
           />
-        </div>
       </div>
+      ) : null}
     </>
   );
 }

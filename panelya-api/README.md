@@ -129,8 +129,8 @@ For Suvera, set payment return URLs to the storefront:
 
 ```env
 PUBLIC_SITE_URL=https://suvera.com.tr
-PAYMENT_SUCCESS_URL=https://suvera.com.tr/tesekkur.html
-PAYMENT_FAILURE_URL=https://suvera.com.tr/tesekkur.html?payment=failed
+PAYMENT_SUCCESS_URL=https://suvera.com.tr/tesekkur
+PAYMENT_FAILURE_URL=https://suvera.com.tr/tesekkur?payment=failed
 ```
 
 If checkout sends `payment_method=iban` or `paymentMethod=iban`, Panelya creates a `manual` provider order without redirecting to the card provider. Legacy values like `transfer`, `havale`, `eft` and `manual` are normalized to `iban`.

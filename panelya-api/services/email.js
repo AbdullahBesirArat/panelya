@@ -76,7 +76,7 @@ async function sendCustomerPasswordResetEmail(account, organization, token) {
   if (!account?.email) return { skipped: true };
   const siteUrl = String(process.env.PUBLIC_SITE_URL || '').replace(/\/$/, '');
   const resetUrl = siteUrl && token
-    ? `${siteUrl}/sifre-sifirla.html?token=${encodeURIComponent(token)}`
+    ? `${siteUrl}/sifre-sifirla?token=${encodeURIComponent(token)}`
     : '';
 
   return sendEmail({

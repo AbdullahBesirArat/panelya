@@ -320,7 +320,7 @@ router.post('/', createOrderLimiter, async (req, res, next) => {
 
     await insertOrderItems(client, orderResult.rows[0].id, items);
 
-    await reserveStock(client, items);
+    await reserveStock(client, items, { organizationId: organization.id });
 
     await client.query('commit');
     res.status(201).json(orderResult.rows[0]);
@@ -430,7 +430,9 @@ router.put('/:id/status', requireAuth, requireRole(['super_admin', 'owner', 'adm
       return res.status(404).json({ error: 'Siparis bulunamadi' });
     }
 
-    await syncStockForStatusChange(client, current.rows[0].id, current.rows[0].status, status);
+    await syncStockForStatusChange(client, current.rows[0].id, current.rows[0].status, status, {
+      organizationId: organization.id,
+    });
 
     const result = await client.query(
       'update orders set status = $1, updated_at = now() where id = $2 and organization_id = $3 returning *',

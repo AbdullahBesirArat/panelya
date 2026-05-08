@@ -17,6 +17,7 @@ const { slugify } = require('../services/tenant');
 
 const router = express.Router();
 const DUMMY_PASSWORD_HASH = '$2b$12$QJv3JQv8ZCk1sQxw2P7/fOMQ7A0J7sKnzGWxZmf0RduCMsZ/HXXdK';
+const VALID_ORGANIZATION_PLANS = ['starter', 'growth', 'business', 'enterprise'];
 
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -50,6 +51,11 @@ function validateAppCredentials({ email, password }) {
     return 'Sifre en az 12 karakter olmali';
   }
   return null;
+}
+
+function defaultOrganizationPlan() {
+  const plan = String(process.env.DEFAULT_ORGANIZATION_PLAN || 'growth').trim().toLowerCase();
+  return VALID_ORGANIZATION_PLANS.includes(plan) ? plan : 'growth';
 }
 
 async function appMemberships(client, userId) {
@@ -277,6 +283,7 @@ router.post('/register', registerLimiter, async (req, res, next) => {
     }
 
     const passwordHash = await bcrypt.hash(password, 12);
+    const organizationPlan = defaultOrganizationPlan();
     const userResult = await client.query(
       `insert into app_users (email, name, password_hash)
        values ($1, $2, $3)
@@ -286,9 +293,9 @@ router.post('/register', registerLimiter, async (req, res, next) => {
 
     const organizationResult = await client.query(
       `insert into organizations (name, slug, plan, status)
-       values ($1, $2, 'starter', 'trialing')
+       values ($1, $2, $3, 'trialing')
        returning id, name, slug, plan, status`,
-      [organizationName, organizationSlug]
+      [organizationName, organizationSlug, organizationPlan]
     );
 
     await client.query(
@@ -300,8 +307,8 @@ router.post('/register', registerLimiter, async (req, res, next) => {
     await client.query(
       `insert into subscriptions
        (organization_id, provider, plan, status, current_period_start, current_period_end)
-       values ($1, 'manual', 'starter', 'trialing', now(), now() + interval '14 days')`,
-      [organizationResult.rows[0].id]
+       values ($1, 'manual', $2, 'trialing', now(), now() + interval '14 days')`,
+      [organizationResult.rows[0].id, organizationPlan]
     );
 
     const memberships = await appMemberships(client, userResult.rows[0].id);

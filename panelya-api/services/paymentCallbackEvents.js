@@ -120,7 +120,9 @@ async function processPaymentCallbackEvent(req, eventId) {
       paymentError = paymentError || `Final durum korunuyor: ${currentStatus}`;
     }
 
-    await syncStockForStatusChange(client, currentOrder.id, currentStatus, nextStatus);
+    await syncStockForStatusChange(client, currentOrder.id, currentStatus, nextStatus, {
+      organizationId: currentOrder.organization_id,
+    });
 
     const updatedOrder = await client.query(
       `update orders

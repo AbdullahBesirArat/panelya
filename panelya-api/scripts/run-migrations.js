@@ -37,6 +37,7 @@ function fileChecksum(content) {
 const legacyChecksumCompatibleMigrations = new Set([
   '005_saas_foundation.sql',
   '010_enforce_content_tenant_scope.sql',
+  '017_category_images_and_collections.sql',
 ]);
 
 async function applyMigration(file) {

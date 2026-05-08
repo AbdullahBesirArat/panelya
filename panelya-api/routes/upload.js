@@ -3,10 +3,13 @@ const fs = require('fs');
 const path = require('path');
 const multer = require('multer');
 const sharp = require('sharp');
+const db = require('../db');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { rateLimit } = require('../middleware/security');
 const { auditLog } = require('../services/audit');
+const { resolveOrganization } = require('../services/tenant');
 const { resolveUploadDir } = require('../services/uploads');
+const { assertStorageCapacity } = require('../services/planLimits');
 
 const router = express.Router();
 const uploadDir = resolveUploadDir();
@@ -63,8 +66,11 @@ function detectImageFormat(buffer) {
 }
 
 router.post('/', requireAuth, requireRole(['super_admin', 'owner', 'admin']), uploadLimiter, upload.array('images', 5), async (req, res, next) => {
+  const client = await db.pool.connect();
+  const writtenPaths = [];
+
   try {
-    const files = [];
+    const preparedFiles = [];
 
     for (const file of req.files || []) {
       const detectedFormat = detectImageFormat(file.buffer);
@@ -83,23 +89,65 @@ router.post('/', requireAuth, requireRole(['super_admin', 'owner', 'admin']), up
 
       const name = `${Date.now()}-${Math.round(Math.random() * 1e9)}.webp`;
       const fullPath = path.join(uploadDir, name);
-
-      await image
+      const output = await sharp(file.buffer, { failOn: 'error', limitInputPixels: 40_000_000 })
         .resize({ width: 1400, withoutEnlargement: true })
         .webp({ quality: 82 })
-        .toFile(fullPath);
+        .toBuffer();
 
-      files.push({ url: `/uploads/${name}` });
+      preparedFiles.push({
+        filename: name,
+        fullPath,
+        output,
+        byteSize: output.length,
+        url: `/uploads/${name}`,
+      });
     }
 
+    await client.query('begin');
+    const organization = await resolveOrganization(req, client);
+    const totalIncomingBytes = preparedFiles.reduce((sum, file) => sum + file.byteSize, 0);
+    await assertStorageCapacity(client, organization.id, totalIncomingBytes);
+
+    for (const file of preparedFiles) {
+      await fs.promises.writeFile(file.fullPath, file.output, { flag: 'wx' });
+      writtenPaths.push(file.fullPath);
+      await client.query(
+        `insert into upload_assets
+         (organization_id, url, filename, byte_size, mime_type, created_by, data)
+         values ($1, $2, $3, $4, $5, $6, $7)`,
+        [
+          organization.id,
+          file.url,
+          file.filename,
+          file.byteSize,
+          'image/webp',
+          req.auth?.actorType === 'app' ? req.auth.sub : null,
+          file.output,
+        ]
+      );
+    }
+
+    const files = preparedFiles.map((file) => ({ url: file.url }));
+    await client.query('commit');
     await auditLog(req, {
       action: 'UPLOAD',
       resourceType: 'upload',
-      newValue: { count: files.length, files },
+      newValue: {
+        organizationId: organization.id,
+        count: files.length,
+        bytes: totalIncomingBytes,
+        files,
+      },
+    }).catch((error) => {
+      console.warn('Upload audit log yazilamadi', { message: error.message });
     });
     res.status(201).json({ files });
   } catch (err) {
+    await client.query('rollback').catch(() => {});
+    await Promise.all(writtenPaths.map((filePath) => fs.promises.unlink(filePath).catch(() => {})));
     next(err);
+  } finally {
+    client.release();
   }
 });
 

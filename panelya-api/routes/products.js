@@ -4,6 +4,7 @@ const { requireAuth, requireRole } = require('../middleware/auth');
 const { auditLog } = require('../services/audit');
 const { resolveOrganization } = require('../services/tenant');
 const { assertPlanCapacity } = require('../services/planLimits');
+const { syncProductStock } = require('../services/inventory');
 
 const router = express.Router();
 const PRODUCT_STATUSES = ['active', 'draft', 'out'];
@@ -12,6 +13,28 @@ const VARIANT_STATUSES = ['active', 'out'];
 function normalizeProductIds(ids) {
   const uniqueIds = [...new Set((Array.isArray(ids) ? ids : []).map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))];
   return uniqueIds.slice(0, 200);
+}
+
+function normalizeStockUpdates(rawUpdates) {
+  const updates = Array.isArray(rawUpdates) ? rawUpdates : [];
+  const seen = new Set();
+
+  return updates.map((raw) => {
+    const productId = Number(raw.product_id || raw.productId || raw.id || 0);
+    const variantId = Number(raw.variant_id || raw.variantId || 0) || null;
+    const stock = Number(raw.stock);
+    if (!Number.isInteger(productId) || productId < 1 || !Number.isFinite(stock) || stock < 0) return null;
+    if (variantId != null && (!Number.isInteger(variantId) || variantId < 1)) return null;
+
+    const key = `${productId}:${variantId || ''}`;
+    if (seen.has(key)) return null;
+    seen.add(key);
+    return {
+      product_id: productId,
+      variant_id: variantId,
+      stock: Math.floor(stock),
+    };
+  }).filter(Boolean).slice(0, 200);
 }
 
 function safePaging(limit, offset, defaultLimit = 50) {
@@ -104,6 +127,22 @@ async function replaceProductVariants(client, organizationId, productId, variant
      )`,
     [organizationId, productId, JSON.stringify(variants)]
   );
+}
+
+async function assertCategoryScope(client, organizationId, categoryId) {
+  if (categoryId == null) return;
+  if (!Number.isInteger(categoryId) || categoryId < 1) {
+    throw Object.assign(new Error('Kategori gecersiz'), { status: 400 });
+  }
+
+  const categoryResult = await client.query(
+    'select id from categories where id = $1 and organization_id = $2 limit 1',
+    [categoryId, organizationId]
+  );
+
+  if (!categoryResult.rows[0]) {
+    throw Object.assign(new Error('Kategori bulunamadi'), { status: 400 });
+  }
 }
 
 function productSelect(whereClause) {
@@ -313,14 +352,16 @@ router.post('/', requireAuth, requireRole(['super_admin', 'owner', 'admin']), as
     const organization = await resolveOrganization(req, client);
     await assertPlanCapacity(client, organization.id, 'products');
     const variants = normalizeVariants(req.body.variants);
+    const params = productParams(req.body);
 
     await client.query('begin');
+    await assertCategoryScope(client, organization.id, params[1]);
     const result = await client.query(
       `insert into products
        (organization_id, name, category_id, price, sale_price, stock, status, colors, sizes, images, details, tags, description, emoji)
        values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
        returning *`,
-      [organization.id, ...productParams(req.body)]
+      [organization.id, ...params]
     );
     await replaceProductVariants(client, organization.id, result.rows[0].id, variants);
     const product = await fetchProduct(client, result.rows[0].id, organization.id);
@@ -433,6 +474,102 @@ router.post('/bulk', requireAuth, requireRole(['super_admin', 'owner', 'admin'])
   }
 });
 
+router.patch('/bulk-stock', requireAuth, requireRole(['super_admin', 'owner', 'admin']), async (req, res, next) => {
+  const client = await db.pool.connect();
+
+  try {
+    const organization = await resolveOrganization(req, client);
+    const updates = normalizeStockUpdates(req.body.updates || req.body.items);
+    if (!updates.length) return res.status(400).json({ error: 'Gecerli stok guncellemesi zorunlu' });
+
+    await client.query('begin');
+    const productUpdates = updates.filter((item) => !item.variant_id);
+    const variantUpdates = updates.filter((item) => item.variant_id);
+    const oldProducts = await client.query(
+      `select id, name, stock, status
+       from products
+       where organization_id = $1 and id = any($2::bigint[])
+       order by id`,
+      [organization.id, [...new Set(updates.map((item) => item.product_id))]]
+    );
+
+    let productResult = { rows: [] };
+    if (productUpdates.length) {
+      productResult = await client.query(
+        `with requested as (
+           select product_id, stock
+           from jsonb_to_recordset($1::jsonb) as item(product_id bigint, stock int)
+         )
+         update products p
+         set stock = requested.stock,
+             status = case
+               when requested.stock <= 0 then 'out'
+               when p.status = 'out' and requested.stock > 0 then 'active'
+               else p.status
+             end,
+             updated_at = now()
+         from requested
+         where p.organization_id = $2 and p.id = requested.product_id
+         returning p.id, p.name, p.stock, p.status`,
+        [JSON.stringify(productUpdates), organization.id]
+      );
+    }
+
+    let variantResult = { rows: [] };
+    if (variantUpdates.length) {
+      variantResult = await client.query(
+        `with requested as (
+           select product_id, variant_id, stock
+           from jsonb_to_recordset($1::jsonb) as item(product_id bigint, variant_id bigint, stock int)
+         )
+         update product_variants pv
+         set stock = requested.stock,
+             status = case
+               when requested.stock <= 0 then 'out'
+               when pv.status = 'out' and requested.stock > 0 then 'active'
+               else pv.status
+             end,
+             updated_at = now()
+         from requested
+         where pv.organization_id = $2
+           and pv.product_id = requested.product_id
+           and pv.id = requested.variant_id
+         returning pv.id, pv.product_id, pv.color, pv.size, pv.stock, pv.status`,
+        [JSON.stringify(variantUpdates), organization.id]
+      );
+      await syncProductStock(client, variantResult.rows.map((item) => item.product_id), {
+        organizationId: organization.id,
+      });
+    }
+
+    const affectedCount = productResult.rows.length + variantResult.rows.length;
+    await auditLog(req, {
+      action: 'BULK_STOCK',
+      resourceType: 'product',
+      oldValue: oldProducts.rows,
+      newValue: {
+        requestedCount: updates.length,
+        affectedCount,
+        products: productResult.rows,
+        variants: variantResult.rows,
+      },
+    });
+    await client.query('commit');
+
+    res.json({
+      ok: true,
+      affectedCount,
+      products: productResult.rows,
+      variants: variantResult.rows,
+    });
+  } catch (err) {
+    await client.query('rollback');
+    next(err);
+  } finally {
+    client.release();
+  }
+});
+
 /**
  * @swagger
  * /api/products/{id}:
@@ -501,8 +638,10 @@ router.put('/:id', requireAuth, requireRole(['super_admin', 'owner', 'admin']), 
   try {
     const organization = await resolveOrganization(req, client);
     const variants = normalizeVariants(req.body.variants);
+    const params = productParams(req.body);
 
     await client.query('begin');
+    await assertCategoryScope(client, organization.id, params[1]);
     const oldProduct = await fetchProduct(client, req.params.id, organization.id);
     const oldResult = await client.query(
       'select * from products where id = $1 and organization_id = $2',
@@ -515,10 +654,13 @@ router.put('/:id', requireAuth, requireRole(['super_admin', 'owner', 'admin']), 
         updated_at=now()
        where id=$14 and organization_id=$15
        returning *`,
-      [...productParams(req.body), req.params.id, organization.id]
+      [...params, req.params.id, organization.id]
     );
 
-    if (!result.rows[0]) return res.status(404).json({ error: 'Urun bulunamadi' });
+    if (!result.rows[0]) {
+      await client.query('rollback');
+      return res.status(404).json({ error: 'Urun bulunamadi' });
+    }
     await replaceProductVariants(client, organization.id, req.params.id, variants);
     const product = await fetchProduct(client, req.params.id, organization.id);
     await auditLog(req, {

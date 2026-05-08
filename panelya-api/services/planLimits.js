@@ -22,6 +22,16 @@ const RESOURCE_CONFIG = {
                    and status = 'active'`,
     upgradeMessage: 'Ekip limitine ulastiniz. Daha fazla uye icin planinizi yukseltebilirsiniz.',
   },
+  collections: {
+    column: 'max_collections',
+    usageQuery: `select count(*)::int as count from collections where organization_id = $1`,
+    upgradeMessage: 'Koleksiyon limitine ulastiniz. Daha fazla koleksiyon icin planinizi yukseltebilirsiniz.',
+  },
+  blog_posts: {
+    column: 'max_blog_posts',
+    usageQuery: `select count(*)::int as count from blog_posts where organization_id = $1`,
+    upgradeMessage: 'Blog yazisi limitine ulastiniz. Daha fazla icerik icin planinizi yukseltebilirsiniz.',
+  },
 };
 
 async function fetchPlanLimitSnapshot(client, organizationId) {
@@ -31,7 +41,9 @@ async function fetchPlanLimitSnapshot(client, organizationId) {
        pl.max_products,
        pl.max_orders_month,
        pl.max_members,
-       pl.max_storage_mb
+       pl.max_storage_mb,
+       pl.max_collections,
+       pl.max_blog_posts
      from organizations o
      left join plan_limits pl on pl.plan_name = o.plan
      where o.id = $1
@@ -40,6 +52,16 @@ async function fetchPlanLimitSnapshot(client, organizationId) {
   );
 
   return result.rows[0] || null;
+}
+
+async function fetchStorageUsageBytes(client, organizationId) {
+  const result = await client.query(
+    `select coalesce(sum(byte_size), 0)::bigint as bytes
+     from upload_assets
+     where organization_id = $1`,
+    [organizationId]
+  );
+  return Number(result.rows[0]?.bytes || 0);
 }
 
 async function fetchResourceUsage(client, organizationId, resource) {
@@ -56,10 +78,13 @@ async function getPlanUsage(client, organizationId) {
   const limits = await fetchPlanLimitSnapshot(client, organizationId);
   if (!limits) return null;
 
-  const [productCount, monthlyOrderCount, activeMemberCount] = await Promise.all([
+  const [productCount, monthlyOrderCount, activeMemberCount, collectionCount, blogPostCount, storageBytes] = await Promise.all([
     fetchResourceUsage(client, organizationId, 'products'),
     fetchResourceUsage(client, organizationId, 'orders_month'),
     fetchResourceUsage(client, organizationId, 'members'),
+    fetchResourceUsage(client, organizationId, 'collections'),
+    fetchResourceUsage(client, organizationId, 'blog_posts'),
+    fetchStorageUsageBytes(client, organizationId).catch(() => 0),
   ]);
 
   return {
@@ -69,11 +94,17 @@ async function getPlanUsage(client, organizationId) {
       maxOrdersMonth: Number(limits.max_orders_month || 0),
       maxMembers: Number(limits.max_members || 0),
       maxStorageMb: Number(limits.max_storage_mb || 0),
+      maxCollections: Number(limits.max_collections || 0),
+      maxBlogPosts: Number(limits.max_blog_posts || 0),
     },
     usage: {
       products: productCount,
       ordersMonth: monthlyOrderCount,
       members: activeMemberCount,
+      collections: collectionCount,
+      blogPosts: blogPostCount,
+      storageBytes,
+      storageMb: Math.ceil(storageBytes / (1024 * 1024)),
     },
   };
 }
@@ -106,6 +137,33 @@ async function assertPlanCapacity(client, organizationId, resource, increment = 
   throw error;
 }
 
+async function assertStorageCapacity(client, organizationId, incomingBytes) {
+  const safeIncomingBytes = Math.max(Number(incomingBytes || 0), 0);
+  if (!safeIncomingBytes) return;
+
+  const limits = await fetchPlanLimitSnapshot(client, organizationId);
+  if (!limits || !limits.max_storage_mb) return;
+
+  await client.query('select id from organizations where id = $1 for update', [organizationId]);
+  const currentBytes = await fetchStorageUsageBytes(client, organizationId);
+  const limitBytes = Number(limits.max_storage_mb || 0) * 1024 * 1024;
+  const nextBytes = currentBytes + safeIncomingBytes;
+
+  if (nextBytes <= limitBytes) return;
+
+  const error = new Error('Depolama limitine ulastiniz. Daha fazla dosya icin planinizi yukseltebilirsiniz.');
+  error.status = 402;
+  error.code = 'PLAN_LIMIT_REACHED';
+  error.meta = {
+    plan: limits.plan,
+    resource: 'storage',
+    limitBytes,
+    usageBytes: currentBytes,
+    nextBytes,
+  };
+  throw error;
+}
+
 function requirePlanCapacity(resource, options = {}) {
   const increment = Number(options.increment || 1);
 
@@ -129,6 +187,7 @@ function requirePlanCapacity(resource, options = {}) {
 
 module.exports = {
   assertPlanCapacity,
+  assertStorageCapacity,
   getPlanUsage,
   requirePlanCapacity,
 };

@@ -908,7 +908,7 @@ export async function createCollection(payload: {
       slug: payload.slug || "",
       description: payload.description || "",
       image_url: payload.imageUrl || "",
-      link_url: payload.linkUrl || "urunler.html",
+      link_url: payload.linkUrl || "urunler",
       active: payload.active,
       sort_order: payload.sortOrder,
     }),
@@ -931,7 +931,7 @@ export async function updateCollection(id: string, payload: {
       slug: payload.slug || "",
       description: payload.description || "",
       image_url: payload.imageUrl || "",
-      link_url: payload.linkUrl || "urunler.html",
+      link_url: payload.linkUrl || "urunler",
       active: payload.active,
       sort_order: payload.sortOrder,
     }),
@@ -946,6 +946,10 @@ export async function deleteCollection(id: string) {
 
 export async function fetchBlogPosts() {
   return authenticatedRequest<ApiBlogPost[]>("/blog/admin/all");
+}
+
+export async function fetchBlogPost(idOrSlug: string) {
+  return publicRequest<ApiBlogPost>(`/blog/${encodeURIComponent(idOrSlug)}`);
 }
 
 export async function createBlogPost(payload: {

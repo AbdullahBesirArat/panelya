@@ -3,6 +3,7 @@ const db = require('../db');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { auditLog } = require('../services/audit');
 const { resolveOrganization, slugify } = require('../services/tenant');
+const { assertPlanCapacity } = require('../services/planLimits');
 
 const router = express.Router();
 const managerOnly = [requireAuth, requireRole(['super_admin', 'owner', 'admin'])];
@@ -15,8 +16,8 @@ function blogPayload(body) {
   return {
     title,
     slug: slugify(body.slug || title),
-    excerpt: String(body.excerpt || '').trim().slice(0, 360),
-    content: String(body.content || '').trim().slice(0, 8000),
+    excerpt: String(body.excerpt || '').trim().slice(0, 500),
+    content: String(body.content || '').trim().slice(0, 20000),
     image_url: String(body.image_url || '').trim().slice(0, 500),
     active: body.active !== false,
     sort_order: Number.isFinite(sortOrder) ? Math.max(0, Math.floor(sortOrder)) : 0,
@@ -57,11 +58,34 @@ router.get('/admin/all', requireAuth, requireRole(['super_admin', 'owner', 'admi
   }
 });
 
+router.get('/:idOrSlug', async (req, res, next) => {
+  try {
+    const organization = await resolveOrganization(req, db, { allowPublic: !req.auth });
+    const idOrSlug = String(req.params.idOrSlug || '').trim();
+    const isNumericId = /^\d+$/.test(idOrSlug);
+    const result = await db.query(
+      `select *
+       from blog_posts
+       where organization_id = $1
+         and active = true
+         and ${isNumericId ? 'id = $2' : 'slug = $2'}
+       limit 1`,
+      [organization.id, isNumericId ? Number(idOrSlug) : idOrSlug]
+    );
+
+    if (!result.rows[0]) return res.status(404).json({ error: 'Blog yazisi bulunamadi' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.post('/', ...managerOnly, async (req, res, next) => {
   try {
     const organization = await resolveOrganization(req);
     const payload = blogPayload(req.body);
     if (!payload.title || !payload.slug) return res.status(400).json({ error: 'Blog basligi zorunlu' });
+    await assertPlanCapacity(db, organization.id, 'blog_posts');
 
     const result = await db.query(
       `insert into blog_posts

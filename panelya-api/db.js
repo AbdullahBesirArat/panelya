@@ -4,7 +4,7 @@ const SLOW_QUERY_THRESHOLD_MS = Math.max(Number(process.env.SLOW_QUERY_THRESHOLD
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  max: Math.min(Math.max(Number(process.env.DB_POOL_MAX || 20), 1), 50),
+  max: Math.min(Math.max(Number(process.env.DB_POOL_MAX || 40), 1), 50),
   idleTimeoutMillis: Math.max(Number(process.env.DB_IDLE_TIMEOUT_MS || 30000), 1000),
   connectionTimeoutMillis: Math.max(Number(process.env.DB_CONNECTION_TIMEOUT_MS || 2000), 250),
 });

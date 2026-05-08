@@ -12,6 +12,7 @@ const authLimiter = rateLimit({
   max: Number(process.env.CUSTOMER_AUTH_RATE_LIMIT || 20),
   message: 'Cok fazla hesap islemi. Lutfen biraz sonra tekrar deneyin.',
 });
+const DUMMY_PASSWORD_HASH = '$2b$12$QJv3JQv8ZCk1sQxw2P7/fOMQ7A0J7sKnzGWxZmf0RduCMsZ/HXXdK';
 
 function sha256(value) {
   return crypto.createHash('sha256').update(String(value || '')).digest('hex');
@@ -31,8 +32,8 @@ function cleanEmail(value) {
 
 function cleanPassword(value) {
   const password = String(value || '');
-  if (password.length < 8 || password.length > 200) {
-    throw Object.assign(new Error('Sifre en az 8 karakter olmali'), { status: 400 });
+  if (password.length < 12 || password.length > 200) {
+    throw Object.assign(new Error('Sifre en az 12 karakter olmali'), { status: 400 });
   }
   return password;
 }
@@ -178,6 +179,18 @@ router.post('/register', authLimiter, async (req, res, next) => {
 
     await client.query('begin');
     const organization = await resolveOrganization(req, client, { allowPublic: true });
+    const existingAccount = await client.query(
+      `select id
+       from customer_accounts
+       where organization_id = $1 and email = $2
+       limit 1`,
+      [organization.id, email]
+    );
+    if (existingAccount.rows[0]) {
+      await client.query('rollback');
+      return res.status(409).json({ error: 'Bu email ile musteri hesabi zaten var' });
+    }
+
     const customer = await upsertAccountCustomer(client, organization.id, {
       name,
       email,
@@ -188,15 +201,15 @@ router.post('/register', authLimiter, async (req, res, next) => {
     const created = await client.query(
       `insert into customer_accounts (organization_id, customer_id, email, name, phone, password_hash)
        values ($1, $2, $3, $4, $5, $6)
-       on conflict (organization_id, email) do update set
-         customer_id = coalesce(customer_accounts.customer_id, excluded.customer_id),
-         name = excluded.name,
-         phone = excluded.phone,
-         password_hash = excluded.password_hash,
-         updated_at = now()
+       on conflict (organization_id, email) do nothing
        returning id`,
       [organization.id, customer.id, email, name, phone, passwordHash]
     );
+    if (!created.rows[0]) {
+      await client.query('rollback');
+      return res.status(409).json({ error: 'Bu email ile musteri hesabi zaten var' });
+    }
+
     const session = await issueSession(client, created.rows[0].id);
     await client.query('commit');
     res.status(201).json(session);
@@ -222,8 +235,9 @@ router.post('/login', authLimiter, async (req, res, next) => {
       [organization.id, email]
     );
     const account = result.rows[0];
-    const valid = account ? await bcrypt.compare(password, account.password_hash) : false;
-    if (!valid) return res.status(401).json({ error: 'Giris bilgileri hatali' });
+    const passwordHashToCompare = account?.password_hash || DUMMY_PASSWORD_HASH;
+    const valid = await bcrypt.compare(password, passwordHashToCompare);
+    if (!account || !account.password_hash || !valid) return res.status(401).json({ error: 'Giris bilgileri hatali' });
 
     const session = await issueSession(client, account.id);
     res.json(session);

@@ -34,14 +34,14 @@ function apiBaseUrl(req) {
 
 function successUrl(req, orderCode) {
   const configured = process.env.PAYMENT_SUCCESS_URL;
-  const url = new URL(configured || `${baseUrl(req)}/tesekkur.html`, baseUrl(req));
+  const url = new URL(configured || `${baseUrl(req)}/tesekkur`, baseUrl(req));
   url.searchParams.set('order', orderCode);
   return url.toString();
 }
 
 function failureUrl(req, orderCode) {
   const configured = process.env.PAYMENT_FAILURE_URL;
-  const url = new URL(configured || `${baseUrl(req)}/tesekkur.html?payment=failed`, baseUrl(req));
+  const url = new URL(configured || `${baseUrl(req)}/tesekkur?payment=failed`, baseUrl(req));
   url.searchParams.set('order', orderCode);
   return url.toString();
 }

@@ -43,6 +43,40 @@ import {
 import { useToastStore } from "@/store/toast";
 
 const productStatusOptions: ProductStatus[] = ["active", "draft", "out"];
+const productColorPresets = [
+  { name: "Altın", value: "#d6bf6a" },
+  { name: "Bej", value: "#d8c3a5" },
+  { name: "Beyaz", value: "#f7f3ea" },
+  { name: "Bordo", value: "#8f2532" },
+  { name: "Ekru", value: "#eee7d8" },
+  { name: "Gri", value: "#b8b8b8" },
+  { name: "Haki", value: "#78824f" },
+  { name: "Kahverengi", value: "#8a5a32" },
+  { name: "Kırmızı", value: "#d80922" },
+  { name: "Lacivert", value: "#243f8f" },
+  { name: "Mavi", value: "#7eb0df" },
+  { name: "Metalik", value: "#c8b9aa" },
+  { name: "Mor", value: "#7c35c8" },
+  { name: "Pembe", value: "#ee93cf" },
+  { name: "Sarı", value: "#ffd91a" },
+  { name: "Siyah", value: "#111111" },
+  { name: "Turkuaz", value: "#3cc2aa" },
+  { name: "Turuncu", value: "#f29a1f" },
+  { name: "Yeşil", value: "#69c82d" },
+  { name: "Krem", value: "#ede8dc" },
+  { name: "Çok Renkli", value: "#d84fd8" },
+];
+const productSizePresets = [
+  "Standart",
+  "XS",
+  "S",
+  "M",
+  "L",
+  "XL",
+  "XXL",
+  "3XL",
+  ...Array.from({ length: 27 }, (_, index) => String(34 + index)),
+];
 type ProductPayload = {
   name: string;
   categoryId?: string;
@@ -112,6 +146,59 @@ function joinLines(values: string[] | null | undefined) {
   return Array.isArray(values) ? values.filter(Boolean).join("\n") : "";
 }
 
+function splitImageLines(value: string) {
+  return value
+    .split(/\n+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function parseMoneyInput(value: string) {
+  const cleaned = value
+    .trim()
+    .replace(/[₺\s]/g, "")
+    .replace(/[^0-9.,-]/g, "");
+
+  if (!cleaned) return NaN;
+
+  if (cleaned.includes(",")) {
+    return Number(cleaned.replace(/\./g, "").replace(",", "."));
+  }
+
+  if (/^\d{1,3}(\.\d{3})+$/.test(cleaned)) {
+    return Number(cleaned.replace(/\./g, ""));
+  }
+
+  return Number(cleaned);
+}
+
+function parseImageLine(line: string) {
+  const parts = line.split("|").map((part) => part.trim()).filter(Boolean);
+  if (parts.length >= 2) {
+    return {
+      color: parts[0],
+      url: parts[parts.length - 1],
+    };
+  }
+
+  return {
+    color: "",
+    url: line.trim(),
+  };
+}
+
+function colorEntryLabel(value: string) {
+  return value.replace(/#(?:[0-9a-f]{3}){1,2}\b/i, "").replace(/[()]/g, "").trim() || value;
+}
+
+function colorEntryHex(value: string) {
+  return value.match(/#(?:[0-9a-f]{3}){1,2}\b/i)?.[0] || "";
+}
+
+function sameEntry(left: string, right: string) {
+  return left.toLocaleLowerCase("tr-TR") === right.toLocaleLowerCase("tr-TR");
+}
+
 function parseVariantLines(value: string): ProductVariant[] {
   const variants = value
     .split(/\n+/)
@@ -145,10 +232,23 @@ function joinVariantLines(variants: ProductVariant[] | null | undefined) {
     .join("\n");
 }
 
+function sumVariantStock(variants: ProductVariant[]) {
+  return variants.reduce((sum, variant) => sum + Math.max(0, Number(variant.stock || 0)), 0);
+}
+
+function uniqueVariantSizes(variants: ProductVariant[]) {
+  return Array.from(new Set(variants.map((variant) => variant.size).filter(Boolean)));
+}
+
 function assetUrl(url: string | null | undefined) {
-  if (!url) return "";
-  if (/^https?:\/\//i.test(url)) return url;
-  return `${API_BASE.replace(/\/api\/?$/, "")}${url}`;
+  const value = String(url || "").trim();
+  if (!value) return "";
+  if (/^https?:\/\//i.test(value)) return value;
+  const assetBase = API_BASE.replace(/\/api\/?$/, "").replace(/\/$/, "");
+  if (value.startsWith("/uploads/")) return `${assetBase}${value}`;
+  if (value.startsWith("uploads/")) return `${assetBase}/${value}`;
+  if (value.startsWith("/")) return `${assetBase}${value}`;
+  return `${assetBase}/uploads/${value}`;
 }
 
 export function ProductsSection({
@@ -168,6 +268,8 @@ export function ProductsSection({
   const [categoryForm, setCategoryForm] = useState(createEmptyCategoryForm);
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
   const [productForm, setProductForm] = useState(createEmptyProductForm);
+  const [productFormError, setProductFormError] = useState("");
+  const [imageColor, setImageColor] = useState("");
   const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
   const [bulkStatus, setBulkStatus] = useState<ProductStatus>("active");
   const [bulkCategoryId, setBulkCategoryId] = useState("");
@@ -311,9 +413,10 @@ export function ProductsSection({
     mutationFn: uploadProductImages,
     onSuccess: (response) => {
       const uploaded = response.files.map((file) => file.url).filter(Boolean);
+      const uploadedLines = uploaded.map((url) => (imageColor ? `${imageColor} | ${url}` : url));
       setProductForm((current) => ({
         ...current,
-        imagesText: [current.imagesText.trim(), ...uploaded].filter(Boolean).join("\n"),
+        imagesText: [current.imagesText.trim(), ...uploadedLines].filter(Boolean).join("\n"),
       }));
       pushToast({
         title: "Görseller yüklendi",
@@ -354,6 +457,10 @@ export function ProductsSection({
   const summary = summaryQuery.data;
   const categories = categoriesQuery.data;
   const products = productsQuery.data;
+  const productColors = splitCsvLines(productForm.colorsText);
+  const selectedVariants = parseVariantLines(productForm.variantsText);
+  const selectedVariantStock = sumVariantStock(selectedVariants);
+  const imageEntries = splitImageLines(productForm.imagesText).map(parseImageLine).filter((entry) => entry.url);
 
   function resetCategoryForm() {
     setEditingCategoryId(null);
@@ -372,6 +479,101 @@ export function ProductsSection({
   function resetProductForm() {
     setEditingProductId(null);
     setProductForm(createEmptyProductForm());
+    setProductFormError("");
+    setImageColor("");
+  }
+
+  function addProductColor(name: string, value: string) {
+    const entry = `${name} ${value}`;
+    setProductForm((current) => {
+      const colors = splitCsvLines(current.colorsText);
+      if (colors.some((color) => sameEntry(color, entry))) {
+        return current;
+      }
+      return {
+        ...current,
+        colorsText: [...colors, entry].join("\n"),
+      };
+    });
+    setImageColor(entry);
+  }
+
+  function removeProductColor(color: string) {
+    setProductForm((current) => {
+      const variants = parseVariantLines(current.variantsText).filter((variant) => !sameEntry(variant.color, color));
+      const stock = variants.length ? String(sumVariantStock(variants)) : current.stock;
+
+      return {
+        ...current,
+        colorsText: splitCsvLines(current.colorsText).filter((item) => !sameEntry(item, color)).join("\n"),
+        sizesText: uniqueVariantSizes(variants).join("\n"),
+        variantsText: joinVariantLines(variants),
+        stock,
+      };
+    });
+    if (sameEntry(imageColor, color)) setImageColor("");
+  }
+
+  function addVariantSize(color: string, size: string) {
+    const normalizedSize = size.trim();
+    if (!color || !normalizedSize) return;
+
+    setProductForm((current) => {
+      const variants = parseVariantLines(current.variantsText);
+      if (variants.some((variant) => sameEntry(variant.color, color) && sameEntry(variant.size, normalizedSize))) {
+        return current;
+      }
+
+      const nextVariants: ProductVariant[] = [
+        ...variants,
+        {
+          color,
+          size: normalizedSize,
+          stock: 0,
+          sku: "",
+          status: "out",
+        },
+      ];
+
+      return {
+        ...current,
+        sizesText: uniqueVariantSizes(nextVariants).join("\n"),
+        variantsText: joinVariantLines(nextVariants),
+        stock: String(sumVariantStock(nextVariants)),
+      };
+    });
+  }
+
+  function updateVariantStock(color: string, size: string, value: string) {
+    const stock = Math.max(0, Math.floor(Number(value) || 0));
+    setProductForm((current) => {
+      const nextVariants = parseVariantLines(current.variantsText).map((variant) => (
+        sameEntry(variant.color, color) && sameEntry(variant.size, size)
+          ? { ...variant, stock, status: (stock > 0 ? "active" : "out") as ProductVariant["status"] }
+          : variant
+      ));
+
+      return {
+        ...current,
+        variantsText: joinVariantLines(nextVariants),
+        stock: String(sumVariantStock(nextVariants)),
+      };
+    });
+  }
+
+  function removeVariantSize(color: string, size: string) {
+    setProductForm((current) => {
+      const nextVariants = parseVariantLines(current.variantsText).filter((variant) => (
+        !(sameEntry(variant.color, color) && sameEntry(variant.size, size))
+      ));
+
+      return {
+        ...current,
+        sizesText: uniqueVariantSizes(nextVariants).join("\n"),
+        variantsText: joinVariantLines(nextVariants),
+        stock: nextVariants.length ? String(sumVariantStock(nextVariants)) : current.stock,
+      };
+    });
   }
 
   function toggleProductSelection(id: string) {
@@ -422,6 +624,7 @@ export function ProductsSection({
       deliveryNote: String(product.details?.delivery_note || ""),
       emoji: product.emoji || "look",
     });
+    setImageColor(product.colors[0] || "");
   }
 
   function submitCategory(event: FormEvent<HTMLFormElement>) {
@@ -443,15 +646,32 @@ export function ProductsSection({
 
   function submitProduct(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setProductFormError("");
 
-    const price = Number(productForm.price);
-    const salePrice = productForm.salePrice === "" ? null : Number(productForm.salePrice);
+    const price = parseMoneyInput(productForm.price);
+    const salePrice = productForm.salePrice.trim() === "" ? null : parseMoneyInput(productForm.salePrice);
     const variants = parseVariantLines(productForm.variantsText);
     const stock = variants.length
       ? variants.reduce((sum, variant) => sum + Number(variant.stock || 0), 0)
       : Number(productForm.stock);
 
-    if (!productForm.name.trim() || !Number.isFinite(price) || price <= 0 || !Number.isFinite(stock) || stock < 0) {
+    if (!productForm.name.trim()) {
+      setProductFormError("Ürün adı zorunlu.");
+      return;
+    }
+
+    if (!Number.isFinite(price) || price <= 0) {
+      setProductFormError("Geçerli bir fiyat girin. Örnek: 1200 veya 1.200,50");
+      return;
+    }
+
+    if (salePrice != null && (!Number.isFinite(salePrice) || salePrice < 0)) {
+      setProductFormError("İndirimli fiyat geçerli değil. Boş bırakabilir ya da 950 gibi yazabilirsiniz.");
+      return;
+    }
+
+    if (!Number.isFinite(stock) || stock < 0) {
+      setProductFormError("Stok sayısı geçerli değil. Renk/beden stoklarını kontrol edin.");
       return;
     }
 
@@ -465,7 +685,7 @@ export function ProductsSection({
       colors: splitCsvLines(productForm.colorsText),
       sizes: splitCsvLines(productForm.sizesText),
       variants,
-      images: splitCsvLines(productForm.imagesText),
+      images: splitImageLines(productForm.imagesText),
       details: {
         short_description: productForm.shortDescription.trim(),
         story: productForm.story.trim(),
@@ -665,9 +885,481 @@ export function ProductsSection({
         </Panel>
 
         <div className="space-y-5">
-          <Panel title="Kategori listesi" description="Katalog yapisi">
-            <div className="space-y-3">
-              {categories.length === 0 && <InlineHint>Henüz kategori yok. İlk kategori ile kataloğu başlat.</InlineHint>}
+          <Panel
+            title={editingProductId ? "Ürünü düzenle" : "Hızlı ürün oluştur"}
+            description={editingProductId ? "Sadece değiştirmek istediğin alanları güncelle." : "Ürün adı, fiyat, stok ve görsellerle ürünü birkaç adımda yayına hazırla."}
+          >
+            <div className="space-y-5">
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div className="rounded-lg border border-line bg-zinc-50 px-3 py-3">
+                  <p className="text-xs font-semibold uppercase text-zinc-500">1. Temel bilgi</p>
+                  <p className="mt-1 text-sm font-semibold text-ink">Ad, fiyat ve stok</p>
+                </div>
+                <div className="rounded-lg border border-line bg-zinc-50 px-3 py-3">
+                  <p className="text-xs font-semibold uppercase text-zinc-500">2. Görsel</p>
+                  <p className="mt-1 text-sm font-semibold text-ink">Kapak fotoğrafını yükle</p>
+                </div>
+                <div className="rounded-lg border border-line bg-zinc-50 px-3 py-3">
+                  <p className="text-xs font-semibold uppercase text-zinc-500">3. Yayın</p>
+                  <p className="mt-1 text-sm font-semibold text-ink">Aktif veya taslak seç</p>
+                </div>
+              </div>
+              <form className="grid gap-4" onSubmit={submitProduct}>
+                <div className="flex items-center justify-between gap-3">
+                  <FieldLabel htmlFor="product-name">{editingProductId ? "Ürünü düzenle" : "Yeni ürün"}</FieldLabel>
+                  {editingProductId ? (
+                    <button
+                      className="focus-ring rounded-lg border border-line px-3 py-1.5 text-xs font-semibold text-zinc-600"
+                      onClick={resetProductForm}
+                      type="button"
+                    >
+                      Vazgec
+                    </button>
+                  ) : null}
+                </div>
+                <input
+                  className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
+                  id="product-name"
+                  onChange={(event) => setProductForm((current) => ({ ...current, name: event.target.value }))}
+                  placeholder="Ürün adı"
+                  value={productForm.name}
+                />
+                <div className="grid gap-3 sm:grid-cols-[0.8fr_1.2fr]">
+                  <div className="space-y-2">
+                    <FieldLabel htmlFor="product-emoji">Liste ikonu (ürün listesinde görsel yoksa küçük işaret olarak görünür)</FieldLabel>
+                    <input
+                      className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
+                      id="product-emoji"
+                      maxLength={16}
+                      onChange={(event) => setProductForm((current) => ({ ...current, emoji: event.target.value }))}
+                      placeholder="look"
+                      value={productForm.emoji}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <FieldLabel htmlFor="product-tags">Etiketler (rozet/arama ipucu ve koleksiyon eşleştirme için kullanılır)</FieldLabel>
+                    <input
+                      className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
+                      id="product-tags"
+                      onChange={(event) => setProductForm((current) => ({ ...current, tags: event.target.value }))}
+                      placeholder="yeni sezon, çok satan, sepette-20"
+                      value={productForm.tags}
+                    />
+                  </div>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <select
+                    className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
+                    onChange={(event) => setProductForm((current) => ({ ...current, categoryId: event.target.value }))}
+                    value={productForm.categoryId}
+                  >
+                    <option value="">Kategori seç</option>
+                    {categories.map((category) => (
+                      <option key={category.id} value={category.id}>{category.name}</option>
+                    ))}
+                  </select>
+                  <select
+                    className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
+                    onChange={(event) => setProductForm((current) => ({ ...current, status: event.target.value as ProductStatus }))}
+                    value={productForm.status}
+                  >
+                    {productStatusOptions.map((option) => (
+                      <option key={option} value={option}>{productStatusLabels[option]}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <input
+                    className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
+                    inputMode="decimal"
+                    onChange={(event) => setProductForm((current) => ({ ...current, price: event.target.value }))}
+                    placeholder="Fiyat"
+                    value={productForm.price}
+                  />
+                  <input
+                    className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
+                    inputMode="decimal"
+                    onChange={(event) => setProductForm((current) => ({ ...current, salePrice: event.target.value }))}
+                    placeholder="İndirimli fiyat"
+                    value={productForm.salePrice}
+                  />
+                  <input
+                    className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm disabled:bg-zinc-100 disabled:text-zinc-500"
+                    disabled={selectedVariants.length > 0}
+                    inputMode="numeric"
+                    onChange={(event) => setProductForm((current) => ({ ...current, stock: event.target.value }))}
+                    placeholder={selectedVariants.length > 0 ? "Varyant stogu" : "Genel stok"}
+                    value={selectedVariants.length > 0 ? String(selectedVariantStock) : productForm.stock}
+                  />
+                </div>
+                <details className="group rounded-lg border border-line bg-zinc-50">
+                  <summary className="focus-ring flex cursor-pointer list-none items-center justify-between gap-3 rounded-lg px-4 py-3 text-sm font-semibold text-ink">
+                    <span>Renk, beden ve stok akışı (önce renk, sonra beden, sonra stok)</span>
+                    <span className="text-xs font-semibold text-zinc-500 group-open:hidden">Aç</span>
+                    <span className="hidden text-xs font-semibold text-zinc-500 group-open:inline">Kapat</span>
+                  </summary>
+                  <div className="space-y-4 border-t border-line bg-white px-4 py-4">
+                    <div className="space-y-2">
+                      <FieldLabel htmlFor="product-colors">Renk seç (seçilen her renk için beden ve stok kutuları açılır)</FieldLabel>
+                      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3" id="product-colors">
+                        {productColorPresets.map((color) => {
+                          const entry = `${color.name} ${color.value}`;
+                          const isSelected = productColors.some((item) => sameEntry(item, entry));
+
+                          return (
+                            <button
+                              className={`focus-ring flex min-h-11 items-center gap-2 rounded-lg border bg-white px-3 py-2 text-left hover:bg-zinc-50 ${
+                                isSelected ? "border-mint ring-1 ring-mint" : "border-line"
+                              }`}
+                              key={color.name}
+                              onClick={() => addProductColor(color.name, color.value)}
+                              type="button"
+                            >
+                              <span
+                                className="h-5 w-5 shrink-0 rounded-full border border-line"
+                                style={{ background: color.value }}
+                              />
+                              <span className="text-xs font-semibold leading-tight text-zinc-800">{color.name}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <InlineHint>Renk adı sitede müşteriye görünür; renk kodu seçim butonunun ve görsel eşleşmenin rengini belirler.</InlineHint>
+                    </div>
+                    {productColors.length > 0 ? (
+                      <div className="space-y-3">
+                        {productColors.map((color) => {
+                          const colorVariants = selectedVariants.filter((variant) => sameEntry(variant.color, color));
+                          const colorName = colorEntryLabel(color);
+
+                          return (
+                            <div className="rounded-lg border border-line bg-zinc-50 p-3" key={color}>
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <div className="flex min-w-0 items-center gap-2">
+                                  <span
+                                    className="h-6 w-6 shrink-0 rounded-full border border-line"
+                                    style={{ background: colorEntryHex(color) || "#ffffff" }}
+                                  />
+                                  <span className="text-sm font-semibold text-ink">{colorName}</span>
+                                </div>
+                                <button
+                                  className="focus-ring rounded-md border border-line bg-white px-2 py-1 text-xs font-semibold text-zinc-600 hover:bg-white"
+                                  onClick={() => removeProductColor(color)}
+                                  type="button"
+                                >
+                                  Rengi kaldır
+                                </button>
+                              </div>
+                              <div className="mt-3 space-y-2">
+                                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-500">Beden seç</p>
+                                <div className="flex flex-wrap gap-2">
+                                  {productSizePresets.map((size) => {
+                                    const isSelected = colorVariants.some((variant) => sameEntry(variant.size, size));
+
+                                    return (
+                                      <button
+                                        className={`focus-ring min-h-9 rounded-lg border px-3 text-xs font-semibold ${
+                                          isSelected
+                                            ? "border-mint bg-white text-mint"
+                                            : "border-line bg-white text-zinc-700 hover:bg-zinc-50"
+                                        }`}
+                                        key={`${color}-${size}`}
+                                        onClick={() => addVariantSize(color, size)}
+                                        type="button"
+                                      >
+                                        {size}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                              <div className="mt-3 space-y-2">
+                                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-500">Stok sayısı</p>
+                                {colorVariants.length > 0 ? (
+                                  <div className="grid gap-2 sm:grid-cols-2">
+                                    {colorVariants.map((variant) => (
+                                      <div
+                                        className="rounded-lg border border-line bg-white p-2"
+                                        key={`${variant.color}-${variant.size}`}
+                                      >
+                                        <div className="mb-2 flex items-center justify-between gap-2">
+                                          <span className="text-xs font-semibold text-ink">{colorName} / {variant.size}</span>
+                                          <button
+                                            className="focus-ring rounded-md px-2 py-1 text-xs font-semibold text-zinc-500 hover:bg-zinc-50"
+                                            onClick={() => removeVariantSize(color, variant.size)}
+                                            type="button"
+                                          >
+                                            Kaldır
+                                          </button>
+                                        </div>
+                                        <input
+                                          aria-label={`${colorName} ${variant.size} stok`}
+                                          className="focus-ring h-10 w-full rounded-lg border border-line bg-white px-3 text-sm"
+                                          inputMode="numeric"
+                                          min={0}
+                                          onChange={(event) => updateVariantStock(color, variant.size, event.target.value)}
+                                          type="number"
+                                          value={String(variant.stock ?? 0)}
+                                        />
+                                      </div>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <InlineHint>Bu renk için önce beden seçin; ardından her bedenin stok kutusu burada açılır.</InlineHint>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="rounded-lg border border-dashed border-line bg-zinc-50 px-3 py-4 text-sm text-zinc-500">
+                        Önce bir renk seçin. Renk seçilince hemen altında beden ve stok kutuları açılır.
+                      </div>
+                    )}
+                    <div className="rounded-lg border border-line bg-zinc-50 px-3 py-2 text-xs text-zinc-600">
+                      Toplam stok, seçilen renk/beden kutularındaki stokların toplamından otomatik hesaplanır.
+                    </div>
+                  </div>
+                </details>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <FieldLabel htmlFor="product-images">Ürün görselleri (kapak ve renk seçilince değişen galeri)</FieldLabel>
+                    <div className="flex flex-wrap items-center justify-end gap-2">
+                      <select
+                        className="focus-ring h-9 rounded-lg border border-line bg-white px-2 text-xs"
+                        onChange={(event) => setImageColor(event.target.value)}
+                        value={imageColor}
+                      >
+                          <option value="">Genel görsel</option>
+                        {productColors.map((color) => (
+                          <option key={color} value={color}>{colorEntryLabel(color)}</option>
+                        ))}
+                      </select>
+                      <label className="focus-ring inline-flex h-9 cursor-pointer items-center rounded-lg border border-line px-3 text-xs font-semibold text-ink">
+                        <input
+                          accept="image/png,image/jpeg,image/webp"
+                          className="hidden"
+                          multiple
+                          onChange={(event) => {
+                            const files = Array.from(event.target.files || []);
+                            if (files.length > 0) {
+                              uploadImagesMutation.mutate(files);
+                            }
+                            event.currentTarget.value = "";
+                          }}
+                          type="file"
+                        />
+                        {uploadImagesMutation.isPending ? "Yükleniyor" : "Görsel yükle"}
+                      </label>
+                    </div>
+                  </div>
+                  <textarea
+                    className="focus-ring min-h-32 rounded-lg border border-line bg-white px-3 py-3 text-sm"
+                    id="product-images"
+                    onChange={(event) => setProductForm((current) => ({ ...current, imagesText: event.target.value }))}
+                    placeholder={"Önce renk seçip görsel yükleyin ya da elle yazın\n#111111 | /uploads/siyah.webp\n#d8c6b0 | /uploads/ekru.webp\n/uploads/genel-kapak.webp"}
+                    value={productForm.imagesText}
+                  />
+                  <InlineHint>Renk seçiliyken yüklenen görsel o renge bağlanır. Düz linkler genel galeri görseli olur.</InlineHint>
+                  {imageEntries.length > 0 ? (
+                    <div className="grid gap-3 sm:grid-cols-3">
+                      {imageEntries.slice(0, 9).map((entry, index) => (
+                        <div className="overflow-hidden rounded-lg border border-line bg-zinc-50" key={`${entry.color}-${entry.url}-${index}`}>
+                          <Image
+                            alt=""
+                            className="h-28 w-full object-cover"
+                            height={160}
+                            src={assetUrl(entry.url)}
+                            unoptimized
+                            width={240}
+                          />
+                          <p className="truncate px-3 py-2 text-xs font-semibold text-zinc-600">
+                            {entry.color ? `${colorEntryLabel(entry.color)} rengi` : "Genel görsel"}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                  {uploadImagesMutation.isError ? <InlineError message={uploadImagesMutation.error.message} /> : null}
+                </div>
+                <div className="space-y-2">
+                  <FieldLabel htmlFor="product-short-description">Kısa açıklama (fiyatın altında görünen kısa ürün özeti)</FieldLabel>
+                  <textarea
+                    className="focus-ring min-h-24 rounded-lg border border-line bg-white px-3 py-3 text-sm"
+                    id="product-short-description"
+                    onChange={(event) => setProductForm((current) => ({ ...current, shortDescription: event.target.value }))}
+                    placeholder="Detay sayfasında fiyatın altında kısa özet olarak görünür."
+                    value={productForm.shortDescription}
+                  />
+                </div>
+                <details className="group rounded-lg border border-line bg-zinc-50">
+                  <summary className="focus-ring flex cursor-pointer list-none items-center justify-between gap-3 rounded-lg px-4 py-3 text-sm font-semibold text-ink">
+                    <span>Uzun açıklama, ölçü ve teslimat notu (ürün detayındaki bilgi sekmeleri)</span>
+                    <span className="text-xs font-semibold text-zinc-500 group-open:hidden">Aç</span>
+                    <span className="hidden text-xs font-semibold text-zinc-500 group-open:inline">Kapat</span>
+                  </summary>
+                  <div className="space-y-4 border-t border-line bg-white px-4 py-4">
+                    <div className="space-y-2">
+                      <FieldLabel htmlFor="product-description">Ana açıklama (ürünün genel metni ve SEO içeriği)</FieldLabel>
+                      <textarea
+                        className="focus-ring min-h-32 rounded-lg border border-line bg-white px-3 py-3 text-sm"
+                        id="product-description"
+                        onChange={(event) => setProductForm((current) => ({ ...current, description: event.target.value }))}
+                        placeholder="Genel ürün açıklaması. Hikaye ve ölçü metni için kaynak olarak da kullanılabilir."
+                        value={productForm.description}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <FieldLabel htmlFor="product-story">Hikaye metni (detay sayfasındaki marka/ürün anlatımı)</FieldLabel>
+                      <textarea
+                        className="focus-ring min-h-32 rounded-lg border border-line bg-white px-3 py-3 text-sm"
+                        id="product-story"
+                        onChange={(event) => setProductForm((current) => ({ ...current, story: event.target.value }))}
+                        placeholder="Detay sayfasındaki ürün hikayesi bölümü için paragraflar."
+                        value={productForm.story}
+                      />
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="space-y-2">
+                        <FieldLabel htmlFor="product-measurements">Ölçü bilgileri (detay sayfasındaki ölçü tablosu)</FieldLabel>
+                        <textarea
+                          className="focus-ring min-h-32 rounded-lg border border-line bg-white px-3 py-3 text-sm"
+                          id="product-measurements"
+                          onChange={(event) => setProductForm((current) => ({ ...current, measurements: event.target.value }))}
+                          placeholder={"Her satıra bir ölçü satırı yazın\nBoy: 138 cm\nGöğüs: 110 cm"}
+                          value={productForm.measurements}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <FieldLabel htmlFor="product-delivery-note">Teslimat notu (kargo, iade ve hazırlık bilgisi)</FieldLabel>
+                        <textarea
+                          className="focus-ring min-h-32 rounded-lg border border-line bg-white px-3 py-3 text-sm"
+                          id="product-delivery-note"
+                          onChange={(event) => setProductForm((current) => ({ ...current, deliveryNote: event.target.value }))}
+                          placeholder="Kargo süresi, iade veya teslimat bilgilendirmeleri."
+                          value={productForm.deliveryNote}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </details>
+                <button
+                  className="focus-ring inline-flex h-10 items-center justify-center rounded-lg bg-ink px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                  disabled={!canManageCatalog || productMutation.isPending || updateProductMutation.isPending || uploadImagesMutation.isPending}
+                  type="submit"
+                >
+                  {updateProductMutation.isPending
+                    ? "Güncelleniyor"
+                    : productMutation.isPending
+                      ? "Oluşturuluyor"
+                      : editingProductId
+                        ? "Ürünü güncelle"
+                        : "Ürün oluştur"}
+                </button>
+                {productFormError ? <InlineError message={productFormError} /> : null}
+                {productMutation.isError && <InlineError message={productMutation.error.message} />}
+                {updateProductMutation.isError && <InlineError message={updateProductMutation.error.message} />}
+              </form>
+            </div>
+          </Panel>
+
+          <Panel title="Kategori ayarları" description="Kategori ekleme nadiren kullanılan bir ayar olarak burada tutulur.">
+            <details className="group rounded-lg border border-line bg-zinc-50">
+              <summary className="focus-ring flex cursor-pointer list-none items-center justify-between gap-3 rounded-lg px-4 py-3 text-sm font-semibold text-ink">
+                <span>{editingCategoryId ? "Kategoriyi düzenle" : "Kategori ekle veya düzenle"}</span>
+                <span className="text-xs font-semibold text-zinc-500 group-open:hidden">Aç</span>
+                <span className="hidden text-xs font-semibold text-zinc-500 group-open:inline">Kapat</span>
+              </summary>
+              <form className="space-y-3 border-t border-line bg-white px-4 py-4" onSubmit={submitCategory}>
+                <div className="flex items-center justify-between gap-3">
+                  <FieldLabel htmlFor="category-name">
+                    {editingCategoryId ? "Kategoriyi düzenle" : "Yeni kategori"} (Suvera ana sayfasındaki kategori kartını besler)
+                  </FieldLabel>
+                  {editingCategoryId ? (
+                    <button
+                      className="focus-ring rounded-lg border border-line px-3 py-1.5 text-xs font-semibold text-zinc-600"
+                      onClick={resetCategoryForm}
+                      type="button"
+                    >
+                      Vazgeç
+                    </button>
+                  ) : null}
+                </div>
+                <div className="grid gap-2 sm:grid-cols-[1fr_0.8fr]">
+                  <input
+                    className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
+                    id="category-name"
+                    onChange={(event) => setCategoryForm((current) => ({ ...current, name: event.target.value }))}
+                    placeholder="Kategori adı"
+                    value={categoryForm.name}
+                  />
+                  <input
+                    className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
+                    onChange={(event) => setCategoryForm((current) => ({ ...current, slug: event.target.value }))}
+                    placeholder="kategori-kisa-adi"
+                    value={categoryForm.slug}
+                  />
+                </div>
+                <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+                  <input
+                    className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
+                    onChange={(event) => setCategoryForm((current) => ({ ...current, imageUrl: event.target.value }))}
+                    placeholder="Kategori görsel URL'si veya /uploads yolu (öneri: yatay 1600x900)"
+                    value={categoryForm.imageUrl}
+                  />
+                  <label className="focus-ring inline-flex h-10 cursor-pointer items-center justify-center rounded-lg border border-line px-3 text-xs font-semibold text-ink">
+                    <input
+                      accept="image/png,image/jpeg,image/webp"
+                      className="hidden"
+                      onChange={(event) => {
+                        const files = Array.from(event.target.files || []);
+                        if (files.length > 0) {
+                          uploadCategoryImageMutation.mutate(files.slice(0, 1));
+                        }
+                        event.currentTarget.value = "";
+                      }}
+                      type="file"
+                    />
+                    {uploadCategoryImageMutation.isPending ? "Yükleniyor" : "Kategori görseli yükle"}
+                  </label>
+                </div>
+                <InlineHint>Suvera ana sayfada ve kategori sayfasında bu fotoğrafı alana göre kırpar. Ürünü ortada bırakan yatay 1600x900, aydınlık bir görsel kullan.</InlineHint>
+                {categoryForm.imageUrl ? (
+                  <div className="overflow-hidden rounded-lg border border-line bg-zinc-100">
+                    <Image
+                      alt=""
+                      className="aspect-[16/9] w-full object-cover"
+                      height={360}
+                      src={assetUrl(categoryForm.imageUrl)}
+                      unoptimized
+                      width={640}
+                    />
+                    <p className="px-3 py-2 text-xs font-semibold text-zinc-600">Suvera kategori kartı önizlemesi</p>
+                  </div>
+                ) : null}
+                <button
+                  className="focus-ring inline-flex h-10 items-center justify-center rounded-lg bg-mint px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                  disabled={!canManageCatalog || categoryMutation.isPending || updateCategoryMutation.isPending || uploadCategoryImageMutation.isPending}
+                  type="submit"
+                >
+                  {updateCategoryMutation.isPending
+                    ? "Güncelleniyor"
+                    : categoryMutation.isPending
+                      ? "Ekleniyor"
+                      : editingCategoryId
+                        ? "Kategoriyi güncelle"
+                        : "Kategori ekle"}
+                </button>
+                {!canManageCatalog && <InlineHint>Bu alanda yazma yetkisi için sahip veya yönetici rolüne ihtiyaç var.</InlineHint>}
+                {categoryMutation.isError && <InlineError message={categoryMutation.error.message} />}
+                {updateCategoryMutation.isError && <InlineError message={updateCategoryMutation.error.message} />}
+                {uploadCategoryImageMutation.isError && <InlineError message={uploadCategoryImageMutation.error.message} />}
+              </form>
+            </details>
+
+            <div className="mt-4 space-y-3">
+              {categories.length === 0 && <InlineHint>Henüz kategori yok. Ürünleri kategorisiz de oluşturabilirsin.</InlineHint>}
               {categories.map((category) => (
                 <div className="flex items-center justify-between gap-3 rounded-lg border border-line px-4 py-3" key={category.id}>
                   <div className="flex min-w-0 items-center gap-3">
@@ -715,316 +1407,6 @@ export function ProductsSection({
                   </div>
                 </div>
               ))}
-            </div>
-          </Panel>
-
-          <Panel
-            title="Katalog işlemleri"
-            description={editingProductId ? "Ürün detaylarını güncelle" : "Yeni kategori ve mağaza ürünü oluştur"}
-          >
-            <div className="space-y-5">
-              <form className="space-y-3" onSubmit={submitCategory}>
-                <div className="flex items-center justify-between gap-3">
-                  <FieldLabel htmlFor="category-name">{editingCategoryId ? "Kategoriyi düzenle" : "Yeni kategori"}</FieldLabel>
-                  {editingCategoryId ? (
-                    <button
-                      className="focus-ring rounded-lg border border-line px-3 py-1.5 text-xs font-semibold text-zinc-600"
-                      onClick={resetCategoryForm}
-                      type="button"
-                    >
-                      Vazgeç
-                    </button>
-                  ) : null}
-                </div>
-                <div className="grid gap-2 sm:grid-cols-[1fr_0.8fr]">
-                  <input
-                    className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
-                    id="category-name"
-                    onChange={(event) => setCategoryForm((current) => ({ ...current, name: event.target.value }))}
-                    placeholder="Kategori adı"
-                    value={categoryForm.name}
-                  />
-                  <input
-                    className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
-                    onChange={(event) => setCategoryForm((current) => ({ ...current, slug: event.target.value }))}
-                    placeholder="kategori-kisa-adi"
-                    value={categoryForm.slug}
-                  />
-                </div>
-                <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
-                  <input
-                    className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
-                    onChange={(event) => setCategoryForm((current) => ({ ...current, imageUrl: event.target.value }))}
-                    placeholder="Kategori görsel URL'si veya /uploads yolu"
-                    value={categoryForm.imageUrl}
-                  />
-                  <label className="focus-ring inline-flex h-10 cursor-pointer items-center justify-center rounded-lg border border-line px-3 text-xs font-semibold text-ink">
-                    <input
-                      accept="image/png,image/jpeg,image/webp"
-                      className="hidden"
-                      onChange={(event) => {
-                        const files = Array.from(event.target.files || []);
-                        if (files.length > 0) {
-                          uploadCategoryImageMutation.mutate(files.slice(0, 1));
-                        }
-                        event.currentTarget.value = "";
-                      }}
-                      type="file"
-                    />
-                    {uploadCategoryImageMutation.isPending ? "Yükleniyor" : "Görsel yükle"}
-                  </label>
-                </div>
-                {categoryForm.imageUrl ? (
-                  <Image
-                    alt=""
-                    className="h-24 w-full rounded-lg border border-line object-cover"
-                    height={160}
-                    src={assetUrl(categoryForm.imageUrl)}
-                    unoptimized
-                    width={640}
-                  />
-                ) : null}
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    className="focus-ring inline-flex h-10 items-center justify-center rounded-lg bg-mint px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
-                    disabled={!canManageCatalog || categoryMutation.isPending || updateCategoryMutation.isPending || uploadCategoryImageMutation.isPending}
-                    type="submit"
-                  >
-                    {updateCategoryMutation.isPending
-                      ? "Güncelleniyor"
-                      : categoryMutation.isPending
-                        ? "Ekleniyor"
-                        : editingCategoryId
-                          ? "Kategoriyi güncelle"
-                          : "Kategori ekle"}
-                  </button>
-                </div>
-                {!canManageCatalog && <InlineHint>Bu alanda yazma yetkisi için sahip veya yönetici rolüne ihtiyaç var.</InlineHint>}
-                {categoryMutation.isError && <InlineError message={categoryMutation.error.message} />}
-                {updateCategoryMutation.isError && <InlineError message={updateCategoryMutation.error.message} />}
-                {uploadCategoryImageMutation.isError && <InlineError message={uploadCategoryImageMutation.error.message} />}
-              </form>
-
-              <form className="grid gap-4" onSubmit={submitProduct}>
-                <div className="flex items-center justify-between gap-3">
-                  <FieldLabel htmlFor="product-name">{editingProductId ? "Ürünü düzenle" : "Yeni ürün"}</FieldLabel>
-                  {editingProductId ? (
-                    <button
-                      className="focus-ring rounded-lg border border-line px-3 py-1.5 text-xs font-semibold text-zinc-600"
-                      onClick={resetProductForm}
-                      type="button"
-                    >
-                      Vazgec
-                    </button>
-                  ) : null}
-                </div>
-                <input
-                  className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
-                  id="product-name"
-                  onChange={(event) => setProductForm((current) => ({ ...current, name: event.target.value }))}
-                  placeholder="Ürün adı"
-                  value={productForm.name}
-                />
-                <div className="grid gap-3 sm:grid-cols-[0.8fr_1.2fr]">
-                  <div className="space-y-2">
-                    <FieldLabel htmlFor="product-emoji">Liste ikonu</FieldLabel>
-                    <input
-                      className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
-                      id="product-emoji"
-                      maxLength={16}
-                      onChange={(event) => setProductForm((current) => ({ ...current, emoji: event.target.value }))}
-                      placeholder="look"
-                      value={productForm.emoji}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <FieldLabel htmlFor="product-tags">Etiketler</FieldLabel>
-                    <input
-                      className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
-                      id="product-tags"
-                      onChange={(event) => setProductForm((current) => ({ ...current, tags: event.target.value }))}
-                      placeholder="yeni sezon, çok satan, indirim"
-                      value={productForm.tags}
-                    />
-                  </div>
-                </div>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <select
-                    className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
-                    onChange={(event) => setProductForm((current) => ({ ...current, categoryId: event.target.value }))}
-                    value={productForm.categoryId}
-                  >
-                    <option value="">Kategori seç</option>
-                    {categories.map((category) => (
-                      <option key={category.id} value={category.id}>{category.name}</option>
-                    ))}
-                  </select>
-                  <select
-                    className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
-                    onChange={(event) => setProductForm((current) => ({ ...current, status: event.target.value as ProductStatus }))}
-                    value={productForm.status}
-                  >
-                    {productStatusOptions.map((option) => (
-                      <option key={option} value={option}>{productStatusLabels[option]}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="grid gap-3 sm:grid-cols-3">
-                  <input
-                    className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
-                    inputMode="decimal"
-                    onChange={(event) => setProductForm((current) => ({ ...current, price: event.target.value }))}
-                    placeholder="Fiyat"
-                    value={productForm.price}
-                  />
-                  <input
-                    className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
-                    inputMode="decimal"
-                    onChange={(event) => setProductForm((current) => ({ ...current, salePrice: event.target.value }))}
-                    placeholder="İndirimli fiyat"
-                    value={productForm.salePrice}
-                  />
-                  <input
-                    className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
-                    inputMode="numeric"
-                    onChange={(event) => setProductForm((current) => ({ ...current, stock: event.target.value }))}
-                    placeholder="Stok"
-                    value={productForm.stock}
-                  />
-                </div>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div className="space-y-2">
-                    <FieldLabel htmlFor="product-colors">Renkler</FieldLabel>
-                    <textarea
-                      className="focus-ring min-h-28 rounded-lg border border-line bg-white px-3 py-3 text-sm"
-                      id="product-colors"
-                      onChange={(event) => setProductForm((current) => ({ ...current, colorsText: event.target.value }))}
-                      placeholder={"Her satıra bir renk kodu yazın\n#111111\n#d8c6b0"}
-                      value={productForm.colorsText}
-                    />
-                    <InlineHint>Ürün detayındaki renk seçim alanlarını besler.</InlineHint>
-                  </div>
-                  <div className="space-y-2">
-                    <FieldLabel htmlFor="product-sizes">Bedenler</FieldLabel>
-                    <textarea
-                      className="focus-ring min-h-28 rounded-lg border border-line bg-white px-3 py-3 text-sm"
-                      id="product-sizes"
-                      onChange={(event) => setProductForm((current) => ({ ...current, sizesText: event.target.value }))}
-                      placeholder={"Her satıra bir beden yazın\nS\nM\nL"}
-                      value={productForm.sizesText}
-                    />
-                    <InlineHint>Liste virgülle de ayrılabilir.</InlineHint>
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <FieldLabel htmlFor="product-variants">Renk / beden stoklari</FieldLabel>
-                  <textarea
-                    className="focus-ring min-h-32 rounded-lg border border-line bg-white px-3 py-3 font-mono text-xs"
-                    id="product-variants"
-                    onChange={(event) => setProductForm((current) => ({ ...current, variantsText: event.target.value }))}
-                    placeholder={"Her satira: renk | beden | stok | sku\n#111111 | S | 4 | ELB-SYH-S\n#111111 | M | 2 | ELB-SYH-M\n#d8c6b0 | S | 0 | ELB-EKRU-S"}
-                    value={productForm.variantsText}
-                  />
-                  <InlineHint>Bu alan doluysa toplam stok, varyant satirlarindaki stok toplamina gore hesaplanir.</InlineHint>
-                </div>
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between gap-3">
-                    <FieldLabel htmlFor="product-images">Ürün görselleri</FieldLabel>
-                    <label className="focus-ring inline-flex h-9 cursor-pointer items-center rounded-lg border border-line px-3 text-xs font-semibold text-ink">
-                      <input
-                        accept="image/png,image/jpeg,image/webp"
-                        className="hidden"
-                        multiple
-                        onChange={(event) => {
-                          const files = Array.from(event.target.files || []);
-                          if (files.length > 0) {
-                            uploadImagesMutation.mutate(files);
-                          }
-                          event.currentTarget.value = "";
-                        }}
-                        type="file"
-                      />
-                      {uploadImagesMutation.isPending ? "Yükleniyor" : "Görsel yükle"}
-                    </label>
-                  </div>
-                  <textarea
-                    className="focus-ring min-h-32 rounded-lg border border-line bg-white px-3 py-3 text-sm"
-                    id="product-images"
-                    onChange={(event) => setProductForm((current) => ({ ...current, imagesText: event.target.value }))}
-                    placeholder={"Her satıra bir görsel URL'si veya /uploads yolu yazın\n/uploads/urun-1.webp"}
-                    value={productForm.imagesText}
-                  />
-                  <InlineHint>İlk görsel kartta ve detay sayfasında kapak olarak kullanılır.</InlineHint>
-                  {uploadImagesMutation.isError ? <InlineError message={uploadImagesMutation.error.message} /> : null}
-                </div>
-                <div className="space-y-2">
-                  <FieldLabel htmlFor="product-short-description">Kısa açıklama</FieldLabel>
-                  <textarea
-                    className="focus-ring min-h-24 rounded-lg border border-line bg-white px-3 py-3 text-sm"
-                    id="product-short-description"
-                    onChange={(event) => setProductForm((current) => ({ ...current, shortDescription: event.target.value }))}
-                    placeholder="Detay sayfasında fiyatın altında kısa özet olarak görünür."
-                    value={productForm.shortDescription}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <FieldLabel htmlFor="product-description">Ana açıklama</FieldLabel>
-                  <textarea
-                    className="focus-ring min-h-32 rounded-lg border border-line bg-white px-3 py-3 text-sm"
-                    id="product-description"
-                    onChange={(event) => setProductForm((current) => ({ ...current, description: event.target.value }))}
-                    placeholder="Genel ürün açıklaması. Hikaye ve ölçü metni için kaynak olarak da kullanılabilir."
-                    value={productForm.description}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <FieldLabel htmlFor="product-story">Hikaye metni</FieldLabel>
-                  <textarea
-                    className="focus-ring min-h-32 rounded-lg border border-line bg-white px-3 py-3 text-sm"
-                    id="product-story"
-                    onChange={(event) => setProductForm((current) => ({ ...current, story: event.target.value }))}
-                    placeholder="Detay sayfasındaki ürün hikayesi bölümü için paragraflar."
-                    value={productForm.story}
-                  />
-                </div>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div className="space-y-2">
-                    <FieldLabel htmlFor="product-measurements">Ölçü bilgileri</FieldLabel>
-                    <textarea
-                      className="focus-ring min-h-32 rounded-lg border border-line bg-white px-3 py-3 text-sm"
-                      id="product-measurements"
-                      onChange={(event) => setProductForm((current) => ({ ...current, measurements: event.target.value }))}
-                      placeholder={"Her satıra bir ölçü satırı yazın\nBoy: 138 cm\nGöğüs: 110 cm"}
-                      value={productForm.measurements}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <FieldLabel htmlFor="product-delivery-note">Teslimat notu</FieldLabel>
-                    <textarea
-                      className="focus-ring min-h-32 rounded-lg border border-line bg-white px-3 py-3 text-sm"
-                      id="product-delivery-note"
-                      onChange={(event) => setProductForm((current) => ({ ...current, deliveryNote: event.target.value }))}
-                      placeholder="Kargo süresi, iade veya teslimat bilgilendirmeleri."
-                      value={productForm.deliveryNote}
-                    />
-                  </div>
-                </div>
-                <button
-                  className="focus-ring inline-flex h-10 items-center justify-center rounded-lg bg-ink px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
-                  disabled={!canManageCatalog || productMutation.isPending || updateProductMutation.isPending || uploadImagesMutation.isPending}
-                  type="submit"
-                >
-                  {updateProductMutation.isPending
-                    ? "Güncelleniyor"
-                    : productMutation.isPending
-                      ? "Oluşturuluyor"
-                      : editingProductId
-                        ? "Ürünü güncelle"
-                        : "Ürün oluştur"}
-                </button>
-                {productMutation.isError && <InlineError message={productMutation.error.message} />}
-                {updateProductMutation.isError && <InlineError message={updateProductMutation.error.message} />}
-              </form>
             </div>
           </Panel>
 

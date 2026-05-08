@@ -10,6 +10,12 @@ const { getOrganizationSummary, invalidateOrganizationSummary, setOrganizationSu
 const { requestedOrganizationSlug, resolveOrganization, slugify } = require('../services/tenant');
 
 const router = express.Router();
+const VALID_ORGANIZATION_PLANS = ['starter', 'growth', 'business', 'enterprise'];
+
+function defaultOrganizationPlan() {
+  const plan = String(process.env.DEFAULT_ORGANIZATION_PLAN || 'growth').trim().toLowerCase();
+  return VALID_ORGANIZATION_PLANS.includes(plan) ? plan : 'growth';
+}
 const INVITE_ROLES = ['admin', 'member', 'viewer'];
 const MEMBER_ROLES = ['owner', 'admin', 'member', 'viewer'];
 
@@ -627,9 +633,9 @@ router.post('/invites/accept', async (req, res, next) => {
     if (!user) {
       const password = String(req.body.password || '');
       const name = String(req.body.name || invite.email.split('@')[0] || 'Team Member').trim().slice(0, 120);
-      if (password.length < 8) {
+      if (password.length < 12) {
         await client.query('rollback');
-        return res.status(400).json({ error: 'Yeni kullanici icin en az 8 karakterli sifre zorunlu' });
+        return res.status(400).json({ error: 'Yeni kullanici icin en az 12 karakterli sifre zorunlu' });
       }
 
       const passwordHash = await bcrypt.hash(password, 12);
@@ -779,9 +785,9 @@ router.post('/', requireAuth, requireRole(['super_admin']), async (req, res, nex
   try {
     const name = String(req.body.name || '').trim().slice(0, 160);
     const slug = slugify(req.body.slug || name);
-    const plan = ['starter', 'growth', 'business', 'enterprise'].includes(req.body.plan)
+    const plan = VALID_ORGANIZATION_PLANS.includes(req.body.plan)
       ? req.body.plan
-      : 'starter';
+      : defaultOrganizationPlan();
 
     if (!name || !slug) return res.status(400).json({ error: 'Organizasyon adi zorunlu' });
 

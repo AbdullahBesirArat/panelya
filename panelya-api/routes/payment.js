@@ -111,7 +111,7 @@ router.post('/initialize', paymentInitLimiter, async (req, res, next) => {
 
     await insertOrderItems(client, orderResult.rows[0].id, items);
 
-    await reserveStock(client, items);
+    await reserveStock(client, items, { organizationId: organization.id });
 
     const payment = provider === 'manual'
       ? { token: null, paymentPageUrl: null, failureUrl: null }

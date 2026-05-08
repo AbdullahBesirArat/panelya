@@ -20,7 +20,9 @@ async function expirePendingOrders({ olderThanMinutes = 30, limit = 100 } = {}) 
     );
 
     for (const order of result.rows) {
-      await syncStockForStatusChange(client, order.id, order.status, 'cancelled');
+      await syncStockForStatusChange(client, order.id, order.status, 'cancelled', {
+        organizationId: order.organization_id,
+      });
       const updated = await client.query(
         `update orders
          set status = 'cancelled',

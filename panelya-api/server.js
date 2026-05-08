@@ -7,6 +7,7 @@ const helmet = require('helmet');
 const path = require('path');
 const swaggerUi = require('swagger-ui-express');
 const swaggerSpec = require('./swagger');
+const db = require('./db');
 const { resolveUploadDir } = require('./services/uploads');
 const {
   corsOptions,
@@ -19,6 +20,7 @@ const {
   handleCorsPreflight,
 } = require('./middleware/security');
 const { attachAuthIfPresent } = require('./middleware/auth');
+const { metricsMiddleware, prometheusMetrics } = require('./services/metrics');
 
 const authRoutes = require('./routes/auth');
 const productRoutes = require('./routes/products');
@@ -93,7 +95,22 @@ app.get('/api/health', (req, res) => {
 });
 
 app.use(requestId);
+app.use(metricsMiddleware);
 app.use(enforceHttps);
+
+app.get('/api/metrics', (req, res) => {
+  const token = String(process.env.METRICS_TOKEN || '').trim();
+  if (token) {
+    const header = String(req.get('authorization') || '');
+    const supplied = header.toLowerCase().startsWith('bearer ') ? header.slice(7).trim() : '';
+    if (supplied !== token) {
+      return res.status(401).json({ error: 'Metrics token gerekli', requestId: req.id });
+    }
+  }
+
+  res.setHeader('Content-Type', 'text/plain; version=0.0.4; charset=utf-8');
+  res.send(prometheusMetrics());
+});
 
 // Public uploads should be readable from storefronts without CORS allowlist coupling.
 // CORS middleware can reject unknown origins and would otherwise block images with 500.
@@ -105,13 +122,46 @@ app.use('/uploads', (req, res, next) => {
 app.use('/uploads', express.static(uploadDir, {
   dotfiles: 'deny',
   index: false,
-  fallthrough: false,
+  fallthrough: true,
   maxAge: process.env.NODE_ENV === 'production' ? '7d' : 0,
   setHeaders(res) {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Content-Disposition', 'inline');
   },
 }));
+
+app.get('/uploads/:filename', async (req, res, next) => {
+  const filename = path.basename(String(req.params.filename || ''));
+  if (!filename || filename !== req.params.filename || !/^[a-z0-9._-]+$/i.test(filename)) {
+    return res.status(404).json({ error: 'Dosya bulunamadi', requestId: req.id });
+  }
+
+  try {
+    const result = await db.query(
+      `select data, mime_type, byte_size
+       from upload_assets
+       where filename = $1
+         and data is not null
+       order by created_at desc
+       limit 1`,
+      [filename]
+    );
+    const asset = result.rows[0];
+    if (!asset) {
+      return res.status(404).json({ error: 'Dosya bulunamadi', requestId: req.id });
+    }
+
+    res.setHeader('Content-Type', asset.mime_type || 'image/webp');
+    res.setHeader('Content-Length', String(asset.byte_size || asset.data.length));
+    res.setHeader('Cache-Control', process.env.NODE_ENV === 'production' ? 'public, max-age=604800, immutable' : 'no-cache');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Content-Disposition', 'inline');
+    if (req.method === 'HEAD') return res.end();
+    return res.send(asset.data);
+  } catch (err) {
+    return next(err);
+  }
+});
 app.use('/uploads', (err, req, res, next) => {
   if (!err) return next();
   if (err.code === 'ENOENT' || err.status === 404) {
@@ -151,7 +201,7 @@ app.use(cors(startupReadinessError
   : corsOptions()));
 app.use(rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: Number(process.env.API_RATE_LIMIT || 600),
+  max: Number(process.env.API_RATE_LIMIT || 1200),
 }));
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: false }));
