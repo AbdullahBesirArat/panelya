@@ -132,6 +132,120 @@ router.put('/:id', ...managerOnly, async (req, res, next) => {
   }
 });
 
+function parseTagList(value) {
+  return String(value || '')
+    .split(',')
+    .map((tag) => tag.trim())
+    .filter(Boolean);
+}
+
+function serializeTagList(list) {
+  const seen = new Set();
+  const result = [];
+  for (const tag of list) {
+    const key = tag.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(tag);
+  }
+  return result.join(',').slice(0, 500);
+}
+
+router.get('/:id/products', requireAuth, requireRole(['super_admin', 'owner', 'admin', 'member', 'viewer']), async (req, res, next) => {
+  try {
+    const organization = await resolveOrganization(req);
+    const collectionResult = await db.query(
+      'select id, slug, title from collections where id = $1 and organization_id = $2',
+      [req.params.id, organization.id]
+    );
+    const collection = collectionResult.rows[0];
+    if (!collection) return res.status(404).json({ error: 'Koleksiyon bulunamadi' });
+
+    const products = await db.query(
+      `select id, name, status, tags
+       from products
+       where organization_id = $1
+       order by name asc, id asc`,
+      [organization.id]
+    );
+
+    const slug = String(collection.slug || '').toLowerCase();
+    res.json({
+      collection: { id: collection.id, slug: collection.slug, title: collection.title },
+      products: products.rows.map((product) => ({
+        id: product.id,
+        name: product.name,
+        status: product.status,
+        tags: product.tags || '',
+        is_member: parseTagList(product.tags).some((tag) => tag.toLowerCase() === slug),
+      })),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.put('/:id/products', ...managerOnly, async (req, res, next) => {
+  try {
+    const organization = await resolveOrganization(req);
+    const collectionResult = await db.query(
+      'select id, slug, title from collections where id = $1 and organization_id = $2',
+      [req.params.id, organization.id]
+    );
+    const collection = collectionResult.rows[0];
+    if (!collection) return res.status(404).json({ error: 'Koleksiyon bulunamadi' });
+    const slug = String(collection.slug || '').trim();
+    if (!slug) return res.status(400).json({ error: 'Koleksiyon slug tanimsiz' });
+
+    const memberIds = Array.isArray(req.body && req.body.memberIds) ? req.body.memberIds : [];
+    const memberSet = new Set(
+      memberIds
+        .map((value) => Number(value))
+        .filter((value) => Number.isInteger(value) && value > 0)
+    );
+
+    const products = await db.query(
+      'select id, tags from products where organization_id = $1',
+      [organization.id]
+    );
+
+    const slugKey = slug.toLowerCase();
+    const updates = [];
+    for (const product of products.rows) {
+      const current = parseTagList(product.tags);
+      const hasMember = current.some((tag) => tag.toLowerCase() === slugKey);
+      const shouldBeMember = memberSet.has(Number(product.id));
+      if (hasMember === shouldBeMember) continue;
+
+      let nextTags;
+      if (shouldBeMember) {
+        nextTags = serializeTagList([...current, slug]);
+      } else {
+        nextTags = serializeTagList(current.filter((tag) => tag.toLowerCase() !== slugKey));
+      }
+      updates.push({ id: product.id, tags: nextTags });
+    }
+
+    for (const update of updates) {
+      await db.query(
+        'update products set tags = $1, updated_at = now() where id = $2 and organization_id = $3',
+        [update.tags, update.id, organization.id]
+      );
+    }
+
+    await auditLog(req, {
+      action: 'UPDATE',
+      resourceType: 'collection',
+      resourceId: collection.id,
+      newValue: { slug, memberCount: memberSet.size, changed: updates.length },
+    });
+
+    res.json({ updated: updates.length, memberCount: memberSet.size });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.delete('/:id', requireAuth, requireRole(['super_admin', 'owner']), async (req, res, next) => {
   try {
     const organization = await resolveOrganization(req);

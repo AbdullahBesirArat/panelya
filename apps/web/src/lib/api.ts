@@ -893,6 +893,33 @@ export async function fetchCollections() {
   return authenticatedRequest<ApiCollection[]>("/collections/admin/all");
 }
 
+export type CollectionProductMembership = {
+  id: number;
+  name: string;
+  status: ProductStatus;
+  tags: string;
+  is_member: boolean;
+};
+
+export type CollectionProductsResponse = {
+  collection: { id: number; slug: string; title: string };
+  products: CollectionProductMembership[];
+};
+
+export async function fetchCollectionProducts(collectionId: number | string) {
+  return authenticatedRequest<CollectionProductsResponse>(`/collections/${collectionId}/products`);
+}
+
+export async function updateCollectionProducts(collectionId: number | string, memberIds: Array<number | string>) {
+  return authenticatedRequest<{ updated: number; memberCount: number }>(
+    `/collections/${collectionId}/products`,
+    {
+      method: "PUT",
+      body: JSON.stringify({ memberIds: memberIds.map((value) => Number(value)) }),
+    }
+  );
+}
+
 export async function createCollection(payload: {
   title: string;
   slug?: string;

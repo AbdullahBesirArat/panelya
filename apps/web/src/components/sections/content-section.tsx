@@ -2,7 +2,7 @@
 
 import type { FormEvent } from "react";
 import Image from "next/image";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { MetricGrid } from "@/components/page-kit";
 import { Button } from "@/components/ui/button";
@@ -19,15 +19,18 @@ import {
   fetchBlogPosts,
   fetchCampaigns,
   fetchCollections,
+  fetchCollectionProducts,
   fetchSlides,
   updateBlogPost,
   updateCampaign,
   updateCollection,
+  updateCollectionProducts,
   updateSlide,
   type ApiBlogPost,
   type ApiCampaign,
   type ApiCollection,
   type ApiSlide,
+  type CollectionProductMembership,
   uploadProductImages,
 } from "@/lib/api";
 import {
@@ -144,6 +147,13 @@ export function ContentSection({
   const [collectionForm, setCollectionForm] = useState(emptyCollectionForm);
   const [blogForm, setBlogForm] = useState(emptyBlogForm);
   const [activeContentTab, setActiveContentTab] = useState<ContentTab>("slides");
+  const [collectionProductsModal, setCollectionProductsModal] = useState<{
+    id: string;
+    title: string;
+    slug: string;
+  } | null>(null);
+  const [collectionProductOverrides, setCollectionProductOverrides] = useState<Map<number, boolean>>(new Map());
+  const [collectionProductFilter, setCollectionProductFilter] = useState("");
 
   const slidesQuery = useQuery({
     queryKey: ["slides", organizationSlug],
@@ -294,6 +304,43 @@ export function ContentSection({
       await invalidateContent();
     },
   });
+
+  const collectionProductsQuery = useQuery({
+    queryKey: ["collection-products", organizationSlug, collectionProductsModal?.id ?? null],
+    queryFn: () => fetchCollectionProducts(collectionProductsModal!.id),
+    enabled: !!collectionProductsModal,
+    staleTime: 0,
+  });
+
+  const collectionProductsMutation = useMutation({
+    mutationFn: ({ id, memberIds }: { id: string; memberIds: number[] }) =>
+      updateCollectionProducts(id, memberIds),
+    onSuccess: async (data) => {
+      pushToast({
+        title: "Koleksiyon ürünleri güncellendi",
+        description: `${data.memberCount} ürün koleksiyonda, ${data.updated} ürün güncellendi.`,
+        tone: "success",
+      });
+      await queryClient.invalidateQueries({ queryKey: ["products", organizationSlug] });
+      setCollectionProductsModal(null);
+    },
+  });
+
+  function openCollectionProductsModal(collection: ApiCollection) {
+    setCollectionProductsModal({ id: String(collection.id), title: collection.title, slug: collection.slug });
+    setCollectionProductOverrides(new Map());
+    setCollectionProductFilter("");
+  }
+
+  const collectionProductSelectedIds = useMemo(() => {
+    const list = collectionProductsQuery.data?.products ?? [];
+    return list
+      .filter((product) => {
+        const override = collectionProductOverrides.get(Number(product.id));
+        return override === undefined ? product.is_member : override;
+      })
+      .map((product) => Number(product.id));
+  }, [collectionProductsQuery.data, collectionProductOverrides]);
 
   const blogMutation = useMutation({
     mutationFn: createBlogPost,
@@ -1051,6 +1098,11 @@ export function ContentSection({
                           Düzenle
                         </Button>
                       ) : null}
+                      {canManageContent ? (
+                        <Button onClick={() => openCollectionProductsModal(collection)} size="sm" type="button" variant="outline">
+                          Ürünleri Yönet
+                        </Button>
+                      ) : null}
                       {canDeleteContent ? (
                         <Button
                           disabled={deleteCollectionMutation.isPending && deleteCollectionMutation.variables === collection.id}
@@ -1307,7 +1359,144 @@ export function ContentSection({
           />
       </div>
       ) : null}
+
+      {collectionProductsModal ? (
+        <div
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) setCollectionProductsModal(null);
+          }}
+          role="dialog"
+        >
+          <div className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl bg-white shadow-xl">
+            <div className="flex items-start justify-between gap-3 border-b border-line px-5 py-4">
+              <div>
+                <h3 className="text-base font-semibold text-ink">
+                  {collectionProductsModal.title} – Ürünleri yönet
+                </h3>
+                <p className="mt-1 text-xs text-zinc-500">
+                  Seçtiğiniz ürünlerin etiketlerine <code>{collectionProductsModal.slug}</code> otomatik
+                  eklenir/çıkarılır. Diğer etiketler korunur.
+                </p>
+              </div>
+              <Button
+                onClick={() => setCollectionProductsModal(null)}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                Kapat
+              </Button>
+            </div>
+            <div className="border-b border-line px-5 py-3">
+              <input
+                aria-label="Ürün ara"
+                className="w-full rounded-md border border-line px-3 py-2 text-sm focus:border-ink focus:outline-none"
+                onChange={(event) => setCollectionProductFilter(event.target.value)}
+                placeholder="Ürün adı ile filtrele..."
+                type="search"
+                value={collectionProductFilter}
+              />
+            </div>
+            <div className="flex-1 overflow-y-auto px-5 py-3">
+              {collectionProductsQuery.isLoading ? (
+                <p className="py-8 text-center text-sm text-zinc-500">Ürünler yükleniyor...</p>
+              ) : collectionProductsQuery.isError ? (
+                <InlineError message={collectionProductsQuery.error.message} />
+              ) : collectionProductsQuery.data ? (
+                <CollectionProductPicker
+                  filter={collectionProductFilter}
+                  onToggle={(productId, nextChecked) => {
+                    setCollectionProductOverrides((prev) => {
+                      const next = new Map(prev);
+                      next.set(productId, nextChecked);
+                      return next;
+                    });
+                  }}
+                  products={collectionProductsQuery.data.products}
+                  selectedIds={collectionProductSelectedIds}
+                />
+              ) : null}
+            </div>
+            <div className="flex items-center justify-between gap-3 border-t border-line px-5 py-3">
+              <span className="text-xs text-zinc-500">
+                {collectionProductSelectedIds.length} ürün seçildi
+              </span>
+              <div className="flex gap-2">
+                <Button
+                  onClick={() => setCollectionProductsModal(null)}
+                  type="button"
+                  variant="outline"
+                >
+                  Vazgeç
+                </Button>
+                <Button
+                  disabled={collectionProductsMutation.isPending || collectionProductsQuery.isLoading}
+                  onClick={() => {
+                    if (!collectionProductsModal) return;
+                    collectionProductsMutation.mutate({
+                      id: collectionProductsModal.id,
+                      memberIds: collectionProductSelectedIds,
+                    });
+                  }}
+                  type="button"
+                >
+                  {collectionProductsMutation.isPending ? "Kaydediliyor..." : "Kaydet"}
+                </Button>
+              </div>
+            </div>
+            {collectionProductsMutation.isError ? (
+              <div className="border-t border-line px-5 py-2">
+                <InlineError message={collectionProductsMutation.error.message} />
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
     </>
+  );
+}
+
+function CollectionProductPicker({
+  products,
+  selectedIds,
+  onToggle,
+  filter,
+}: {
+  products: CollectionProductMembership[];
+  selectedIds: number[];
+  onToggle: (id: number, nextChecked: boolean) => void;
+  filter: string;
+}) {
+  const selectedSet = new Set(selectedIds);
+  const query = filter.trim().toLocaleLowerCase("tr-TR");
+  const visible = query
+    ? products.filter((product) => product.name.toLocaleLowerCase("tr-TR").includes(query))
+    : products;
+  if (visible.length === 0) {
+    return <p className="py-6 text-center text-sm text-zinc-500">Eşleşen ürün bulunamadı.</p>;
+  }
+  return (
+    <ul className="space-y-1">
+      {visible.map((product) => {
+        const id = Number(product.id);
+        const checked = selectedSet.has(id);
+        return (
+          <li key={id}>
+            <label className="flex cursor-pointer items-center gap-3 rounded-md px-2 py-2 text-sm hover:bg-zinc-50">
+              <input
+                checked={checked}
+                onChange={() => onToggle(id, !checked)}
+                type="checkbox"
+              />
+              <span className="flex-1 truncate">{product.name}</span>
+              <span className="text-xs uppercase text-zinc-400">{product.status}</span>
+            </label>
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
