@@ -14,7 +14,7 @@ function sanitizeCustomer(input = {}) {
     address: cleanString(input.address, 1000),
   };
 
-  if (customer.email && !EMAIL_RE.test(customer.email)) {
+  if (!customer.email || !EMAIL_RE.test(customer.email)) {
     throw Object.assign(new Error('Gecersiz email adresi'), { status: 400 });
   }
 

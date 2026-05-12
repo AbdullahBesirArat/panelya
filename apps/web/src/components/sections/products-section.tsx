@@ -3,20 +3,24 @@
 import type { FormEvent } from "react";
 import Image from "next/image";
 import { useState } from "react";
+import { Button } from "@/components/ui/button";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { MetricGrid } from "@/components/page-kit";
 import {
   API_BASE,
+  addOrganizationColor,
   bulkUpdateProducts,
   createCategory,
   createProduct,
   deleteCategory,
   deleteProduct,
   fetchCategories,
+  fetchOrganizationColors,
   fetchProducts,
   updateCategory,
   updateProduct,
   type ApiCategory,
+  type ApiCustomColor,
   type ApiProduct,
   type ProductVariant,
   type ProductStatus,
@@ -77,6 +81,16 @@ const productSizePresets = [
   "3XL",
   ...Array.from({ length: 27 }, (_, index) => String(34 + index)),
 ];
+const productFallbackIconOptions = [
+  { label: "Elbise", value: "👗" },
+  { label: "Dış giyim", value: "🧥" },
+  { label: "Tesettür", value: "🧕" },
+  { label: "Çanta", value: "👜" },
+  { label: "Ayakkabı", value: "👠" },
+  { label: "Aksesuar", value: "◇" },
+  { label: "Suvera", value: "SU" },
+  { label: "Klasik", value: "✦" },
+];
 type ProductPayload = {
   name: string;
   categoryId?: string;
@@ -96,6 +110,7 @@ type ProductPayload = {
   };
   tags: string;
   description: string;
+  product_story: string;
   emoji: string;
 };
 
@@ -119,11 +134,12 @@ function createEmptyProductForm() {
     imagesText: "",
     tags: "",
     description: "",
+    productStory: "",
     shortDescription: "",
     story: "",
     measurements: "",
     deliveryNote: "",
-    emoji: "look",
+    emoji: "👗",
   };
 }
 
@@ -269,10 +285,14 @@ export function ProductsSection({
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
   const [productForm, setProductForm] = useState(createEmptyProductForm);
   const [productFormError, setProductFormError] = useState("");
+  const [newProductTag, setNewProductTag] = useState("");
   const [imageColor, setImageColor] = useState("");
   const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
   const [bulkStatus, setBulkStatus] = useState<ProductStatus>("active");
   const [bulkCategoryId, setBulkCategoryId] = useState("");
+  const [showCustomColorForm, setShowCustomColorForm] = useState(false);
+  const [customColorName, setCustomColorName] = useState("");
+  const [customColorHex, setCustomColorHex] = useState("#d8c3a5");
   const debouncedSearch = useDebouncedValue(search);
 
   const categoriesQuery = useQuery({
@@ -286,6 +306,24 @@ export function ProductsSection({
     queryFn: () => fetchProducts({ q: debouncedSearch, status, categoryId, limit: 50 }),
     staleTime: 15_000,
     placeholderData: keepPreviousData,
+  });
+
+  const customColorsQuery = useQuery({
+    queryKey: ["customColors", organizationSlug],
+    queryFn: fetchOrganizationColors,
+    staleTime: 60_000,
+  });
+
+  const customColorMutation = useMutation({
+    mutationFn: addOrganizationColor,
+    onSuccess: (newColor: ApiCustomColor) => {
+      void queryClient.invalidateQueries({ queryKey: ["customColors", organizationSlug] });
+      addProductColor(newColor.name, newColor.hex);
+      setCustomColorName("");
+      setCustomColorHex("#d8c3a5");
+      setShowCustomColorForm(false);
+      pushToast({ title: "Özel renk eklendi", description: newColor.name, tone: "success" });
+    },
   });
 
   const canManageCatalog = currentRole === "owner" || currentRole === "admin";
@@ -458,6 +496,10 @@ export function ProductsSection({
   const categories = categoriesQuery.data;
   const products = productsQuery.data;
   const productColors = splitCsvLines(productForm.colorsText);
+  const selectedProductTags = splitCsvLines(productForm.tags);
+  const availableProductTags = Array.from(new Set(
+    products.flatMap((product) => splitCsvLines(product.tags || "")),
+  )).sort((a, b) => a.localeCompare(b, "tr"));
   const selectedVariants = parseVariantLines(productForm.variantsText);
   const selectedVariantStock = sumVariantStock(selectedVariants);
   const imageEntries = splitImageLines(productForm.imagesText).map(parseImageLine).filter((entry) => entry.url);
@@ -480,7 +522,32 @@ export function ProductsSection({
     setEditingProductId(null);
     setProductForm(createEmptyProductForm());
     setProductFormError("");
+    setNewProductTag("");
     setImageColor("");
+  }
+
+  function addProductTag(tag: string) {
+    const normalizedTag = tag.trim().replace(/^#+/, "").replace(/\s+/g, " ");
+    if (!normalizedTag) return;
+
+    setProductForm((current) => {
+      const tags = splitCsvLines(current.tags);
+      if (tags.some((item) => item.toLocaleLowerCase("tr-TR") === normalizedTag.toLocaleLowerCase("tr-TR"))) {
+        return current;
+      }
+      return {
+        ...current,
+        tags: [...tags, normalizedTag].join(", "),
+      };
+    });
+    setNewProductTag("");
+  }
+
+  function removeProductTag(tag: string) {
+    setProductForm((current) => ({
+      ...current,
+      tags: splitCsvLines(current.tags).filter((item) => item !== tag).join(", "),
+    }));
   }
 
   function addProductColor(name: string, value: string) {
@@ -618,11 +685,12 @@ export function ProductsSection({
       imagesText: joinLines(product.images),
       tags: product.tags || "",
       description: product.description || "",
+      productStory: product.product_story || "",
       shortDescription: String(product.details?.short_description || ""),
       story: String(product.details?.story || ""),
       measurements: String(product.details?.measurements || ""),
       deliveryNote: String(product.details?.delivery_note || ""),
-      emoji: product.emoji || "look",
+      emoji: product.emoji || "👗",
     });
     setImageColor(product.colors[0] || "");
   }
@@ -694,6 +762,7 @@ export function ProductsSection({
       },
       tags: productForm.tags.trim(),
       description: productForm.description.trim(),
+      product_story: productForm.productStory.trim(),
       emoji: productForm.emoji.trim(),
     };
 
@@ -924,27 +993,97 @@ export function ProductsSection({
                   placeholder="Ürün adı"
                   value={productForm.name}
                 />
-                <div className="grid gap-3 sm:grid-cols-[0.8fr_1.2fr]">
+                <div className="grid gap-4">
                   <div className="space-y-2">
-                    <FieldLabel htmlFor="product-emoji">Liste ikonu (ürün listesinde görsel yoksa küçük işaret olarak görünür)</FieldLabel>
-                    <input
-                      className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
-                      id="product-emoji"
-                      maxLength={16}
-                      onChange={(event) => setProductForm((current) => ({ ...current, emoji: event.target.value }))}
-                      placeholder="look"
-                      value={productForm.emoji}
-                    />
+                    <FieldLabel htmlFor="product-fallback-icon">Fotoğraf yoksa görünecek simge</FieldLabel>
+                    <div className="grid grid-cols-2 gap-2 lg:grid-cols-4" id="product-fallback-icon">
+                      {productFallbackIconOptions.map((option) => {
+                        const selected = productForm.emoji === option.value;
+                        return (
+                          <button
+                            aria-pressed={selected}
+                            className={[
+                              "focus-ring flex min-h-14 items-center gap-2 rounded-lg border px-3 py-2 text-left text-xs transition",
+                              selected ? "border-mint bg-mint/10 text-mint" : "border-line bg-white text-zinc-600 hover:border-zinc-300",
+                            ].join(" ")}
+                            key={option.value}
+                            onClick={() => setProductForm((current) => ({ ...current, emoji: option.value }))}
+                            title={option.label}
+                            type="button"
+                          >
+                            <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-zinc-50 text-lg leading-none">{option.value}</span>
+                            <span className="min-w-0 font-semibold leading-tight">{option.label}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <InlineHint>Ürün fotoğrafı yoksa vitrinde bu simge görünür; fotoğraf varsa kullanılmaz.</InlineHint>
                   </div>
                   <div className="space-y-2">
-                    <FieldLabel htmlFor="product-tags">Etiketler (rozet/arama ipucu ve koleksiyon eşleştirme için kullanılır)</FieldLabel>
-                    <input
-                      className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
-                      id="product-tags"
-                      onChange={(event) => setProductForm((current) => ({ ...current, tags: event.target.value }))}
-                      placeholder="yeni sezon, çok satan, sepette-20"
-                      value={productForm.tags}
-                    />
+                    <FieldLabel htmlFor="product-new-tag">Etiketler</FieldLabel>
+                    {selectedProductTags.length ? (
+                      <div className="flex flex-wrap gap-2 rounded-lg border border-line bg-zinc-50 p-2">
+                        {selectedProductTags.map((tag) => (
+                          <button
+                            className="focus-ring inline-flex items-center gap-2 rounded-full bg-white px-3 py-1.5 text-xs font-semibold text-ink shadow-sm"
+                            key={tag}
+                            onClick={() => removeProductTag(tag)}
+                            title="Etiketi kaldır"
+                            type="button"
+                          >
+                            {tag}
+                            <span className="text-zinc-400">×</span>
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="rounded-lg border border-dashed border-line bg-zinc-50 px-3 py-2 text-xs text-zinc-500">
+                        Henüz etiket seçilmedi.
+                      </div>
+                    )}
+                    {availableProductTags.length ? (
+                      <div className="flex flex-wrap gap-2">
+                        {availableProductTags.map((tag) => {
+                          const selected = selectedProductTags.some((item) => item.toLocaleLowerCase("tr-TR") === tag.toLocaleLowerCase("tr-TR"));
+                          return (
+                            <button
+                              className={[
+                                "focus-ring rounded-full border px-3 py-1.5 text-xs font-semibold transition",
+                                selected ? "border-mint bg-mint/10 text-mint" : "border-line bg-white text-zinc-600 hover:border-zinc-300",
+                              ].join(" ")}
+                              key={tag}
+                              onClick={() => (selected ? removeProductTag(tag) : addProductTag(tag))}
+                              type="button"
+                            >
+                              {tag}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : null}
+                    <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+                      <input
+                        className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
+                        id="product-new-tag"
+                        onChange={(event) => setNewProductTag(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key !== "Enter") return;
+                          event.preventDefault();
+                          addProductTag(newProductTag);
+                        }}
+                        placeholder="Yeni etiket yaz"
+                        value={newProductTag}
+                      />
+                      <button
+                        className="focus-ring h-10 rounded-lg border border-line px-4 text-sm font-semibold text-ink disabled:opacity-50"
+                        disabled={!newProductTag.trim()}
+                        onClick={() => addProductTag(newProductTag)}
+                        type="button"
+                      >
+                        Ekle
+                      </button>
+                    </div>
+                    <InlineHint>Mevcut etiketlerden seçebilir veya yeni etiket yazıp bu üründe kullanabilirsin.</InlineHint>
                   </div>
                 </div>
                 <div className="grid gap-3 sm:grid-cols-2">
@@ -1024,6 +1163,81 @@ export function ProductsSection({
                           );
                         })}
                       </div>
+                      {(customColorsQuery.data ?? []).length > 0 && (
+                        <div className="mt-1 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                          {(customColorsQuery.data ?? []).map((color) => {
+                            const entry = `${color.name} ${color.hex}`;
+                            const isSelected = productColors.some((item) => sameEntry(item, entry));
+                            return (
+                              <button
+                                className={`focus-ring flex min-h-11 items-center gap-2 rounded-lg border bg-white px-3 py-2 text-left hover:bg-zinc-50 ${
+                                  isSelected ? "border-mint ring-1 ring-mint" : "border-line"
+                                }`}
+                                key={color.value}
+                                onClick={() => addProductColor(color.name, color.hex)}
+                                type="button"
+                              >
+                                <span
+                                  className="h-5 w-5 shrink-0 rounded-full border border-line"
+                                  style={{ background: color.hex }}
+                                />
+                                <span className="text-xs font-semibold leading-tight text-zinc-800">{color.name}</span>
+                                <span className="ml-auto text-[10px] text-zinc-400">Özel</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                      {showCustomColorForm ? (
+                        <div className="mt-2 flex flex-wrap items-end gap-2 rounded-lg border border-line bg-zinc-50 p-3">
+                          <div className="grid gap-1">
+                            <label className="text-xs font-semibold text-zinc-600">Renk adı</label>
+                            <input
+                              className="focus-ring h-9 rounded-md border border-line bg-white px-2 text-sm"
+                              onChange={(e) => setCustomColorName(e.target.value)}
+                              placeholder="ör: Bakır"
+                              value={customColorName}
+                            />
+                          </div>
+                          <div className="grid gap-1">
+                            <label className="text-xs font-semibold text-zinc-600">Renk</label>
+                            <div className="flex items-center gap-2">
+                              <input
+                                className="h-9 w-12 cursor-pointer rounded border border-line"
+                                onChange={(e) => setCustomColorHex(e.target.value)}
+                                type="color"
+                                value={customColorHex}
+                              />
+                              <input
+                                className="focus-ring h-9 w-24 rounded-md border border-line bg-white px-2 font-mono text-xs"
+                                onChange={(e) => setCustomColorHex(e.target.value)}
+                                placeholder="#d8c3a5"
+                                value={customColorHex}
+                              />
+                            </div>
+                          </div>
+                          <Button
+                            disabled={!customColorName.trim() || customColorMutation.isPending}
+                            onClick={() => customColorMutation.mutate({ name: customColorName.trim(), hex: customColorHex })}
+                            type="button"
+                            variant="mint"
+                          >
+                            {customColorMutation.isPending ? "Ekleniyor" : "Ekle"}
+                          </Button>
+                          <Button onClick={() => setShowCustomColorForm(false)} type="button" variant="outline">
+                            İptal
+                          </Button>
+                        </div>
+                      ) : (
+                        <button
+                          className="focus-ring mt-1 flex h-9 items-center gap-1.5 rounded-lg border border-dashed border-zinc-300 bg-white px-3 text-xs font-semibold text-zinc-500 hover:border-zinc-400 hover:text-zinc-700"
+                          disabled={!canManageCatalog}
+                          onClick={() => setShowCustomColorForm(true)}
+                          type="button"
+                        >
+                          + Özel Renk Ekle
+                        </button>
+                      )}
                       <InlineHint>Renk adı sitede müşteriye görünür; renk kodu seçim butonunun ve görsel eşleşmenin rengini belirler.</InlineHint>
                     </div>
                     {productColors.length > 0 ? (
@@ -1211,13 +1425,23 @@ export function ProductsSection({
                       />
                     </div>
                     <div className="space-y-2">
-                      <FieldLabel htmlFor="product-story">Hikaye metni (detay sayfasındaki marka/ürün anlatımı)</FieldLabel>
+                      <FieldLabel htmlFor="product-story">Ürün Hikayesi (detay sayfasındaki &ldquo;Ürün Hikayesi&rdquo; accordion içeriği)</FieldLabel>
                       <textarea
                         className="focus-ring min-h-32 rounded-lg border border-line bg-white px-3 py-3 text-sm"
                         id="product-story"
                         onChange={(event) => setProductForm((current) => ({ ...current, story: event.target.value }))}
-                        placeholder="Detay sayfasındaki ürün hikayesi bölümü için paragraflar."
+                        placeholder="Detay sayfasındaki Ürün Hikayesi accordion'ı için paragraflar."
                         value={productForm.story}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <FieldLabel htmlFor="product-product-story">Ürünün Duruşu (detay sayfasındaki bağımsız &ldquo;Ürünün Duruşu&rdquo; bölümü)</FieldLabel>
+                      <textarea
+                        className="focus-ring min-h-32 rounded-lg border border-line bg-white px-3 py-3 text-sm"
+                        id="product-product-story"
+                        onChange={(event) => setProductForm((current) => ({ ...current, productStory: event.target.value }))}
+                        placeholder="Kumaş, kalıp ve kullanım hissi; ürünün duruşunu anlatan bağımsız metin."
+                        value={productForm.productStory}
                       />
                     </div>
                     <div className="grid gap-3 sm:grid-cols-2">

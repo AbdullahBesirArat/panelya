@@ -6,6 +6,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import {
   API_BASE,
+  changeOrganizationEmail,
   regeneratePublicAccessToken,
   updateOrganizationSettings,
 } from "@/lib/api";
@@ -42,6 +43,7 @@ export function SettingsSection({
   const user = useSessionStore((state) => state.user);
   const organizations = useSessionStore((state) => state.organizations);
   const [latestPublicToken, setLatestPublicToken] = useState("");
+  const [emailFormKey, setEmailFormKey] = useState(0);
 
   const canManageSettings = currentRole === "owner" || currentRole === "admin" || currentRole === "super_admin";
 
@@ -57,6 +59,19 @@ export function SettingsSection({
         queryClient.invalidateQueries({ queryKey: ["summary"] }),
         queryClient.invalidateQueries({ queryKey: ["me"] }),
       ]);
+    },
+  });
+
+  const emailMutation = useMutation({
+    mutationFn: changeOrganizationEmail,
+    onSuccess: () => {
+      pushToast({
+        title: "E-posta güncellendi",
+        description: "Bildirim e-postası başarıyla değiştirildi.",
+        tone: "success",
+      });
+      setEmailFormKey((k) => k + 1);
+      void queryClient.invalidateQueries({ queryKey: ["summary"] });
     },
   });
 
@@ -98,6 +113,17 @@ export function SettingsSection({
     { label: "Kargo", value: `${storeSettings.shippingFee ?? 0} TL`, status: freeShippingLabel(storeSettings.freeShippingThreshold), update: "Ayarlar" },
     { label: "Musteri e-postasi", value: storeSettings.orderEmailEnabled === false ? "Kapali" : "Acik", status: storeSettings.contactEmail || "-", update: "Bildirim" },
   ];
+
+  function handleEmailSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!canManageSettings) return;
+    const form = new FormData(event.currentTarget);
+    emailMutation.mutate({
+      currentEmail: String(form.get("currentEmail") || "").trim(),
+      newEmail: String(form.get("newEmail") || "").trim(),
+      newEmailConfirm: String(form.get("newEmailConfirm") || "").trim(),
+    });
+  }
 
   function handleSettingsSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -300,6 +326,53 @@ export function SettingsSection({
           </div>
         </Panel>
       </div>
+      <Panel title="E-posta Değiştir" description="Bildirim e-postasını güncelle">
+        <form key={emailFormKey} className="space-y-4" onSubmit={handleEmailSubmit}>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="grid gap-2">
+              <FieldLabel htmlFor="currentEmail">Mevcut e-posta</FieldLabel>
+              <input
+                className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
+                disabled={!canManageSettings || emailMutation.isPending}
+                id="currentEmail"
+                name="currentEmail"
+                placeholder={storeSettings.contactEmail || "Mevcut e-posta"}
+                type="email"
+                required
+              />
+            </div>
+            <div className="grid gap-2">
+              <FieldLabel htmlFor="newEmail">Yeni e-posta</FieldLabel>
+              <input
+                className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
+                disabled={!canManageSettings || emailMutation.isPending}
+                id="newEmail"
+                name="newEmail"
+                type="email"
+                required
+              />
+            </div>
+            <div className="grid gap-2">
+              <FieldLabel htmlFor="newEmailConfirm">Yeni e-posta tekrar</FieldLabel>
+              <input
+                className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
+                disabled={!canManageSettings || emailMutation.isPending}
+                id="newEmailConfirm"
+                name="newEmailConfirm"
+                type="email"
+                required
+              />
+            </div>
+          </div>
+          {emailMutation.isError ? <InlineError message={emailMutation.error.message} /> : null}
+          <div className="flex flex-wrap gap-2">
+            <Button disabled={!canManageSettings || emailMutation.isPending} type="submit" variant="mint">
+              {emailMutation.isPending ? "Güncelleniyor" : "E-postayı Güncelle"}
+            </Button>
+          </div>
+          {!canManageSettings ? <InlineHint>Bu alanları düzenlemek için sahip veya yönetici rolü gerekir.</InlineHint> : null}
+        </form>
+      </Panel>
       <ActivityPanel
         title="Entegrasyon notları"
         items={[

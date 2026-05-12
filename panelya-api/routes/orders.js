@@ -73,6 +73,14 @@ function orderDetailView(row) {
   };
 }
 
+function trackQuery(req) {
+  return {
+    ...req.query,
+    orderCode: req.query.orderCode || req.query.code || req.query.order,
+    customerEmail: req.query.customerEmail || req.query.email,
+  };
+}
+
 async function notifyOrderUpdate(order, customer) {
   await sendOrderStatusEmail(order, customer).catch((error) => {
     console.warn('Order status email gonderilemedi', {
@@ -218,11 +226,12 @@ router.post('/expire-pending', requireAuth, requireRole(['super_admin', 'owner',
   }
 });
 
-router.get('/lookup', async (req, res, next) => {
+async function lookupOrder(req, res, next) {
   try {
-    const orderCode = String(req.query.orderCode || '').trim().slice(0, 40);
+    const query = trackQuery(req);
+    const orderCode = String(query.orderCode || '').trim().slice(0, 40);
     if (!orderCode) return res.status(400).json({ error: 'Siparis kodu zorunlu' });
-    const customerEmail = String(req.query.email || req.query.customerEmail || '').trim().toLowerCase().slice(0, 254);
+    const customerEmail = String(query.customerEmail || '').trim().toLowerCase().slice(0, 254);
     if (!req.auth && (!customerEmail || !customerEmail.includes('@'))) {
       return res.status(400).json({ error: 'Siparis takibi icin email zorunlu' });
     }
@@ -282,7 +291,10 @@ router.get('/lookup', async (req, res, next) => {
   } catch (err) {
     next(err);
   }
-});
+}
+
+router.get('/lookup', lookupOrder);
+router.get('/track', lookupOrder);
 
 router.post('/', createOrderLimiter, async (req, res, next) => {
   const client = await db.pool.connect();
@@ -429,6 +441,10 @@ router.put('/:id/status', requireAuth, requireRole(['super_admin', 'owner', 'adm
       await client.query('rollback');
       return res.status(404).json({ error: 'Siparis bulunamadi' });
     }
+    if (current.rows[0].status === 'delivered' && status === 'cancelled') {
+      await client.query('rollback');
+      return res.status(400).json({ error: 'Teslim edilmis siparis iptal edilemez. Iade sureci kullanin.' });
+    }
 
     await syncStockForStatusChange(client, current.rows[0].id, current.rows[0].status, status, {
       organizationId: organization.id,
@@ -465,10 +481,10 @@ router.put('/:id/shipping', requireAuth, requireRole(['super_admin', 'owner', 'a
     await client.query('begin');
     const organization = await resolveOrganization(req, client);
     const {
-      shipping_company = '',
-      tracking_number = '',
-      tracking_url = '',
-      shipped_at = null,
+      shipping_company = req.body.shippingCompany || '',
+      tracking_number = req.body.trackingNumber || '',
+      tracking_url = req.body.trackingUrl || '',
+      shipped_at = req.body.shippedAt || null,
     } = req.body;
 
     const oldResult = await client.query(

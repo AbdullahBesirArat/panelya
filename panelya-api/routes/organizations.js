@@ -768,6 +768,114 @@ router.delete('/current/members/:membershipId', requireAuth, requireRole(['owner
   }
 });
 
+router.get('/colors', requireAuth, requireRole(['owner', 'admin', 'member', 'viewer', 'super_admin']), async (req, res, next) => {
+  try {
+    const organization = await resolveOrganization(req);
+    const result = await db.query(
+      'select store_settings from organizations where id = $1 limit 1',
+      [organization.id]
+    );
+    const settings = result.rows[0]?.store_settings || {};
+    res.json(Array.isArray(settings.custom_colors) ? settings.custom_colors : []);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/colors', requireAuth, requireRole(['owner', 'admin', 'super_admin']), async (req, res, next) => {
+  try {
+    const organization = await resolveOrganization(req);
+    const name = String(req.body.name || '').trim().slice(0, 60);
+    const hex = String(req.body.hex || '').trim().toLowerCase().slice(0, 20);
+
+    if (!name || !hex || !/^#([0-9a-f]{3}){1,2}$/.test(hex)) {
+      return res.status(400).json({ error: 'Renk adi ve gecerli hex kodu zorunlu' });
+    }
+
+    const existing = await db.query(
+      'select id, store_settings from organizations where id = $1 limit 1',
+      [organization.id]
+    );
+    const settings = existing.rows[0]?.store_settings || {};
+    const customColors = Array.isArray(settings.custom_colors) ? settings.custom_colors : [];
+
+    if (customColors.length >= 50) {
+      return res.status(400).json({ error: 'En fazla 50 ozel renk eklenebilir' });
+    }
+
+    const newColor = { name, hex, value: `${name}|${hex}` };
+    const newSettings = { ...settings, custom_colors: [...customColors, newColor] };
+
+    await db.query(
+      'update organizations set store_settings = $1::jsonb, updated_at = now() where id = $2',
+      [JSON.stringify(newSettings), organization.id]
+    );
+
+    invalidateOrganizationSummary(organization.id);
+    await auditLog(req, {
+      action: 'ADD_CUSTOM_COLOR',
+      resourceType: 'organization',
+      resourceId: organization.id,
+      newValue: newColor,
+    });
+    res.status(201).json(newColor);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.patch('/current/email', requireAuth, requireRole(['owner', 'admin', 'super_admin']), async (req, res, next) => {
+  try {
+    const organization = await resolveOrganization(req);
+    const currentEmail = cleanEmail(req.body.currentEmail);
+    const newEmail = cleanEmail(req.body.newEmail);
+    const newEmailConfirm = cleanEmail(req.body.newEmailConfirm);
+
+    if (!currentEmail || !newEmail || !newEmailConfirm) {
+      return res.status(400).json({ error: 'Tum e-posta alanlari zorunlu' });
+    }
+    if (!newEmail.includes('@') || !currentEmail.includes('@')) {
+      return res.status(400).json({ error: 'Gecerli e-posta giriniz' });
+    }
+    if (newEmail !== newEmailConfirm) {
+      return res.status(400).json({ error: 'Yeni e-postalar eslesmiyor' });
+    }
+
+    const existing = await db.query(
+      'select id, store_settings from organizations where id = $1 limit 1',
+      [organization.id]
+    );
+    const stored = existing.rows[0];
+    if (!stored) return res.status(404).json({ error: 'Organizasyon bulunamadi' });
+
+    const storeSettings = stored.store_settings || {};
+    const storedEmail = cleanEmail(storeSettings.contactEmail || '');
+    if (storedEmail !== currentEmail) {
+      return res.status(400).json({ error: 'Mevcut e-posta eslesmiyor' });
+    }
+
+    const newSettings = cleanStoreSettings({ ...storeSettings, contactEmail: newEmail });
+    const result = await db.query(
+      `update organizations
+       set store_settings = $1::jsonb, updated_at = now()
+       where id = $2
+       returning id, name, slug, plan, status, created_at, updated_at, store_settings`,
+      [JSON.stringify(newSettings), organization.id]
+    );
+
+    invalidateOrganizationSummary(organization.id);
+    await auditLog(req, {
+      action: 'CHANGE_CONTACT_EMAIL',
+      resourceType: 'organization',
+      resourceId: organization.id,
+      newValue: { contactEmail: newEmail },
+    });
+    res.json(result.rows[0]);
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.get('/', requireAuth, requireRole(['super_admin']), async (req, res, next) => {
   try {
     const result = await db.query(

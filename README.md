@@ -1,47 +1,47 @@
-# Panelya Operations
+# Panelya Operations Platform
 
-Panelya Operations is a multi-tenant SaaS operations platform for catalog, order, customer, content and analytics workflows. This repository now contains only the Panelya product surface:
+## Project Title
 
-- `apps/web`: Next.js operations dashboard
-- `panelya-api`: Express API, auth, tenant filtering, payments and PostgreSQL data layer
-- PostgreSQL: organizations, memberships, products, orders, customers, content and activity logs
+Panelya Operations Platform
 
-## Live Services
+## Short Description
 
-- Web dashboard: `https://panelya-web.vercel.app`
-- API health: `https://panelya-api-production.up.railway.app/api/health`
-- API docs: `https://panelya-api-production.up.railway.app/api/docs`
-- API spec: `https://panelya-api-production.up.railway.app/api/docs-json`
+Panelya is a multi-tenant SaaS operations platform for managing commerce products, orders, customers, storefront content, teams and analytics from a Next.js dashboard backed by a Node.js / Express REST API.
 
-## Demo Workspace
+## Key Features
 
-After `npm run demo:seed`, use:
+- Multi-tenant workspace model with organization-level data isolation.
+- Next.js / TypeScript dashboard for operational workflows.
+- Node.js / Express REST API with PostgreSQL persistence.
+- JWT access tokens, refresh-token rotation, RBAC and backend-enforced authorization.
+- Product, order, customer, content, team, analytics and settings modules.
+- Tenant-aware public API paths for the Suvera storefront.
+- iyzico payment integration path, payment callback validation and pending-order handling.
+- Swagger/OpenAPI documentation and production readiness checks.
+- Docker Compose, GitHub Actions, Vercel and Railway deployment workflow.
 
-- Organization slug: `panelya`
-- Email: `demo@panelya.dev`
-- Password: `PanelyaDemo!123`
+## Tech Stack
 
-Override these with `DEMO_OWNER_EMAIL`, `DEMO_OWNER_PASSWORD`, `DEMO_OWNER_NAME`, `DEMO_ORGANIZATION_NAME` and `DEMO_ORGANIZATION_SLUG` for staging demos.
+- Dashboard: Next.js, React, TypeScript, Tailwind CSS, React Query, Zustand, Recharts.
+- API: Node.js, Express, PostgreSQL, JWT, bcrypt, Helmet, Swagger UI.
+- Payments: iyzico SDK with local/mock payment modes for development.
+- DevOps: Docker, Railway, Vercel and GitHub Actions.
 
-Safety note:
+## Architecture / Folder Structure
 
-- `demo:seed` is enabled by default only outside production.
-- In production, set `ALLOW_DEMO_SEED=true` explicitly before running the seed script.
-- By default the script only writes to the `panelya` demo workspace.
-- If you intentionally need a different demo slug, also set `FORCE_DEMO_SEED=true`.
+```text
+panelya/
+|-- apps/web/             # Next.js operations dashboard
+|-- panelya-api/          # Express API, auth, payments, migrations and services
+|-- docs/                 # Verification, deployment and Suvera integration notes
+|-- suvera-storefront/    # Legacy/reference storefront copy, not the root-tracked Suvera source
+|-- docker-compose.yml    # Local PostgreSQL/API/web support
+`-- package.json          # Root workspace scripts
+```
 
-## Stack
+The root-tracked Suvera source lives outside this nested repository at `../suvera`.
 
-- Frontend: Next.js, TypeScript, React Query, Zustand, Tailwind
-- Backend: Node.js, Express, PostgreSQL
-- Auth: JWT access token + refresh token rotation
-- SaaS layer: organizations, memberships, subscriptions, activity logs
-- Payments: manual/mock for local smoke tests, iyzico integration path for sandbox and production
-- DevOps: Docker Compose, Vercel, Railway, GitHub Actions, production check scripts
-
-## Local Run
-
-Install dependencies:
+## Installation
 
 ```bash
 npm install
@@ -55,86 +55,98 @@ npm run db:migrate
 npm run demo:seed
 ```
 
-Start API and web in separate terminals:
+## Environment Variables
+
+Use example files only. Never commit real `.env` files.
+
+- `apps/web/.env.example`
+- `panelya-api/.env.example`
+- `panelya-api/.env.production.example`
+
+Important API variables include:
+
+- `DATABASE_URL`
+- `JWT_SECRET_APP`
+- `JWT_SECRET_ADMIN`
+- `CORS_ORIGIN`
+- `PUBLIC_API_URL`
+- `PUBLIC_SITE_URL`
+- `PAYMENT_PROVIDER`
+- `PAYMENT_CALLBACK_SECRET`
+- `IYZICO_API_KEY`
+- `IYZICO_SECRET_KEY`
+- `RESEND_API_KEY`
+
+Production secrets must be set in Railway, Vercel or the chosen hosting provider.
+
+## Running Locally
+
+Start the API and web app in separate terminals:
 
 ```bash
 npm run dev:api
 npm run dev:web
 ```
 
-Web runs on `http://localhost:3001`.
-API health runs on `http://localhost:3000/api/health`.
+Default local URLs:
 
-On Windows you can also run:
+- Dashboard: `http://localhost:3001`
+- API health: `http://localhost:3000/api/health`
+- API docs: `http://localhost:3000/api/docs`
 
-```powershell
-.\start-dev.ps1
-```
+Local demo workspace after seeding:
 
-## Useful Commands
+- Organization slug: `panelya`
+- Email: `demo@panelya.dev`
+- Password: `PanelyaDemo!123`
+
+## Available Scripts
 
 ```bash
 npm run check:api
 npm run lint:web
 npm run typecheck:web
 npm run build:web
+npm run db:migrate
 npm run demo:seed
 npm run suvera:seed
-npm run db:migrate
 npm run smoke:auth
 npm run smoke:payment
 npm run check:production
 npm run secrets:generate
 ```
 
-## Product Surface
-
-- Workspace registration and login
-- Organization switching
-- Tenant-aware dashboard summary
-- Product and category management
-- Order listing, shipping fields and status updates
-- Customer list and spend view
-- Content management for slides and campaigns
-- Analytics summary with order status chart
-- Settings summary for plan, subscription and team footprint
-- Swagger UI and JSON spec under the API deploy
-
-## Production Notes
-
-- `PAYMENT_PROVIDER=mock` is blocked in production.
-- Real production should use `PAYMENT_PROVIDER=iyzico` after sandbox sign-off.
-- Callback secret validation is available for protected payment flows.
-- Production env validation checks JWT strength, CORS, public URLs, payment config and admin bootstrap.
-- Admin bootstrap is available with `npm --prefix panelya-api run admin:create`.
-- GitHub Actions CI runs API syntax, web lint, web typecheck and web build from the root workspace lockfile.
-
 ## Deployment
 
-- Frontend: Vercel project `panelya-web`
-- Backend: Railway service `panelya-api`
-- Database: Railway Postgres
+- Dashboard: deploy `apps/web` to Vercel.
+- API: deploy `panelya-api` to Railway or another Node.js host.
+- Database: use managed PostgreSQL and run migrations before API releases.
+- Storefront integration: seed the `suvera` workspace with `npm run suvera:seed`, then configure Suvera's proxy environment in its separate Vercel project.
 
-Vercel web env:
+Production notes:
 
-```text
-NEXT_PUBLIC_API_BASE_URL=https://panelya-api-production.up.railway.app/api
-```
+- Do not use `PAYMENT_PROVIDER=mock` in production.
+- Keep `ALLOW_ENV_ADMIN_LOGIN=false` in production.
+- Use strong generated values for all JWT and callback secrets.
+- Keep tenant filters and RBAC checks enforced in backend routes.
 
-Railway API env should include:
+## Screenshots
 
-```text
-NODE_ENV=production
-DATABASE_URL=${{Postgres.DATABASE_URL}}
-CORS_ORIGIN=https://panelya-web.vercel.app,https://panelya.com.tr,https://www.panelya.com.tr,https://suvera.com.tr,https://www.suvera.com.tr
-PUBLIC_API_URL=https://panelya-api-production.up.railway.app
-PUBLIC_SITE_URL=https://suvera.com.tr
-PAYMENT_PROVIDER=iyzico
-PAYMENT_SUCCESS_URL=https://suvera.com.tr/tesekkur.html
-PAYMENT_FAILURE_URL=https://suvera.com.tr/tesekkur.html?payment=failed
-PAYMENT_CALLBACK_SECRET_REQUIRED=true
-```
+Add screenshots before publishing:
 
-For the Suvera storefront, use the separate source directory at `C:\Users\Arat\Desktop\proje\suvera` as the static Vercel project root. Run `npm run suvera:seed` after migrations to create the `suvera` workspace, then set the storefront proxy env `SUVERA_PUBLIC_ACCESS_TOKEN` to that workspace public access token.
+- Dashboard overview
+- Product management
+- Order management
+- Customer profile/list
+- Content management
+- Swagger API docs
 
-Use `docs/SHOWCASE-VERIFICATION.md` for the final quality gate.
+## Live Demo
+
+- Dashboard: `https://panelya-web.vercel.app`
+- API health: `https://panelya-api-production.up.railway.app/api/health`
+- API docs: `https://panelya-api-production.up.railway.app/api/docs`
+
+## Author
+
+Arat - Junior Full-Stack Developer

@@ -56,6 +56,9 @@ function productParams(body) {
   if (!String(body.name || '').trim() || !Number.isFinite(price) || price <= 0) {
     throw Object.assign(new Error('Urun adi ve gecerli fiyat zorunlu'), { status: 400 });
   }
+  if (Number.isFinite(salePrice) && salePrice > price) {
+    throw Object.assign(new Error('Indirimli fiyat normal fiyattan yuksek olamaz'), { status: 400 });
+  }
 
   return [
     String(body.name).trim().slice(0, 200),
@@ -70,6 +73,7 @@ function productParams(body) {
     JSON.stringify(body.details && typeof body.details === 'object' ? body.details : {}),
     String(body.tags || '').slice(0, 500),
     String(body.description || '').slice(0, 5000),
+    String(body.product_story || '').slice(0, 5000),
     String(body.emoji || '').slice(0, 16),
   ];
 }
@@ -161,6 +165,7 @@ function productSelect(whereClause) {
     p.details,
     p.tags,
     p.description,
+    p.product_story,
     p.emoji,
     p.created_at,
     p.updated_at,
@@ -314,6 +319,8 @@ router.get('/', async (req, res, next) => {
       if (!PRODUCT_STATUSES.includes(status)) return res.status(400).json({ error: 'Durum gecersiz' });
       params.push(status);
       filters.push(`p.status = $${params.length}`);
+    } else if (!req.auth) {
+      filters.push("p.status in ('active', 'out')");
     }
 
     params.push(paging.limit, paging.offset);
@@ -334,7 +341,8 @@ router.get('/', async (req, res, next) => {
 router.get('/:id', async (req, res, next) => {
   try {
     const organization = await resolveOrganization(req, db, { allowPublic: !req.auth });
-    const result = await db.query(`${productSelect('p.id = $1 and p.organization_id = $2')}`, [req.params.id, organization.id]);
+    const publicStatusFilter = req.auth ? '' : " and p.status in ('active', 'out')";
+    const result = await db.query(`${productSelect(`p.id = $1 and p.organization_id = $2${publicStatusFilter}`)}`, [req.params.id, organization.id]);
 
     if (!result.rows[0]) {
       return res.status(404).json({ error: 'Urun bulunamadi' });
@@ -358,8 +366,8 @@ router.post('/', requireAuth, requireRole(['super_admin', 'owner', 'admin']), as
     await assertCategoryScope(client, organization.id, params[1]);
     const result = await client.query(
       `insert into products
-       (organization_id, name, category_id, price, sale_price, stock, status, colors, sizes, images, details, tags, description, emoji)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+       (organization_id, name, category_id, price, sale_price, stock, status, colors, sizes, images, details, tags, description, product_story, emoji)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
        returning *`,
       [organization.id, ...params]
     );
@@ -650,9 +658,9 @@ router.put('/:id', requireAuth, requireRole(['super_admin', 'owner', 'admin']), 
     const result = await client.query(
       `update products set
         name=$1, category_id=$2, price=$3, sale_price=$4, stock=$5, status=$6,
-        colors=$7, sizes=$8, images=$9, details=$10, tags=$11, description=$12, emoji=$13,
+        colors=$7, sizes=$8, images=$9, details=$10, tags=$11, description=$12, product_story=$13, emoji=$14,
         updated_at=now()
-       where id=$14 and organization_id=$15
+       where id=$15 and organization_id=$16
        returning *`,
       [...params, req.params.id, organization.id]
     );

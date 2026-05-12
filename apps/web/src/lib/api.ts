@@ -71,6 +71,7 @@ export type ApiProduct = {
   };
   tags: string;
   description: string;
+  product_story: string;
   emoji: string;
   created_at: string;
   updated_at: string;
@@ -1026,6 +1027,34 @@ export async function updateOrganizationSettings(payload: { name: string; slug: 
 export async function regeneratePublicAccessToken() {
   return authenticatedRequest<ApiOrganizationSettings>("/organizations/current/public-access-token/regenerate", {
     method: "POST",
+  });
+}
+
+export async function changeOrganizationEmail(payload: {
+  currentEmail: string;
+  newEmail: string;
+  newEmailConfirm: string;
+}) {
+  return authenticatedRequest<ApiOrganizationSettings>("/organizations/current/email", {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export type ApiCustomColor = {
+  name: string;
+  hex: string;
+  value: string;
+};
+
+export async function fetchOrganizationColors() {
+  return authenticatedRequest<ApiCustomColor[]>("/organizations/colors");
+}
+
+export async function addOrganizationColor(payload: { name: string; hex: string }) {
+  return authenticatedRequest<ApiCustomColor>("/organizations/colors", {
+    method: "POST",
+    body: JSON.stringify(payload),
   });
 }
 
