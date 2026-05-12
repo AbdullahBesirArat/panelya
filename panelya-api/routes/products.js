@@ -75,6 +75,7 @@ function productParams(body) {
     String(body.description || '').slice(0, 5000),
     String(body.product_story || '').slice(0, 5000),
     String(body.emoji || '').slice(0, 16),
+    Boolean(body.featured_in_category),
   ];
 }
 
@@ -167,6 +168,7 @@ function productSelect(whereClause) {
     p.description,
     p.product_story,
     p.emoji,
+    p.featured_in_category,
     p.created_at,
     p.updated_at,
     coalesce(
@@ -303,7 +305,7 @@ async function fetchProduct(client, productId, organizationId) {
 router.get('/', async (req, res, next) => {
   try {
     const organization = await resolveOrganization(req, db, { allowPublic: !req.auth });
-    const { q = '', category_id, status, limit = 50, offset = 0 } = req.query;
+    const { q = '', category_id, status, featured_in_category, limit = 50, offset = 0 } = req.query;
     const paging = safePaging(limit, offset);
     const params = [organization.id, `%${String(q).slice(0, 120)}%`];
     const filters = ['p.organization_id = $1', 'p.name ilike $2'];
@@ -313,6 +315,11 @@ router.get('/', async (req, res, next) => {
       if (!Number.isInteger(categoryId) || categoryId < 1) return res.status(400).json({ error: 'Kategori gecersiz' });
       params.push(categoryId);
       filters.push(`p.category_id = $${params.length}`);
+    }
+
+    if (featured_in_category != null && featured_in_category !== '') {
+      const truthy = ['1', 'true', 'yes', 'on'].includes(String(featured_in_category).toLowerCase());
+      filters.push(`p.featured_in_category = ${truthy ? 'true' : 'false'}`);
     }
 
     if (status) {
@@ -366,8 +373,8 @@ router.post('/', requireAuth, requireRole(['super_admin', 'owner', 'admin']), as
     await assertCategoryScope(client, organization.id, params[1]);
     const result = await client.query(
       `insert into products
-       (organization_id, name, category_id, price, sale_price, stock, status, colors, sizes, images, details, tags, description, product_story, emoji)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+       (organization_id, name, category_id, price, sale_price, stock, status, colors, sizes, images, details, tags, description, product_story, emoji, featured_in_category)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
        returning *`,
       [organization.id, ...params]
     );
@@ -659,8 +666,9 @@ router.put('/:id', requireAuth, requireRole(['super_admin', 'owner', 'admin']), 
       `update products set
         name=$1, category_id=$2, price=$3, sale_price=$4, stock=$5, status=$6,
         colors=$7, sizes=$8, images=$9, details=$10, tags=$11, description=$12, product_story=$13, emoji=$14,
+        featured_in_category=$15,
         updated_at=now()
-       where id=$15 and organization_id=$16
+       where id=$16 and organization_id=$17
        returning *`,
       [...params, req.params.id, organization.id]
     );
@@ -680,6 +688,88 @@ router.put('/:id', requireAuth, requireRole(['super_admin', 'owner', 'admin']), 
     });
     await client.query('commit');
     res.json(product);
+  } catch (err) {
+    await client.query('rollback');
+    next(err);
+  } finally {
+    client.release();
+  }
+});
+
+/**
+ * @swagger
+ * /api/products/category/{categoryId}/featured:
+ *   put:
+ *     summary: Bir kategorideki one cikan urunleri toplu ayarla
+ *     tags: [Products]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: categoryId
+ *         required: true
+ *         schema: { type: integer }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               product_ids:
+ *                 type: array
+ *                 items: { type: integer }
+ *     responses:
+ *       200:
+ *         description: Guncellenen kategori one cikan urun listesi
+ */
+router.put('/category/:categoryId/featured', requireAuth, requireRole(['super_admin', 'owner', 'admin']), async (req, res, next) => {
+  const client = await db.pool.connect();
+  try {
+    const organization = await resolveOrganization(req, client);
+    const categoryId = Number(req.params.categoryId);
+    if (!Number.isInteger(categoryId) || categoryId < 1) {
+      return res.status(400).json({ error: 'Kategori gecersiz' });
+    }
+    const featuredIds = normalizeProductIds(req.body.product_ids || req.body.productIds || req.body.ids);
+
+    await client.query('begin');
+    await assertCategoryScope(client, organization.id, categoryId);
+
+    const previous = await client.query(
+      `select id, featured_in_category
+       from products
+       where organization_id = $1 and category_id = $2`,
+      [organization.id, categoryId]
+    );
+
+    const result = await client.query(
+      `update products
+       set featured_in_category = case when id = any($1::bigint[]) then true else false end,
+           updated_at = now()
+       where organization_id = $2 and category_id = $3
+       returning id, name, featured_in_category`,
+      [featuredIds, organization.id, categoryId]
+    );
+
+    await auditLog(req, {
+      action: 'UPDATE_FEATURED',
+      resourceType: 'product',
+      newValue: {
+        category_id: categoryId,
+        featured_ids: featuredIds,
+        affected: result.rows.length,
+      },
+      oldValue: previous.rows,
+    });
+
+    await client.query('commit');
+    res.json({
+      ok: true,
+      category_id: categoryId,
+      featured_ids: result.rows.filter((row) => row.featured_in_category).map((row) => Number(row.id)),
+      products: result.rows,
+    });
   } catch (err) {
     await client.query('rollback');
     next(err);

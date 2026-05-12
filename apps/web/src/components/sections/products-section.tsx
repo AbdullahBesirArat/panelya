@@ -17,6 +17,7 @@ import {
   fetchCategories,
   fetchOrganizationColors,
   fetchProducts,
+  setCategoryFeaturedProducts,
   updateCategory,
   updateProduct,
   type ApiCategory,
@@ -282,6 +283,8 @@ export function ProductsSection({
   const [categoryId, setCategoryId] = useState("");
   const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
   const [categoryForm, setCategoryForm] = useState(createEmptyCategoryForm);
+  const [featuredCategoryId, setFeaturedCategoryId] = useState<string | null>(null);
+  const [featuredSelection, setFeaturedSelection] = useState<Set<string>>(() => new Set());
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
   const [productForm, setProductForm] = useState(createEmptyProductForm);
   const [productFormError, setProductFormError] = useState("");
@@ -307,6 +310,26 @@ export function ProductsSection({
     staleTime: 15_000,
     placeholderData: keepPreviousData,
   });
+
+  const featuredCategoryProductsQuery = useQuery({
+    queryKey: ["category-products", organizationSlug, featuredCategoryId],
+    queryFn: () => fetchProducts({ categoryId: featuredCategoryId || "", limit: 200 }),
+    enabled: Boolean(featuredCategoryId),
+    staleTime: 15_000,
+  });
+
+  const [seenFeaturedData, setSeenFeaturedData] = useState<ApiProduct[] | null>(null);
+  if (featuredCategoryProductsQuery.data && featuredCategoryProductsQuery.data !== seenFeaturedData) {
+    // Render-phase reset so the checkbox set is rebuilt every time the query
+    // returns new data (initial load + post-save refetch) without using an
+    // effect that calls setState synchronously.
+    setSeenFeaturedData(featuredCategoryProductsQuery.data);
+    setFeaturedSelection(new Set(
+      featuredCategoryProductsQuery.data
+        .filter((product) => product.featured_in_category)
+        .map((product) => product.id),
+    ));
+  }
 
   const customColorsQuery = useQuery({
     queryKey: ["customColors", organizationSlug],
@@ -443,6 +466,22 @@ export function ProductsSection({
         queryClient.invalidateQueries({ queryKey: ["categories", organizationSlug] }),
         queryClient.invalidateQueries({ queryKey: ["products", organizationSlug] }),
         queryClient.invalidateQueries({ queryKey: ["summary", organizationSlug] }),
+      ]);
+    },
+  });
+
+  const featuredCategoryMutation = useMutation({
+    mutationFn: ({ categoryId: targetId, productIds }: { categoryId: string; productIds: string[] }) =>
+      setCategoryFeaturedProducts(targetId, productIds),
+    onSuccess: async () => {
+      pushToast({
+        title: "Öne çıkanlar güncellendi",
+        description: "Suvera kategori sayfasında öne çıkan ürünler yenilendi.",
+        tone: "success",
+      });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["category-products", organizationSlug] }),
+        queryClient.invalidateQueries({ queryKey: ["products", organizationSlug] }),
       ]);
     },
   });
@@ -1584,53 +1623,140 @@ export function ProductsSection({
 
             <div className="mt-4 space-y-3">
               {categories.length === 0 && <InlineHint>Henüz kategori yok. Ürünleri kategorisiz de oluşturabilirsin.</InlineHint>}
-              {categories.map((category) => (
-                <div className="flex items-center justify-between gap-3 rounded-lg border border-line px-4 py-3" key={category.id}>
-                  <div className="flex min-w-0 items-center gap-3">
-                    <div className="h-12 w-12 shrink-0 overflow-hidden rounded-md border border-line bg-zinc-100">
-                      {category.image_url ? (
-                        <Image
-                          alt=""
-                          className="h-full w-full object-cover"
-                          height={96}
-                          src={assetUrl(category.image_url)}
-                          unoptimized
-                          width={96}
-                        />
-                      ) : (
-                        <div className="flex h-full w-full items-center justify-center text-xs font-bold text-zinc-400">
-                          {category.name.slice(0, 2).toLocaleUpperCase("tr-TR")}
+              {categories.map((category) => {
+                const isFeaturedOpen = featuredCategoryId === category.id;
+                const featuredProducts = featuredCategoryProductsQuery.data ?? [];
+                const isLoadingFeatured = isFeaturedOpen && featuredCategoryProductsQuery.isFetching;
+                return (
+                  <div className="rounded-lg border border-line bg-white" key={category.id}>
+                    <div className="flex items-center justify-between gap-3 px-4 py-3">
+                      <div className="flex min-w-0 items-center gap-3">
+                        <div className="h-12 w-12 shrink-0 overflow-hidden rounded-md border border-line bg-zinc-100">
+                          {category.image_url ? (
+                            <Image
+                              alt=""
+                              className="h-full w-full object-cover"
+                              height={96}
+                              src={assetUrl(category.image_url)}
+                              unoptimized
+                              width={96}
+                            />
+                          ) : (
+                            <div className="flex h-full w-full items-center justify-center text-xs font-bold text-zinc-400">
+                              {category.name.slice(0, 2).toLocaleUpperCase("tr-TR")}
+                            </div>
+                          )}
                         </div>
-                      )}
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold">{category.name}</p>
+                          <p className="truncate text-xs text-zinc-500">{category.slug}</p>
+                        </div>
+                      </div>
+                      <div className="flex shrink-0 flex-wrap gap-2">
+                        {canManageCatalog ? (
+                          <button
+                            aria-expanded={isFeaturedOpen}
+                            className={`focus-ring inline-flex h-9 items-center rounded-lg px-3 text-xs font-semibold ${isFeaturedOpen ? "border border-mint bg-mint/10 text-mint" : "border border-line text-ink"}`}
+                            onClick={() => setFeaturedCategoryId(isFeaturedOpen ? null : category.id)}
+                            type="button"
+                          >
+                            {isFeaturedOpen ? "Öne çıkanları kapat" : "Öne çıkanlar"}
+                          </button>
+                        ) : null}
+                        {canManageCatalog ? (
+                          <button
+                            className="focus-ring inline-flex h-9 items-center rounded-lg border border-line px-3 text-xs font-semibold text-ink"
+                            onClick={() => startEditingCategory(category)}
+                            type="button"
+                          >
+                            Düzenle
+                          </button>
+                        ) : null}
+                        {canDeleteCatalog ? (
+                          <button
+                            className="focus-ring inline-flex h-9 items-center rounded-lg border border-line px-3 text-xs font-semibold text-coral"
+                            disabled={deleteCategoryMutation.isPending && deleteCategoryMutation.variables === category.id}
+                            onClick={() => deleteCategoryMutation.mutate(category.id)}
+                            type="button"
+                          >
+                            {deleteCategoryMutation.isPending && deleteCategoryMutation.variables === category.id ? "Siliniyor" : "Sil"}
+                          </button>
+                        ) : null}
+                      </div>
                     </div>
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold">{category.name}</p>
-                      <p className="truncate text-xs text-zinc-500">{category.slug}</p>
-                    </div>
-                  </div>
-                  <div className="flex shrink-0 flex-wrap gap-2">
-                    {canManageCatalog ? (
-                      <button
-                        className="focus-ring inline-flex h-9 items-center rounded-lg border border-line px-3 text-xs font-semibold text-ink"
-                        onClick={() => startEditingCategory(category)}
-                        type="button"
-                      >
-                        Düzenle
-                      </button>
+                    {isFeaturedOpen ? (
+                      <div className="space-y-3 border-t border-line bg-zinc-50 px-4 py-4">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <p className="text-xs font-semibold uppercase tracking-[1.5px] text-zinc-600">
+                            Suvera &ldquo;{category.name}&rdquo; sayfasındaki öne çıkanlar
+                          </p>
+                          <p className="text-xs text-zinc-500">
+                            Seçili: <strong>{featuredSelection.size}</strong> ürün
+                          </p>
+                        </div>
+                        {isLoadingFeatured ? (
+                          <InlineHint>Kategori ürünleri yükleniyor.</InlineHint>
+                        ) : featuredCategoryProductsQuery.isError ? (
+                          <InlineError message="Kategori ürünleri yüklenemedi." />
+                        ) : featuredProducts.length === 0 ? (
+                          <InlineHint>Bu kategoride henüz ürün yok.</InlineHint>
+                        ) : (
+                          <>
+                            <div className="grid max-h-72 gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
+                              {featuredProducts.map((product) => {
+                                const checked = featuredSelection.has(product.id);
+                                return (
+                                  <label
+                                    className={`flex items-center gap-2 rounded-md border px-3 py-2 text-sm ${checked ? "border-mint bg-mint/5" : "border-line bg-white"}`}
+                                    key={product.id}
+                                  >
+                                    <input
+                                      checked={checked}
+                                      onChange={(event) => {
+                                        const next = new Set(featuredSelection);
+                                        if (event.target.checked) next.add(product.id);
+                                        else next.delete(product.id);
+                                        setFeaturedSelection(next);
+                                      }}
+                                      type="checkbox"
+                                    />
+                                    <span className="min-w-0 flex-1 truncate">{product.name}</span>
+                                    <span className="shrink-0 text-xs text-zinc-500">
+                                      {product.status === "active" ? "Aktif" : product.status === "draft" ? "Taslak" : "Stoksuz"}
+                                    </span>
+                                  </label>
+                                );
+                              })}
+                            </div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <button
+                                className="focus-ring inline-flex h-9 items-center rounded-lg bg-mint px-4 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                                disabled={featuredCategoryMutation.isPending}
+                                onClick={() => featuredCategoryMutation.mutate({
+                                  categoryId: category.id,
+                                  productIds: Array.from(featuredSelection),
+                                })}
+                                type="button"
+                              >
+                                {featuredCategoryMutation.isPending ? "Kaydediliyor" : "Öne çıkanları kaydet"}
+                              </button>
+                              <button
+                                className="focus-ring inline-flex h-9 items-center rounded-lg border border-line px-3 text-xs font-semibold text-zinc-600"
+                                onClick={() => setFeaturedSelection(new Set())}
+                                type="button"
+                              >
+                                Seçimleri temizle
+                              </button>
+                              <InlineHint>Suvera kategori sayfasındaki &ldquo;Öne çıkanlar&rdquo; şeridi bu seçime göre yenilenir.</InlineHint>
+                            </div>
+                            {featuredCategoryMutation.isError && <InlineError message={featuredCategoryMutation.error.message} />}
+                          </>
+                        )}
+                      </div>
                     ) : null}
-                    {canDeleteCatalog ? (
-                      <button
-                        className="focus-ring inline-flex h-9 items-center rounded-lg border border-line px-3 text-xs font-semibold text-coral"
-                        disabled={deleteCategoryMutation.isPending && deleteCategoryMutation.variables === category.id}
-                        onClick={() => deleteCategoryMutation.mutate(category.id)}
-                        type="button"
-                      >
-                        {deleteCategoryMutation.isPending && deleteCategoryMutation.variables === category.id ? "Siliniyor" : "Sil"}
-                      </button>
-                    ) : null}
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </Panel>
 

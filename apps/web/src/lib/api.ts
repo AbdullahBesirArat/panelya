@@ -73,6 +73,7 @@ export type ApiProduct = {
   description: string;
   product_story: string;
   emoji: string;
+  featured_in_category: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -718,6 +719,18 @@ export async function bulkUpdateProducts(payload: {
 export async function deleteProduct(id: string) {
   return authenticatedRequest<void>(`/products/${id}`, {
     method: "DELETE",
+  });
+}
+
+export async function setCategoryFeaturedProducts(categoryId: string, productIds: string[]) {
+  return authenticatedRequest<{
+    ok: boolean;
+    category_id: number;
+    featured_ids: number[];
+    products: Array<{ id: string; name: string; featured_in_category: boolean }>;
+  }>(`/products/category/${categoryId}/featured`, {
+    method: "PUT",
+    body: JSON.stringify({ product_ids: productIds }),
   });
 }
 
