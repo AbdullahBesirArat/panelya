@@ -1766,6 +1766,7 @@ export function ProductsSection({
           />
         </div>
       </div>
+
     </>
   );
 }

@@ -167,8 +167,8 @@ function productSelect(whereClause) {
     p.tags,
     p.description,
     p.product_story,
-    p.emoji,
     p.featured_in_category,
+    p.emoji,
     p.created_at,
     p.updated_at,
     coalesce(
