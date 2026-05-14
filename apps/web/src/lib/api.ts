@@ -540,6 +540,34 @@ export async function fetchMe() {
   return authenticatedRequest<MeResponse>("/auth/me");
 }
 
+export async function verifyTenantEmail(token: string) {
+  return publicRequest<{ ok: boolean }>("/auth/verify-email", {
+    method: "POST",
+    body: JSON.stringify({ token }),
+  });
+}
+
+export async function resendTenantVerification(email: string) {
+  return publicRequest<{ ok: boolean }>("/auth/resend-verification", {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
+}
+
+export async function requestTenantEmailChange(payload: { new_email: string; password: string }) {
+  return authenticatedRequest<{ ok: boolean }>("/auth/email-change/request", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function confirmTenantEmailChange(token: string) {
+  return publicRequest<{ ok: boolean }>("/auth/email-change/confirm", {
+    method: "POST",
+    body: JSON.stringify({ token }),
+  });
+}
+
 export async function switchOrganizationSession(organizationSlug: string) {
   return authenticatedRequest<Omit<SessionResponse, "refreshToken">>("/auth/session/switch-organization", {
     method: "POST",

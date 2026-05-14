@@ -28,6 +28,53 @@ async function sendWithResend({ to, subject, html, text }) {
   }
 }
 
+function brevoCredentials(account) {
+  if (account === 'panelya') {
+    return {
+      apiKey: String(process.env.BREVO_API_KEY_PANELYA || '').trim(),
+      senderEmail: String(process.env.BREVO_SENDER_PANELYA || '').trim(),
+      senderName: String(process.env.BREVO_SENDER_PANELYA_NAME || 'Panelya').trim(),
+    };
+  }
+  return {
+    apiKey: String(process.env.BREVO_API_KEY_SUVERA || '').trim(),
+    senderEmail: String(process.env.BREVO_SENDER_SUVERA || '').trim(),
+    senderName: String(process.env.BREVO_SENDER_SUVERA_NAME || 'Suvera').trim(),
+  };
+}
+
+async function sendWithBrevo({ to, subject, html, text, account }) {
+  const { apiKey, senderEmail, senderName } = brevoCredentials(account);
+  if (!apiKey || !senderEmail) {
+    throw new Error(`Brevo creds eksik (account=${account || 'suvera'})`);
+  }
+
+  const recipients = (Array.isArray(to) ? to : [to])
+    .filter(Boolean)
+    .map((email) => ({ email: String(email) }));
+
+  const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+    method: 'POST',
+    headers: {
+      'api-key': apiKey,
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify({
+      sender: { email: senderEmail, name: senderName },
+      to: recipients,
+      subject,
+      htmlContent: html,
+      textContent: text,
+    }),
+  });
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => '');
+    throw new Error(`Brevo email gonderimi basarisiz: ${response.status} ${body}`.trim());
+  }
+}
+
 async function sendEmail(message) {
   if (EMAIL_PROVIDER === 'none' || !message?.to) {
     return { skipped: true };
@@ -38,12 +85,18 @@ async function sendEmail(message) {
     return { skipped: false };
   }
 
+  if (EMAIL_PROVIDER === 'brevo') {
+    await sendWithBrevo({ ...message, account: message.account || 'suvera' });
+    return { skipped: false };
+  }
+
   throw new Error(`Desteklenmeyen EMAIL_PROVIDER: ${EMAIL_PROVIDER}`);
 }
 
 async function sendWelcomeEmail(user, organization) {
   if (!user?.email) return { skipped: true };
   return sendEmail({
+    account: 'suvera',
     to: user.email,
     subject: `${organization?.name || 'Panelya'} hos geldiniz`,
     text: `Merhaba ${user.name || ''}, ${organization?.name || 'Panelya'} workspace'iniz hazir.`,
@@ -59,6 +112,7 @@ async function sendInviteEmail(invite, organization, token) {
     : '';
 
   return sendEmail({
+    account: 'panelya',
     to: invite.email,
     subject: `${organization?.name || 'Panelya'} ekip daveti`,
     text: [
@@ -80,6 +134,7 @@ async function sendCustomerPasswordResetEmail(account, organization, token) {
     : '';
 
   return sendEmail({
+    account: 'suvera',
     to: account.email,
     subject: `${organization?.name || 'Suvera'} sifre sifirlama`,
     text: [
@@ -104,6 +159,84 @@ function escapeHtml(value) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
+}
+
+function buildVerificationUrl({ target, token, purpose }) {
+  const isPanelya = target === 'panelya';
+  const baseRaw = isPanelya
+    ? (process.env.PUBLIC_APP_URL || '')
+    : (process.env.PUBLIC_SITE_URL || '');
+  const base = String(baseRaw || '').replace(/\/$/, '');
+  if (!base || !token) return '';
+  let parsed;
+  try {
+    parsed = new URL(base);
+  } catch {
+    return '';
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return '';
+  }
+  const path = isPanelya ? '/verify' : '/dogrula.html';
+  const qs = new URLSearchParams({ token: String(token) });
+  if (purpose) qs.set('purpose', purpose);
+  return `${base}${path}?${qs.toString()}`;
+}
+
+async function sendEmailVerificationMagicLink({ to, name, token, target, organization }) {
+  if (!to) return { skipped: true };
+  const url = buildVerificationUrl({ target, token });
+  if (!url) return { skipped: true };
+  const account = target === 'panelya' ? 'panelya' : 'suvera';
+  const brand = organization?.name || (target === 'panelya' ? 'Panelya' : 'Suvera');
+
+  return sendEmail({
+    account,
+    to,
+    subject: `${brand} - E-posta dogrulama`,
+    text: [
+      `Merhaba ${name || ''}`.trim(),
+      'E-posta adresinizi dogrulamak icin asagidaki linke tiklayin:',
+      url,
+      'Link 24 saat boyunca gecerlidir. Bu talebi siz olusturmadiysaniz dikkate almayin.',
+    ].filter(Boolean).join('\n'),
+    html: [
+      '<div style="font-family:Arial,sans-serif;line-height:1.5;color:#0f172a;">',
+      `<p>Merhaba ${escapeHtml(name || '')},</p>`,
+      `<p><strong>${escapeHtml(brand)}</strong> hesabiniza ait e-posta adresini dogrulamak icin asagidaki butona tiklayin.</p>`,
+      `<p style="margin:20px 0;"><a href="${escapeHtml(url)}" style="display:inline-block;background:#0f172a;color:#ffffff;text-decoration:none;padding:10px 16px;border-radius:6px;">E-postami dogrula</a></p>`,
+      '<p style="color:#64748b;">Link 24 saat boyunca gecerlidir. Bu talebi siz olusturmadiysaniz bu e-postayi dikkate almayin.</p>',
+      '</div>',
+    ].join(''),
+  });
+}
+
+async function sendEmailChangeConfirmation({ to, name, token, target, organization }) {
+  if (!to) return { skipped: true };
+  const url = buildVerificationUrl({ target, token, purpose: 'email_change' });
+  if (!url) return { skipped: true };
+  const account = target === 'panelya' ? 'panelya' : 'suvera';
+  const brand = organization?.name || (target === 'panelya' ? 'Panelya' : 'Suvera');
+
+  return sendEmail({
+    account,
+    to,
+    subject: `${brand} - E-posta degisikligini onaylayin`,
+    text: [
+      `Merhaba ${name || ''}`.trim(),
+      'Hesabinizin e-posta adresini degistirme talebini onaylamak icin asagidaki linke tiklayin:',
+      url,
+      'Link 24 saat boyunca gecerlidir. Bu talebi siz olusturmadiysaniz dikkate almayin.',
+    ].filter(Boolean).join('\n'),
+    html: [
+      '<div style="font-family:Arial,sans-serif;line-height:1.5;color:#0f172a;">',
+      `<p>Merhaba ${escapeHtml(name || '')},</p>`,
+      `<p><strong>${escapeHtml(brand)}</strong> hesabinizin e-posta adresini degistirme talebini onaylamak icin asagidaki butona tiklayin.</p>`,
+      `<p style="margin:20px 0;"><a href="${escapeHtml(url)}" style="display:inline-block;background:#0f172a;color:#ffffff;text-decoration:none;padding:10px 16px;border-radius:6px;">Yeni e-postami onayla</a></p>`,
+      '<p style="color:#64748b;">Link 24 saat boyunca gecerlidir. Bu talebi siz olusturmadiysaniz bu e-postayi dikkate almayin.</p>',
+      '</div>',
+    ].join(''),
+  });
 }
 
 function statusLabel(status) {
@@ -183,6 +316,7 @@ async function sendOrderStatusEmail(order, customer) {
     : '';
 
   return sendEmail({
+    account: 'suvera',
     to: customer.email,
     subject: `${subjectPrefix}: ${orderCode}`.trim(),
     text: textLines.join('\n'),
@@ -198,10 +332,71 @@ async function sendOrderStatusEmail(order, customer) {
   });
 }
 
+async function sendNewOrderSellerNotification({ order, organization, sellerEmail, items }) {
+  if (!sellerEmail || !order) return { skipped: true };
+  const appUrl = String(process.env.PUBLIC_APP_URL || '').replace(/\/$/, '');
+  let panelUrl = '';
+  if (appUrl && order.id) {
+    try {
+      const parsed = new URL(appUrl);
+      if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+        panelUrl = `${appUrl}/orders/${encodeURIComponent(order.id)}`;
+      }
+    } catch {
+      panelUrl = '';
+    }
+  }
+  const orderCode = order.order_code || '-';
+  const total = formatMoney(order.total ?? order.total_amount);
+  const customerName = order.customer_name || order.customer?.name || '';
+
+  const itemList = Array.isArray(items) ? items : [];
+  const itemRows = itemList.map((it) => (
+    `<tr><td style="padding:6px 12px;color:#0f172a;">${escapeHtml(it.product_name || it.name || '')}</td>`
+    + `<td style="padding:6px 12px;color:#64748b;">${escapeHtml(String(it.quantity || 0))}</td>`
+    + `<td style="padding:6px 12px;text-align:right;color:#0f172a;">${escapeHtml(formatMoney(it.unit_price))}</td></tr>`
+  )).join('');
+  const itemTable = itemRows
+    ? `<table role="presentation" cellspacing="0" cellpadding="0" style="border-collapse:collapse;border:1px solid #e2e8f0;border-radius:6px;width:100%;margin-top:12px;"><thead><tr><th style="padding:6px 12px;text-align:left;color:#64748b;font-weight:600;">Urun</th><th style="padding:6px 12px;text-align:left;color:#64748b;font-weight:600;">Adet</th><th style="padding:6px 12px;text-align:right;color:#64748b;font-weight:600;">Birim</th></tr></thead><tbody>${itemRows}</tbody></table>`
+    : '';
+
+  const panelButton = panelUrl
+    ? `<p style="margin:20px 0 0;"><a href="${escapeHtml(panelUrl)}" style="display:inline-block;background:#0f172a;color:#ffffff;text-decoration:none;padding:10px 14px;border-radius:6px;">Panele git</a></p>`
+    : '';
+
+  return sendEmail({
+    account: 'panelya',
+    to: sellerEmail,
+    subject: `Yeni siparis: ${orderCode}${total ? ` - ${total}` : ''}`,
+    text: [
+      `${organization?.name || 'Panelya'} workspace'inde yeni bir siparis olustu.`,
+      compactLine('Siparis kodu', orderCode),
+      compactLine('Toplam', total),
+      compactLine('Musteri', customerName),
+      panelUrl ? `Detay: ${panelUrl}` : '',
+    ].filter(Boolean).join('\n'),
+    html: [
+      '<div style="font-family:Arial,sans-serif;line-height:1.5;color:#0f172a;">',
+      `<p><strong>${escapeHtml(organization?.name || 'Panelya')}</strong> workspace'inde yeni bir siparis olustu.</p>`,
+      '<table role="presentation" cellspacing="0" cellpadding="0" style="border-collapse:collapse;border:1px solid #e2e8f0;border-radius:6px;overflow:hidden;">',
+      `<tr><td style="padding:8px 12px;color:#64748b;">Siparis kodu</td><td style="padding:8px 12px;font-weight:600;">${escapeHtml(orderCode)}</td></tr>`,
+      total ? `<tr><td style="padding:8px 12px;color:#64748b;">Toplam</td><td style="padding:8px 12px;font-weight:600;">${escapeHtml(total)}</td></tr>` : '',
+      customerName ? `<tr><td style="padding:8px 12px;color:#64748b;">Musteri</td><td style="padding:8px 12px;font-weight:600;">${escapeHtml(customerName)}</td></tr>` : '',
+      '</table>',
+      itemTable,
+      panelButton,
+      '</div>',
+    ].filter(Boolean).join(''),
+  });
+}
+
 module.exports = {
   sendEmail,
   sendCustomerPasswordResetEmail,
   sendInviteEmail,
   sendOrderStatusEmail,
   sendWelcomeEmail,
+  sendEmailVerificationMagicLink,
+  sendEmailChangeConfirmation,
+  sendNewOrderSellerNotification,
 };

@@ -12,8 +12,47 @@ const {
   issueRefreshToken,
   revokeRefreshToken,
 } = require('../services/authTokens');
-const { sendWelcomeEmail } = require('../services/email');
+const crypto = require('crypto');
+const {
+  sendWelcomeEmail,
+  sendEmailVerificationMagicLink,
+  sendEmailChangeConfirmation,
+} = require('../services/email');
 const { slugify } = require('../services/tenant');
+const { logger } = require('../services/logger');
+
+const EMAIL_VERIFICATION_TTL_HOURS = Math.max(1, Number(process.env.EMAIL_VERIFICATION_TTL_HOURS || 24));
+
+function sha256(value) {
+  return crypto.createHash('sha256').update(String(value || '')).digest('hex');
+}
+
+function randomToken() {
+  return crypto.randomBytes(32).toString('hex');
+}
+
+async function issueUserVerificationToken(client, {
+  organizationId,
+  userId,
+  purpose,
+  newEmail = null,
+}) {
+  const token = randomToken();
+  await client.query(
+    `insert into email_magic_link_tokens
+       (organization_id, subject_type, subject_id, purpose, token_hash, new_email, expires_at)
+     values ($1, 'user', $2, $3, $4, $5, now() + ($6 || ' hours')::interval)`,
+    [
+      organizationId,
+      String(userId),
+      purpose,
+      sha256(token),
+      newEmail,
+      String(EMAIL_VERIFICATION_TTL_HOURS),
+    ]
+  );
+  return token;
+}
 
 const router = express.Router();
 const DUMMY_PASSWORD_HASH = '$2b$12$QJv3JQv8ZCk1sQxw2P7/fOMQ7A0J7sKnzGWxZmf0RduCMsZ/HXXdK';
@@ -322,7 +361,23 @@ router.post('/register', registerLimiter, async (req, res, next) => {
       actorType: 'app',
     };
 
+    const verificationToken = await issueUserVerificationToken(client, {
+      organizationId: currentMembership.organization.id,
+      userId: userResult.rows[0].id,
+      purpose: 'signup',
+    });
+
     await client.query('commit');
+
+    sendEmailVerificationMagicLink({
+      to: email,
+      name,
+      token: verificationToken,
+      target: 'panelya',
+      organization: currentMembership.organization,
+    }).catch((error) => {
+      logger.warn({ email, err: error.message }, 'Tenant verification email gonderilemedi');
+    });
     await auditLog(req, {
       action: 'REGISTER',
       resourceType: 'organization',
@@ -701,6 +756,210 @@ router.get('/me', requireAuth, async (req, res, next) => {
     });
   } catch (err) {
     next(err);
+  }
+});
+
+router.post('/verify-email', registerLimiter, async (req, res, next) => {
+  const client = await db.pool.connect();
+  try {
+    const token = String(req.body.token || '').trim();
+    if (!token) return res.status(400).json({ error: 'Dogrulama token zorunlu' });
+    const tokenHash = sha256(token);
+
+    await client.query('begin');
+    const result = await client.query(
+      `select id, subject_id, organization_id, new_email
+         from email_magic_link_tokens
+        where token_hash = $1
+          and subject_type = 'user'
+          and purpose = 'signup'
+          and consumed_at is null
+          and expires_at > now()
+        limit 1
+        for update`,
+      [tokenHash]
+    );
+    const row = result.rows[0];
+    if (!row) {
+      await client.query('rollback');
+      return res.status(400).json({ error: 'Dogrulama linki gecersiz veya suresi doldu' });
+    }
+    await client.query(
+      'update app_users set email_verified_at = now(), updated_at = now() where id = $1',
+      [row.subject_id]
+    );
+    await client.query(
+      'update email_magic_link_tokens set consumed_at = now() where id = $1',
+      [row.id]
+    );
+    await client.query('commit');
+    res.json({ ok: true });
+  } catch (err) {
+    try { await client.query('rollback'); } catch {}
+    next(err);
+  } finally {
+    client.release();
+  }
+});
+
+router.post('/resend-verification', registerLimiter, async (req, res, next) => {
+  const client = await db.pool.connect();
+  try {
+    const email = cleanEmail(req.body.email);
+    if (!email) return res.status(400).json({ error: 'Email zorunlu' });
+
+    const userResult = await client.query(
+      `select u.id, u.email, u.name, u.email_verified_at,
+              m.organization_id,
+              o.name as organization_name,
+              o.slug as organization_slug
+         from app_users u
+         left join memberships m on m.user_id = u.id and m.status = 'active'
+         left join organizations o on o.id = m.organization_id
+        where lower(u.email) = lower($1)
+        order by m.id asc
+        limit 1`,
+      [email]
+    );
+    const user = userResult.rows[0];
+    if (user && !user.email_verified_at && user.organization_id) {
+      await client.query('begin');
+      const token = await issueUserVerificationToken(client, {
+        organizationId: user.organization_id,
+        userId: user.id,
+        purpose: 'signup',
+      });
+      await client.query('commit');
+      sendEmailVerificationMagicLink({
+        to: user.email,
+        name: user.name,
+        token,
+        target: 'panelya',
+        organization: { name: user.organization_name, slug: user.organization_slug },
+      }).catch((error) => {
+        logger.warn({ email, err: error.message }, 'Tenant resend verification gonderilemedi');
+      });
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    try { await client.query('rollback'); } catch {}
+    next(err);
+  } finally {
+    client.release();
+  }
+});
+
+router.post('/email-change/request', requireAuth, requireActorType(['app']), async (req, res, next) => {
+  const client = await db.pool.connect();
+  try {
+    const newEmail = cleanEmail(req.body.new_email);
+    const password = cleanPassword(req.body.password);
+    if (!newEmail || !newEmail.includes('@')) {
+      return res.status(400).json({ error: 'Gecerli email zorunlu' });
+    }
+    if (!password) return res.status(400).json({ error: 'Mevcut parola zorunlu' });
+
+    const userResult = await client.query(
+      'select id, email, name, password_hash from app_users where id = $1 limit 1',
+      [req.auth.userId]
+    );
+    const user = userResult.rows[0];
+    const passwordMatches = await bcrypt.compare(password, user?.password_hash || DUMMY_PASSWORD_HASH);
+    if (!user || !user.password_hash || !passwordMatches) {
+      return res.status(401).json({ error: 'Parola hatali' });
+    }
+    if (newEmail.toLowerCase() === String(user.email).toLowerCase()) {
+      return res.status(400).json({ error: 'Yeni email mevcut email ile ayni' });
+    }
+
+    const conflict = await client.query(
+      'select id from app_users where lower(email) = lower($1) limit 1',
+      [newEmail]
+    );
+    if (conflict.rows[0]) {
+      return res.status(409).json({ error: 'Bu email baska bir hesapta kullaniliyor' });
+    }
+
+    await client.query('begin');
+    const token = await issueUserVerificationToken(client, {
+      organizationId: req.auth.organizationId,
+      userId: user.id,
+      purpose: 'email_change',
+      newEmail,
+    });
+    await client.query('commit');
+
+    sendEmailChangeConfirmation({
+      to: newEmail,
+      name: user.name || '',
+      token,
+      target: 'panelya',
+      organization: { name: req.auth.organizationSlug },
+    }).catch((error) => {
+      logger.warn({ email: newEmail, err: error.message }, 'Tenant email-change mail gonderilemedi');
+    });
+
+    res.json({ ok: true });
+  } catch (err) {
+    try { await client.query('rollback'); } catch {}
+    next(err);
+  } finally {
+    client.release();
+  }
+});
+
+router.post('/email-change/confirm', registerLimiter, async (req, res, next) => {
+  const client = await db.pool.connect();
+  try {
+    const token = String(req.body.token || '').trim();
+    if (!token) return res.status(400).json({ error: 'Dogrulama token zorunlu' });
+    const tokenHash = sha256(token);
+
+    await client.query('begin');
+    const tokenResult = await client.query(
+      `select id, subject_id, new_email
+         from email_magic_link_tokens
+        where token_hash = $1
+          and subject_type = 'user'
+          and purpose = 'email_change'
+          and consumed_at is null
+          and expires_at > now()
+        limit 1
+        for update`,
+      [tokenHash]
+    );
+    const row = tokenResult.rows[0];
+    if (!row || !row.new_email) {
+      await client.query('rollback');
+      return res.status(400).json({ error: 'Dogrulama linki gecersiz veya suresi doldu' });
+    }
+
+    const conflict = await client.query(
+      'select id from app_users where lower(email) = lower($1) and id <> $2 limit 1',
+      [row.new_email, row.subject_id]
+    );
+    if (conflict.rows[0]) {
+      await client.query('rollback');
+      return res.status(409).json({ error: 'Bu email baska bir hesapta kullaniliyor' });
+    }
+
+    await client.query(
+      `update app_users
+          set email = $1, email_verified_at = now(), updated_at = now()
+        where id = $2`,
+      [row.new_email, row.subject_id]
+    );
+    await client.query(
+      'update email_magic_link_tokens set consumed_at = now() where id = $1',
+      [row.id]
+    );
+    await client.query('commit');
+    res.json({ ok: true });
+  } catch (err) {
+    try { await client.query('rollback'); } catch {}
+    next(err);
+  } finally {
+    client.release();
   }
 });
 

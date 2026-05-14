@@ -93,7 +93,7 @@ export default function LoginPage() {
       applySession(session);
       pushToast({
         title: "Mağaza hazır",
-        description: "Yeni mağaza hesabı ile oturum açıldı.",
+        description: `Dogrulama linki ${registerForm.email} adresine gonderildi. Postanizi kontrol edin.`,
         tone: "success",
       });
       router.replace("/dashboard");

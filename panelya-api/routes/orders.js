@@ -13,7 +13,8 @@ const { insertOrderItems } = require('../services/orderItems');
 const { normalizeCheckoutOptions } = require('../services/checkoutPayload');
 const { assertPlanCapacity } = require('../services/planLimits');
 const { fetchOrderCustomer, upsertCustomer } = require('../services/customers');
-const { sendOrderStatusEmail } = require('../services/email');
+const { sendOrderStatusEmail, sendNewOrderSellerNotification } = require('../services/email');
+const { logger } = require('../services/logger');
 
 const router = express.Router();
 const ORDER_STATUSES = ['new', 'payment_pending', 'processing', 'shipped', 'delivered', 'cancelled', 'paid'];
@@ -335,7 +336,39 @@ router.post('/', createOrderLimiter, async (req, res, next) => {
     await reserveStock(client, items, { organizationId: organization.id });
 
     await client.query('commit');
-    res.status(201).json(orderResult.rows[0]);
+
+    const createdOrder = orderResult.rows[0];
+    setImmediate(async () => {
+      try {
+        const sellerResult = await db.query(
+          `select u.email as user_email, o.name as organization_name, o.slug as organization_slug
+             from organizations o
+             left join memberships m on m.organization_id = o.id and m.role = 'owner' and m.status = 'active'
+             left join app_users u on u.id = m.user_id
+            where o.id = $1
+            order by m.created_at asc
+            limit 1`,
+          [organization.id]
+        );
+        const sellerRow = sellerResult.rows[0];
+        const sellerEmail = sellerRow?.user_email || '';
+        if (!sellerEmail) return;
+        await sendNewOrderSellerNotification({
+          order: { ...createdOrder, customer_name: customerResult?.name || customer?.name || '' },
+          organization: {
+            id: organization.id,
+            name: sellerRow.organization_name || organization.name,
+            slug: sellerRow.organization_slug || organization.slug,
+          },
+          sellerEmail,
+          items,
+        });
+      } catch (error) {
+        logger.warn({ orderId: createdOrder?.id, err: error.message }, 'Seller siparis bildirimi gonderilemedi');
+      }
+    });
+
+    res.status(201).json(createdOrder);
   } catch (err) {
     await client.query('rollback');
     next(err);

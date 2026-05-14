@@ -8,6 +8,7 @@ import {
   API_BASE,
   changeOrganizationEmail,
   regeneratePublicAccessToken,
+  requestTenantEmailChange,
   updateOrganizationSettings,
 } from "@/lib/api";
 import { MetricGrid } from "@/components/page-kit";
@@ -373,6 +374,9 @@ export function SettingsSection({
           {!canManageSettings ? <InlineHint>Bu alanları düzenlemek için sahip veya yönetici rolü gerekir.</InlineHint> : null}
         </form>
       </Panel>
+      <Panel title="Hesap E-postasi Degistir" description="Giris e-postasini yenile (onay linki ile)">
+        <UserEmailChangeForm />
+      </Panel>
       <ActivityPanel
         title="Entegrasyon notları"
         items={[
@@ -382,6 +386,77 @@ export function SettingsSection({
         ]}
       />
     </>
+  );
+}
+
+function UserEmailChangeForm() {
+  const pushToast = useToastStore((state) => state.pushToast);
+  const [newEmail, setNewEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const mutation = useMutation({
+    mutationFn: () => requestTenantEmailChange({ new_email: newEmail, password }),
+    onSuccess: () => {
+      pushToast({
+        title: "Onay linki gonderildi",
+        description: `${newEmail} adresine dogrulama linki gonderildi.`,
+        tone: "success",
+      });
+      setNewEmail("");
+      setPassword("");
+    },
+    onError: (err: unknown) => {
+      pushToast({
+        title: "E-posta degisikligi basarisiz",
+        description: err instanceof Error ? err.message : "Talep gonderilemedi.",
+        tone: "error",
+      });
+    },
+  });
+
+  function onSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!newEmail || !password) return;
+    mutation.mutate();
+  }
+
+  return (
+    <form className="space-y-4" onSubmit={onSubmit}>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid gap-2">
+          <FieldLabel htmlFor="userNewEmail">Yeni e-posta</FieldLabel>
+          <input
+            className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
+            id="userNewEmail"
+            name="userNewEmail"
+            onChange={(event) => setNewEmail(event.target.value)}
+            placeholder="yeni@ornek.com"
+            required
+            type="email"
+            value={newEmail}
+          />
+        </div>
+        <div className="grid gap-2">
+          <FieldLabel htmlFor="userCurrentPassword">Mevcut parola</FieldLabel>
+          <input
+            className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
+            id="userCurrentPassword"
+            name="userCurrentPassword"
+            onChange={(event) => setPassword(event.target.value)}
+            placeholder="************"
+            required
+            type="password"
+            value={password}
+          />
+        </div>
+      </div>
+      {mutation.isError ? <InlineError message={(mutation.error as Error).message} /> : null}
+      <div className="flex flex-wrap gap-2">
+        <Button disabled={mutation.isPending} type="submit" variant="mint">
+          {mutation.isPending ? "Gonderiliyor" : "Onay linki gonder"}
+        </Button>
+      </div>
+      <InlineHint>Yeni adrese onay linki gonderilir. Link 24 saat gecerlidir.</InlineHint>
+    </form>
   );
 }
 
