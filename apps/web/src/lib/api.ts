@@ -555,7 +555,7 @@ export async function resendTenantVerification(email: string) {
 }
 
 export async function requestTenantEmailChange(payload: { new_email: string; password: string }) {
-  return authenticatedRequest<{ ok: boolean; user: SessionUser }>("/auth/email-change/request", {
+  return authenticatedRequest<{ ok: boolean; user?: SessionUser }>("/auth/email-change/request", {
     method: "POST",
     body: JSON.stringify(payload),
   });

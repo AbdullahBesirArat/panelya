@@ -377,7 +377,7 @@ export function SettingsSection({
           {!canManageSettings ? <InlineHint>Bu alanları düzenlemek için sahip veya yönetici rolü gerekir.</InlineHint> : null}
         </form>
       </Panel>
-      <Panel title="Hesap E-postasi Degistir" description="Giris e-postasini yenile (onay linki ile)">
+      <Panel title="Hesap E-postasi Degistir" description="Giris e-postasini hemen yenile">
         <UserEmailChangeForm />
       </Panel>
       <Panel title="Sifre Degistir" description="Mevcut e-posta ve sifre ile yeni sifre belirle">
@@ -492,10 +492,11 @@ function UserEmailChangeForm() {
   const mutation = useMutation({
     mutationFn: () => requestTenantEmailChange({ new_email: newEmail, password }),
     onSuccess: (response) => {
-      updateUserEmail(response.user.email);
+      const updatedEmail = response.user?.email || newEmail;
+      updateUserEmail(updatedEmail);
       pushToast({
         title: "E-posta guncellendi",
-        description: `Giris e-postasi ${response.user.email} olarak degistirildi.`,
+        description: `Giris e-postasi ${updatedEmail} olarak degistirildi.`,
         tone: "success",
       });
       setNewEmail("");
