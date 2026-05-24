@@ -763,18 +763,6 @@ export async function deleteProduct(id: string) {
   });
 }
 
-export async function setCategoryFeaturedProducts(categoryId: string, productIds: string[]) {
-  return authenticatedRequest<{
-    ok: boolean;
-    category_id: number;
-    featured_ids: number[];
-    products: Array<{ id: string; name: string; featured_in_category: boolean }>;
-  }>(`/products/category/${categoryId}/featured`, {
-    method: "PUT",
-    body: JSON.stringify({ product_ids: productIds }),
-  });
-}
-
 export async function uploadProductImages(files: File[]) {
   const formData = new FormData();
   files.forEach((file) => formData.append("images", file));

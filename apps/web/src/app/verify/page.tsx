@@ -1,25 +1,21 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import Link from "next/link";
+import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { confirmTenantEmailChange, verifyTenantEmail } from "@/lib/api";
 
 type Status = "pending" | "ok" | "error";
 
-export default function VerifyPage() {
+function VerifyContent() {
   const params = useSearchParams();
+  const token = (params?.get("token") || "").trim();
+  const purpose = (params?.get("purpose") || "").trim();
   const [status, setStatus] = useState<Status>("pending");
   const [message, setMessage] = useState("Dogrulama yapiliyor...");
 
   useEffect(() => {
-    const token = (params?.get("token") || "").trim();
-    const purpose = (params?.get("purpose") || "").trim();
-
-    if (!token) {
-      setStatus("error");
-      setMessage("Dogrulama linki eksik veya hatali.");
-      return;
-    }
+    if (!token) return;
 
     const run = async () => {
       try {
@@ -38,12 +34,15 @@ export default function VerifyPage() {
       }
     };
     run();
-  }, [params]);
+  }, [purpose, token]);
+
+  const effectiveStatus = token ? status : "error";
+  const effectiveMessage = token ? message : "Dogrulama linki eksik veya hatali.";
 
   const tone =
-    status === "ok"
+    effectiveStatus === "ok"
       ? "border-mint/30 bg-mint/10 text-mint"
-      : status === "error"
+      : effectiveStatus === "error"
         ? "border-coral/30 bg-coral/10 text-coral"
         : "border-line bg-white text-zinc-600";
 
@@ -52,11 +51,19 @@ export default function VerifyPage() {
       <div className="w-full max-w-md rounded-xl border border-line bg-white p-8 shadow-sm">
         <p className="text-sm font-semibold uppercase text-mint">Panelya</p>
         <h1 className="mt-3 text-2xl font-bold">E-posta dogrulama</h1>
-        <p className={`mt-6 rounded-lg border px-4 py-3 text-sm font-semibold ${tone}`}>{message}</p>
-        <a className="focus-ring mt-6 inline-flex h-11 items-center rounded-lg bg-ink px-5 text-sm font-semibold text-white" href="/login">
+        <p className={`mt-6 rounded-lg border px-4 py-3 text-sm font-semibold ${tone}`}>{effectiveMessage}</p>
+        <Link className="focus-ring mt-6 inline-flex h-11 items-center rounded-lg bg-ink px-5 text-sm font-semibold text-white" href="/login">
           Giris sayfasina don
-        </a>
+        </Link>
       </div>
     </main>
+  );
+}
+
+export default function VerifyPage() {
+  return (
+    <Suspense fallback={null}>
+      <VerifyContent />
+    </Suspense>
   );
 }
