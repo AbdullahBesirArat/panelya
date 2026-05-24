@@ -464,10 +464,9 @@ function PasswordChangeForm({ userEmail }: { userEmail: string }) {
           <input
             className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
             id="passwordNew"
-            minLength={12}
             name="passwordNew"
             onChange={(event) => setNewPassword(event.target.value)}
-            placeholder="En az 12 karakter"
+            placeholder="Yeni sifre"
             required
             type="password"
             value={newPassword}

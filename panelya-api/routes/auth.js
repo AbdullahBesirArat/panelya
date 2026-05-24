@@ -918,8 +918,9 @@ router.post('/password/change', requireAuth, requireActorType(['app']), async (r
     }
     if (!currentPassword) return res.status(400).json({ error: 'Mevcut sifre zorunlu' });
 
-    const passwordError = validateAppCredentials({ email, password: newPassword });
-    if (passwordError) return res.status(400).json({ error: passwordError });
+    if (!newPassword || newPassword.length > 200) {
+      return res.status(400).json({ error: 'Yeni sifre zorunlu' });
+    }
 
     const userResult = await db.query(
       'select id, email, name, password_hash from app_users where id = $1 limit 1',
