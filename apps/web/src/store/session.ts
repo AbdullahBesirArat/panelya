@@ -50,6 +50,7 @@ type SessionState = {
   applySession: (payload: SessionPayload) => void;
   applyAdminSession: (payload: AdminSessionPayload) => void;
   syncProfile: (payload: Omit<SessionPayload, "refreshToken">) => void;
+  updateUserEmail: (email: string) => void;
   clearSession: () => void;
   setHydrated: (hydrated: boolean) => void;
 };
@@ -91,6 +92,9 @@ export const useSessionStore = create<SessionState>()(
         admin: null,
         organizations: payload.organizations,
         organizationSlug: payload.currentOrganization.slug,
+      })),
+      updateUserEmail: (email) => set((state) => ({
+        user: state.user ? { ...state.user, email } : state.user,
       })),
       clearSession: () => set({
         actorType: null,

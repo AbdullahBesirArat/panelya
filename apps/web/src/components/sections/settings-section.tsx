@@ -486,14 +486,16 @@ function PasswordChangeForm({ userEmail }: { userEmail: string }) {
 
 function UserEmailChangeForm() {
   const pushToast = useToastStore((state) => state.pushToast);
+  const updateUserEmail = useSessionStore((state) => state.updateUserEmail);
   const [newEmail, setNewEmail] = useState("");
   const [password, setPassword] = useState("");
   const mutation = useMutation({
     mutationFn: () => requestTenantEmailChange({ new_email: newEmail, password }),
-    onSuccess: () => {
+    onSuccess: (response) => {
+      updateUserEmail(response.user.email);
       pushToast({
-        title: "Onay linki gonderildi",
-        description: `${newEmail} adresine dogrulama linki gonderildi.`,
+        title: "E-posta guncellendi",
+        description: `Giris e-postasi ${response.user.email} olarak degistirildi.`,
         tone: "success",
       });
       setNewEmail("");
@@ -547,10 +549,10 @@ function UserEmailChangeForm() {
       {mutation.isError ? <InlineError message={(mutation.error as Error).message} /> : null}
       <div className="flex flex-wrap gap-2">
         <Button disabled={mutation.isPending} type="submit" variant="mint">
-          {mutation.isPending ? "Gonderiliyor" : "Onay linki gonder"}
+          {mutation.isPending ? "Guncelleniyor" : "E-postayi Guncelle"}
         </Button>
       </div>
-      <InlineHint>Yeni adrese onay linki gonderilir. Link 24 saat gecerlidir.</InlineHint>
+      <InlineHint>Onay e-postasi gonderilmez; mevcut parola dogruysa e-posta hemen degisir.</InlineHint>
     </form>
   );
 }

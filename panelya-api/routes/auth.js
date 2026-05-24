@@ -881,25 +881,25 @@ router.post('/email-change/request', requireAuth, requireActorType(['app']), asy
     }
 
     await client.query('begin');
-    const token = await issueUserVerificationToken(client, {
-      organizationId: req.auth.organizationId,
-      userId: user.id,
-      purpose: 'email_change',
-      newEmail,
+    const updated = await client.query(
+      `update app_users
+          set email = $1,
+              email_verified_at = now(),
+              updated_at = now()
+        where id = $2
+        returning id, email, name`,
+      [newEmail, user.id]
+    );
+    await auditLog(req, {
+      action: 'CHANGE_EMAIL',
+      resourceType: 'app_user',
+      resourceId: user.id,
+      oldValue: { email: user.email },
+      newValue: { email: newEmail },
     });
     await client.query('commit');
 
-    sendEmailChangeConfirmation({
-      to: newEmail,
-      name: user.name || '',
-      token,
-      target: 'panelya',
-      organization: { name: req.auth.organizationSlug },
-    }).catch((error) => {
-      logger.warn({ email: newEmail, err: error.message }, 'Tenant email-change mail gonderilemedi');
-    });
-
-    res.json({ ok: true });
+    res.json({ ok: true, user: updated.rows[0] });
   } catch (err) {
     try { await client.query('rollback'); } catch {}
     next(err);
