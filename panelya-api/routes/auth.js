@@ -86,8 +86,8 @@ function validateAppCredentials({ email, password }) {
   if (!email || !email.includes('@')) {
     return 'Gecerli bir email girin';
   }
-  if (!password || password.length < 12 || password.length > 200) {
-    return 'Sifre en az 12 karakter olmali';
+  if (!password || password.length > 200) {
+    return 'Sifre zorunlu';
   }
   return null;
 }

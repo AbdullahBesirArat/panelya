@@ -200,7 +200,7 @@ export default function LoginPage() {
                 <input
                   className="focus-ring mt-2 h-12 w-full rounded-lg border border-line bg-white px-4"
                   onChange={(event) => setRegisterForm((state) => ({ ...state, password: event.target.value }))}
-                  placeholder="En az 12 karakter"
+                  placeholder="Sifre"
                   type="password"
                   value={registerForm.password}
                 />
