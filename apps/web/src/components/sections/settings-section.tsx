@@ -6,6 +6,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import {
   API_BASE,
+  changeTenantPassword,
   changeOrganizationEmail,
   regeneratePublicAccessToken,
   requestTenantEmailChange,
@@ -379,6 +380,9 @@ export function SettingsSection({
       <Panel title="Hesap E-postasi Degistir" description="Giris e-postasini yenile (onay linki ile)">
         <UserEmailChangeForm />
       </Panel>
+      <Panel title="Sifre Degistir" description="Mevcut e-posta ve sifre ile yeni sifre belirle">
+        <PasswordChangeForm userEmail={user?.email || ""} />
+      </Panel>
       <ActivityPanel
         title="Entegrasyon notları"
         items={[
@@ -388,6 +392,96 @@ export function SettingsSection({
         ]}
       />
     </>
+  );
+}
+
+function PasswordChangeForm({ userEmail }: { userEmail: string }) {
+  const pushToast = useToastStore((state) => state.pushToast);
+  const [email, setEmail] = useState(userEmail);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const mutation = useMutation({
+    mutationFn: () => changeTenantPassword({
+      email,
+      current_password: currentPassword,
+      new_password: newPassword,
+    }),
+    onSuccess: () => {
+      pushToast({
+        title: "Sifre guncellendi",
+        description: "Yeni sifreniz bir sonraki giriste kullanilabilir.",
+        tone: "success",
+      });
+      setCurrentPassword("");
+      setNewPassword("");
+    },
+    onError: (err: unknown) => {
+      pushToast({
+        title: "Sifre degisikligi basarisiz",
+        description: err instanceof Error ? err.message : "Sifre guncellenemedi.",
+        tone: "error",
+      });
+    },
+  });
+
+  function onSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!email || !currentPassword || !newPassword) return;
+    mutation.mutate();
+  }
+
+  return (
+    <form className="space-y-4" onSubmit={onSubmit}>
+      <div className="grid gap-3 sm:grid-cols-3">
+        <div className="grid gap-2">
+          <FieldLabel htmlFor="passwordEmail">Mevcut e-posta</FieldLabel>
+          <input
+            className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
+            id="passwordEmail"
+            name="passwordEmail"
+            onChange={(event) => setEmail(event.target.value)}
+            placeholder="ornek@mail.com"
+            required
+            type="email"
+            value={email}
+          />
+        </div>
+        <div className="grid gap-2">
+          <FieldLabel htmlFor="passwordCurrent">Mevcut sifre</FieldLabel>
+          <input
+            className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
+            id="passwordCurrent"
+            name="passwordCurrent"
+            onChange={(event) => setCurrentPassword(event.target.value)}
+            placeholder="************"
+            required
+            type="password"
+            value={currentPassword}
+          />
+        </div>
+        <div className="grid gap-2">
+          <FieldLabel htmlFor="passwordNew">Yeni sifre</FieldLabel>
+          <input
+            className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
+            id="passwordNew"
+            minLength={12}
+            name="passwordNew"
+            onChange={(event) => setNewPassword(event.target.value)}
+            placeholder="En az 12 karakter"
+            required
+            type="password"
+            value={newPassword}
+          />
+        </div>
+      </div>
+      {mutation.isError ? <InlineError message={(mutation.error as Error).message} /> : null}
+      <div className="flex flex-wrap gap-2">
+        <Button disabled={mutation.isPending} type="submit" variant="mint">
+          {mutation.isPending ? "Guncelleniyor" : "Sifreyi Guncelle"}
+        </Button>
+      </div>
+      <InlineHint>Onay e-postasi gonderilmez; mevcut bilgiler dogruysa sifre hemen degisir.</InlineHint>
+    </form>
   );
 }
 

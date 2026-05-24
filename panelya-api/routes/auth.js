@@ -908,6 +908,56 @@ router.post('/email-change/request', requireAuth, requireActorType(['app']), asy
   }
 });
 
+router.post('/password/change', requireAuth, requireActorType(['app']), async (req, res, next) => {
+  try {
+    const email = cleanEmail(req.body.email);
+    const currentPassword = cleanPassword(req.body.current_password || req.body.currentPassword);
+    const newPassword = cleanPassword(req.body.new_password || req.body.newPassword);
+    if (!email || !email.includes('@')) {
+      return res.status(400).json({ error: 'Gecerli email zorunlu' });
+    }
+    if (!currentPassword) return res.status(400).json({ error: 'Mevcut sifre zorunlu' });
+
+    const passwordError = validateAppCredentials({ email, password: newPassword });
+    if (passwordError) return res.status(400).json({ error: passwordError });
+
+    const userResult = await db.query(
+      'select id, email, name, password_hash from app_users where id = $1 limit 1',
+      [req.auth.userId]
+    );
+    const user = userResult.rows[0];
+    if (!user || cleanEmail(user.email) !== email) {
+      await bcrypt.compare(currentPassword, DUMMY_PASSWORD_HASH);
+      return res.status(400).json({ error: 'E-posta veya sifre hatali' });
+    }
+
+    const passwordMatches = await bcrypt.compare(currentPassword, user.password_hash || DUMMY_PASSWORD_HASH);
+    if (!user.password_hash || !passwordMatches) {
+      return res.status(401).json({ error: 'E-posta veya sifre hatali' });
+    }
+
+    if (await bcrypt.compare(newPassword, user.password_hash)) {
+      return res.status(400).json({ error: 'Yeni sifre mevcut sifre ile ayni olamaz' });
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, 12);
+    await db.query(
+      'update app_users set password_hash = $1, updated_at = now() where id = $2',
+      [passwordHash, user.id]
+    );
+
+    await auditLog(req, {
+      action: 'CHANGE_PASSWORD',
+      resourceType: 'app_user',
+      resourceId: user.id,
+      newValue: { email: user.email },
+    });
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.post('/email-change/confirm', registerLimiter, async (req, res, next) => {
   const client = await db.pool.connect();
   try {

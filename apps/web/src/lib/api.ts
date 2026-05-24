@@ -561,6 +561,17 @@ export async function requestTenantEmailChange(payload: { new_email: string; pas
   });
 }
 
+export async function changeTenantPassword(payload: {
+  email: string;
+  current_password: string;
+  new_password: string;
+}) {
+  return authenticatedRequest<{ ok: boolean }>("/auth/password/change", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function confirmTenantEmailChange(token: string) {
   return publicRequest<{ ok: boolean }>("/auth/email-change/confirm", {
     method: "POST",
