@@ -850,7 +850,17 @@ router.patch('/current/email', requireAuth, requireRole(['owner', 'admin', 'supe
 
     const storeSettings = stored.store_settings || {};
     const storedEmail = cleanEmail(storeSettings.contactEmail || '');
-    if (storedEmail !== currentEmail) {
+    let actorEmail = cleanEmail(req.auth.email || '');
+    if (req.auth.actorType === 'app' && req.auth.userId) {
+      const actorResult = await db.query(
+        'select email from app_users where id = $1 limit 1',
+        [req.auth.userId]
+      );
+      actorEmail = cleanEmail(actorResult.rows[0]?.email || actorEmail);
+    }
+
+    const acceptedCurrentEmails = [storedEmail, actorEmail].filter(Boolean);
+    if (!acceptedCurrentEmails.includes(currentEmail)) {
       return res.status(400).json({ error: 'Mevcut e-posta eslesmiyor' });
     }
 

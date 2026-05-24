@@ -100,6 +100,7 @@ export function SettingsSection({
   const summary = summaryQuery.data;
   const storeSettings = summary.organization.store_settings || {};
   const currentOrganization = organizations.find((organization) => organization.slug === organizationSlug);
+  const currentEmailHint = storeSettings.contactEmail || user?.email || "";
   const publicAccessToken = latestPublicToken || currentOrganization?.publicAccessToken || "-";
   const storefrontSnippet = [
     `window.SUVERA_API_BASE = "${API_BASE}";`,
@@ -334,10 +335,11 @@ export function SettingsSection({
               <FieldLabel htmlFor="currentEmail">Mevcut e-posta</FieldLabel>
               <input
                 className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
+                defaultValue={currentEmailHint}
                 disabled={!canManageSettings || emailMutation.isPending}
                 id="currentEmail"
                 name="currentEmail"
-                placeholder={storeSettings.contactEmail || "Mevcut e-posta"}
+                placeholder={currentEmailHint || "Mevcut e-posta"}
                 type="email"
                 required
               />
