@@ -86,11 +86,13 @@ export function AppShell({
   }, [isError, hydrated, clearSession, router]);
 
   useEffect(() => {
-    if (data?.actorType === "app" && activeSection === "superadmin") {
+    // Impersonation sirasinda app aktoru gecici olarak superadmin route'unda olabilir
+    // (token degisti, navigasyon henuz tamamlanmadi). Bu durumda oturumu KAPATMA.
+    if (data?.actorType === "app" && activeSection === "superadmin" && !impersonation) {
       clearSession();
       router.replace("/login");
     }
-  }, [data, activeSection, clearSession, router]);
+  }, [data, activeSection, clearSession, router, impersonation]);
 
   async function handleOrganizationChange(nextSlug: string) {
     if (!nextSlug || nextSlug === activeOrganizationSlug) return;
