@@ -10,6 +10,7 @@ import { useSessionStore } from "@/store/session";
 import { useToastStore } from "@/store/toast";
 
 type Mode = "login" | "register";
+type LoginRole = "store" | "admin";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -20,6 +21,7 @@ export default function LoginPage() {
   const applyAdminSession = useSessionStore((state) => state.applyAdminSession);
   const pushToast = useToastStore((state) => state.pushToast);
   const [mode, setMode] = useState<Mode>("login");
+  const [loginRole, setLoginRole] = useState<LoginRole>("store");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [loginForm, setLoginForm] = useState({
@@ -47,22 +49,29 @@ export default function LoginPage() {
     setError("");
 
     try {
-      if (!loginForm.organizationSlug.trim()) {
+      if (loginRole === "admin") {
+        // Platform Yöneticisi (super_admin) — admins tablosu, ayri admin endpoint.
+        // Magaza kisa adi ZORUNLU DEGIL.
         const adminSession = await loginAdminSession({
-          username: loginForm.email,
+          username: loginForm.email.trim(),
           password: loginForm.password,
         });
         applyAdminSession(adminSession);
         pushToast({
-          title: "Superadmin oturumu acildi",
-          description: "Platform paneli hazir.",
+          title: "Platform yöneticisi oturumu açıldı",
+          description: "Platform Yönetimi paneli hazır.",
           tone: "success",
         });
         router.replace("/superadmin");
         return;
       }
 
-      const session = await loginSession(loginForm);
+      // Magaza Yoneticisi (organization owner/admin/member) — mevcut akis.
+      const session = await loginSession({
+        email: loginForm.email,
+        password: loginForm.password,
+        organizationSlug: loginForm.organizationSlug.trim() || undefined,
+      });
       applySession(session);
       pushToast({
         title: "Oturum açıldı",
@@ -139,12 +148,34 @@ export default function LoginPage() {
 
           {mode === "login" ? (
             <form className="mt-6 space-y-4" onSubmit={handleLogin}>
+              <div className="grid grid-cols-2 gap-2 rounded-lg border border-line bg-white p-1">
+                <button
+                  className={`focus-ring rounded-md px-3 py-2 text-sm font-semibold ${loginRole === "store" ? "bg-ink text-white" : "text-zinc-600"}`}
+                  onClick={() => { setLoginRole("store"); setError(""); }}
+                  type="button"
+                >
+                  Mağaza Yöneticisi
+                </button>
+                <button
+                  className={`focus-ring rounded-md px-3 py-2 text-sm font-semibold ${loginRole === "admin" ? "bg-ink text-white" : "text-zinc-600"}`}
+                  onClick={() => { setLoginRole("admin"); setError(""); }}
+                  type="button"
+                >
+                  Platform Yöneticisi
+                </button>
+              </div>
+              <p className="text-xs text-zinc-500">
+                {loginRole === "admin"
+                  ? "Sistem sahibi (super_admin) girişi — mağaza kısa adı gerekmez."
+                  : "Mağaza ekibi girişi. Birden fazla mağazanız varsa kısa ad ile seçebilirsiniz."}
+              </p>
               <label className="block">
                 <span className="text-sm font-semibold text-zinc-700">E-posta</span>
                 <input
+                  autoComplete="username"
                   className="focus-ring mt-2 h-12 w-full rounded-lg border border-line bg-white px-4"
                   onChange={(event) => setLoginForm((state) => ({ ...state, email: event.target.value }))}
-                  placeholder="sahip@panelya.com"
+                  placeholder={loginRole === "admin" ? "yonetici@ornek.com" : "magaza-sahibi@ornek.com"}
                   type="email"
                   value={loginForm.email}
                 />
@@ -152,6 +183,7 @@ export default function LoginPage() {
               <label className="block">
                 <span className="text-sm font-semibold text-zinc-700">Şifre</span>
                 <input
+                  autoComplete="current-password"
                   className="focus-ring mt-2 h-12 w-full rounded-lg border border-line bg-white px-4"
                   onChange={(event) => setLoginForm((state) => ({ ...state, password: event.target.value }))}
                   placeholder="************"
@@ -159,18 +191,20 @@ export default function LoginPage() {
                   value={loginForm.password}
                 />
               </label>
-              <label className="block">
-                <span className="text-sm font-semibold text-zinc-700">Mağaza kısa adı</span>
-                <input
-                  className="focus-ring mt-2 h-12 w-full rounded-lg border border-line bg-white px-4"
-                  onChange={(event) => setLoginForm((state) => ({ ...state, organizationSlug: event.target.value }))}
-                  placeholder="panelya"
-                  type="text"
-                  value={loginForm.organizationSlug}
-                />
-              </label>
+              {loginRole === "store" ? (
+                <label className="block">
+                  <span className="text-sm font-semibold text-zinc-700">Mağaza kısa adı <span className="font-normal text-zinc-400">(opsiyonel)</span></span>
+                  <input
+                    className="focus-ring mt-2 h-12 w-full rounded-lg border border-line bg-white px-4"
+                    onChange={(event) => setLoginForm((state) => ({ ...state, organizationSlug: event.target.value }))}
+                    placeholder="panelya"
+                    type="text"
+                    value={loginForm.organizationSlug}
+                  />
+                </label>
+              ) : null}
               <button className="focus-ring h-12 w-full rounded-lg bg-mint px-5 font-semibold text-white disabled:opacity-70" disabled={loading} type="submit">
-                {loading ? "Oturum açılıyor" : "Giriş yap"}
+                {loading ? "Oturum açılıyor" : loginRole === "admin" ? "Platform yöneticisi girişi" : "Giriş yap"}
               </button>
             </form>
           ) : (
