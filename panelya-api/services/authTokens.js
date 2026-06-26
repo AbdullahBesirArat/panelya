@@ -50,6 +50,33 @@ function createAppAccessToken({ user, membership }) {
   }, APP_AUDIENCE);
 }
 
+// Super_admin'in bir magazanin paneline gecisi icin kisa omurlu app-audience token.
+// organizationSlug JWT'ye gomulu oldugundan resolveOrganization yalnizca hedef org'u
+// cozer; tenant izolasyonu korunur. `impersonated` flag'i ve impersonator kimligi
+// audit/UI uyarisi icin claim'lerde tasinir.
+function createImpersonationToken({ adminId, ownerUserId = null, organization, role = 'owner', expiresIn }) {
+  const tokenType = 'app';
+  return jwt.sign(
+    {
+      sub: ownerUserId || `superadmin:${adminId}`,
+      userId: ownerUserId || null,
+      role,
+      organizationId: organization.id,
+      organizationSlug: organization.slug,
+      actorType: 'app',
+      impersonated: true,
+      impersonatorAdminId: String(adminId),
+    },
+    ensureJwtSecret(tokenType),
+    {
+      expiresIn: expiresIn || process.env.IMPERSONATION_TOKEN_EXPIRES_IN || '15m',
+      algorithm: 'HS256',
+      issuer: 'panelya-api',
+      audience: APP_AUDIENCE,
+    }
+  );
+}
+
 async function issueRefreshToken(client, { userId, req }) {
   const rawToken = randomToken(48);
   const expiresAt = new Date(Date.now() + refreshTokenExpiresDays() * 24 * 60 * 60 * 1000);
@@ -129,6 +156,7 @@ module.exports = {
   buildSessionPayload,
   createAdminAccessToken,
   createAppAccessToken,
+  createImpersonationToken,
   getRefreshSession,
   issueRefreshToken,
   markRefreshTokenUsed,

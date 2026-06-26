@@ -95,9 +95,20 @@ function requireRole(allowedRoles) {
   };
 }
 
+// Platform Yonetimi (super_admin) uclari icin tek noktadan yetki kontrolu.
+// Mevcut requireActorType(['admin']) + requireRole(['super_admin']) davranisini
+// degistirmeden tek middleware'e sarar. Impersonation token'lari (actorType 'app')
+// platform uclarina erisemez; yalnizca gercek admin-audience super_admin gecer.
+const requireSuperAdmin = [
+  requireAuth,
+  requireActorType(['admin']),
+  requireRole(['super_admin']),
+];
+
 module.exports = {
   attachAuthIfPresent,
   requireActorType,
   requireAuth,
   requireRole,
+  requireSuperAdmin,
 };

@@ -37,6 +37,7 @@ const wishlistRoutes = require('./routes/wishlist');
 const paymentRoutes = require('./routes/payment');
 const auditRoutes = require('./routes/audit');
 const organizationRoutes = require('./routes/organizations');
+const platformRoutes = require('./routes/platform');
 
 const app = express();
 const port = Number(process.env.PORT || 3000);
@@ -222,6 +223,7 @@ app.use('/api/wishlist', wishlistRoutes);
 app.use('/api/payment', paymentRoutes);
 app.use('/api/audit', auditRoutes);
 app.use('/api/organizations', organizationRoutes);
+app.use('/api/platform', platformRoutes);
 
 app.use((req, res) => {
   res.status(404).json({ error: 'Endpoint bulunamadi', requestId: req.id });
