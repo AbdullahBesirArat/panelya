@@ -1,0 +1,5 @@
+# SQL migration dosyalari tum OS'lerde LF olmali.
+# Migration runner dosya icerigini sha256 ile checksum'lar; CRLF/LF farki
+# (ozellikle Windows core.autocrlf=true) yanlis "drift" uyarisina yol acar.
+# Repo blob'lari zaten LF; bu kural working-tree'yi de LF'e sabitler.
+*.sql text eol=lf
