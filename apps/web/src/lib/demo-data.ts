@@ -1,5 +1,5 @@
 export const navigationItems = [
-  { key: "superadmin", label: "Superadmin" },
+  { key: "superadmin", label: "Platform Yönetimi" },
   { key: "dashboard", label: "Genel Bakış" },
   { key: "products", label: "Ürünler" },
   { key: "orders", label: "Siparişler" },

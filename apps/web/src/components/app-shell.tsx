@@ -27,6 +27,8 @@ export function AppShell({
   const organizationSlug = useSessionStore((state) => state.organizationSlug);
   const syncProfile = useSessionStore((state) => state.syncProfile);
   const clearSession = useSessionStore((state) => state.clearSession);
+  const impersonation = useSessionStore((state) => state.impersonation);
+  const stopImpersonation = useSessionStore((state) => state.stopImpersonation);
   const pushToast = useToastStore((state) => state.pushToast);
   const [switching, setSwitching] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
@@ -84,11 +86,13 @@ export function AppShell({
   }, [isError, hydrated, clearSession, router]);
 
   useEffect(() => {
-    if (data?.actorType === "app" && activeSection === "superadmin") {
+    // Impersonation sirasinda app aktoru gecici olarak superadmin route'unda olabilir
+    // (token degisti, navigasyon henuz tamamlanmadi). Bu durumda oturumu KAPATMA.
+    if (data?.actorType === "app" && activeSection === "superadmin" && !impersonation) {
       clearSession();
       router.replace("/login");
     }
-  }, [data, activeSection, clearSession, router]);
+  }, [data, activeSection, clearSession, router, impersonation]);
 
   async function handleOrganizationChange(nextSlug: string) {
     if (!nextSlug || nextSlug === activeOrganizationSlug) return;
@@ -112,6 +116,17 @@ export function AppShell({
     } finally {
       setSwitching(false);
     }
+  }
+
+  function handleReturnFromImpersonation() {
+    const { restored } = stopImpersonation();
+    queryClient.clear();
+    pushToast({
+      title: "Platform yönetimine dönüldü",
+      description: restored ? "Süper yönetici oturumunuz geri yüklendi." : "Oturum kapatıldı.",
+      tone: "info",
+    });
+    router.replace(restored ? "/superadmin" : "/login");
   }
 
   async function handleLogout() {
@@ -246,6 +261,20 @@ export function AppShell({
       </aside>
 
       <div className="lg:pl-64">
+        {impersonation ? (
+          <div className="sticky top-0 z-20 flex flex-col gap-2 border-b border-sun/40 bg-sun/15 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+            <p className="text-sm font-semibold text-zinc-800">
+              ⚠ Platform yöneticisi olarak görüntülüyorsunuz — {displayBrandName(impersonation.organizationName)}
+            </p>
+            <button
+              className="focus-ring inline-flex h-9 items-center justify-center rounded-lg border border-zinc-800/30 bg-white px-4 text-sm font-semibold"
+              onClick={() => handleReturnFromImpersonation()}
+              type="button"
+            >
+              Platform yönetimine dön
+            </button>
+          </div>
+        ) : null}
         <header className="sticky top-0 z-10 border-b border-line bg-white/95 px-4 py-4 backdrop-blur sm:px-6">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
@@ -254,25 +283,27 @@ export function AppShell({
               <p className="text-sm text-zinc-500">{displayBrandName(displayUser.name) || displayUser.email}</p>
             </div>
             <div className="flex flex-col gap-2 sm:flex-row">
-              <select
-                className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
-                disabled={switching}
-                onChange={(event) => void handleOrganizationChange(event.target.value)}
-                value={activeOrganizationSlug}
-              >
-                {displayOrganizations.map((organization) => (
-                  <option key={organization.slug} value={organization.slug}>
-                    {displayBrandName(organization.name)} ({roleLabel(organization.role)})
-                  </option>
-                ))}
-              </select>
+              {impersonation ? null : (
+                <select
+                  className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
+                  disabled={switching}
+                  onChange={(event) => void handleOrganizationChange(event.target.value)}
+                  value={activeOrganizationSlug}
+                >
+                  {displayOrganizations.map((organization) => (
+                    <option key={organization.slug} value={organization.slug}>
+                      {displayBrandName(organization.name)} ({roleLabel(organization.role)})
+                    </option>
+                  ))}
+                </select>
+              )}
               <button
                 className="focus-ring inline-flex h-10 items-center justify-center rounded-lg border border-line bg-white px-4 text-sm font-semibold"
                 disabled={loggingOut}
-                onClick={() => void handleLogout()}
+                onClick={() => impersonation ? handleReturnFromImpersonation() : void handleLogout()}
                 type="button"
               >
-                {loggingOut ? "Çıkış yapılıyor" : "Çıkış"}
+                {impersonation ? "Çıkış" : loggingOut ? "Çıkış yapılıyor" : "Çıkış"}
               </button>
             </div>
           </div>
