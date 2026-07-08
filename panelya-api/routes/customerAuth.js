@@ -11,6 +11,12 @@ const {
 } = require('../services/email');
 const brevoContacts = require('../services/brevoContacts');
 const { logger } = require('../services/logger');
+const { auditLog } = require('../services/audit');
+const {
+  requestEmailChange,
+  confirmEmailChange,
+  resetCustomerPassword,
+} = require('../services/customerAuthFlows');
 
 const EMAIL_VERIFICATION_TTL_HOURS = Math.max(1, Number(process.env.EMAIL_VERIFICATION_TTL_HOURS || 24));
 
@@ -412,39 +418,36 @@ router.post('/email-change/request', authLimiter, async (req, res, next) => {
     if (!accountRow.rows[0] || !valid) {
       return res.status(401).json({ error: 'Parola hatali' });
     }
-    if (newEmail === account.email) {
-      return res.status(400).json({ error: 'Yeni email mevcut email ile ayni' });
-    }
-
-    const conflict = await client.query(
-      `select id from customer_accounts
-        where organization_id = $1 and email = $2
-        limit 1`,
-      [organization.id, newEmail]
-    );
-    if (conflict.rows[0]) {
-      return res.status(409).json({ error: 'Bu email baska bir hesapta kullaniliyor' });
-    }
 
     await client.query('begin');
-    const token = await issueEmailVerificationToken(client, {
+    const result = await requestEmailChange(client, {
       organizationId: organization.id,
-      subjectType: 'customer',
-      subjectId: account.id,
-      purpose: 'email_change',
-      newEmail,
+      account,
+      newEmailRaw: newEmail,
+      issueToken: (txClient, { organizationId, subjectId, newEmail: pendingEmail }) =>
+        issueEmailVerificationToken(txClient, {
+          organizationId,
+          subjectType: 'customer',
+          subjectId,
+          purpose: 'email_change',
+          newEmail: pendingEmail,
+        }),
     });
     await client.query('commit');
 
-    sendEmailChangeConfirmation({
-      to: newEmail,
-      name: accountRow.rows[0].name || '',
-      token,
-      target: 'suvera',
-      organization,
-    }).catch((error) => {
-      logger.warn({ email: newEmail, err: error.message }, 'Email change mail gonderilemedi');
-    });
+    // E-posta yalnizca gercekten yeni token uretildiginde gonderilir. Ayni-email
+    // ve cakisma durumlarinda da ayni yanit doner (hesap varligi sizdirilmaz).
+    if (result.outcome === 'issued') {
+      sendEmailChangeConfirmation({
+        to: result.newEmail,
+        name: accountRow.rows[0].name || '',
+        token: result.token,
+        target: 'suvera',
+        organization,
+      }).catch((error) => {
+        logger.warn({ err: error.message }, 'Email change mail gonderilemedi');
+      });
+    }
 
     res.json({ ok: true });
   } catch (err) {
@@ -463,47 +466,26 @@ router.post('/email-change/confirm', authLimiter, async (req, res, next) => {
     const tokenHash = sha256(token);
 
     await client.query('begin');
-    const tokenResult = await client.query(
-      `select id, organization_id, subject_id, new_email
-         from email_magic_link_tokens
-        where token_hash = $1
-          and subject_type = 'customer'
-          and purpose = 'email_change'
-          and consumed_at is null
-          and expires_at > now()
-        limit 1
-        for update`,
-      [tokenHash]
-    );
-    const row = tokenResult.rows[0];
-    if (!row || !row.new_email) {
+    const result = await confirmEmailChange(client, { tokenHash });
+    if (result.outcome !== 'changed') {
       await client.query('rollback');
+      // Cakisma da dahil generic yanit: hesap varligi sizdirilmaz.
       return res.status(400).json({ error: 'Dogrulama linki gecersiz veya suresi doldu' });
     }
-
-    const conflict = await client.query(
-      `select id from customer_accounts
-        where organization_id = $1 and email = $2 and id <> $3
-        limit 1`,
-      [row.organization_id, row.new_email, row.subject_id]
-    );
-    if (conflict.rows[0]) {
-      await client.query('rollback');
-      return res.status(409).json({ error: 'Bu email baska bir hesapta kullaniliyor' });
-    }
-
-    await client.query(
-      `update customer_accounts
-          set email = $1, email_verified_at = now(), updated_at = now()
-        where id = $2 and organization_id = $3`,
-      [row.new_email, row.subject_id, row.organization_id]
-    );
-    await client.query(
-      'update email_magic_link_tokens set consumed_at = now() where id = $1',
-      [row.id]
-    );
     await client.query('commit');
-    res.json({ ok: true });
+
+    // Basarili e-posta degisikligini audit'e yaz (hassas deger yok).
+    await auditLog(req, {
+      action: 'CUSTOMER_EMAIL_CHANGED',
+      resourceType: 'customer_account',
+      resourceId: result.subjectId,
+      actorType: 'app',
+      organizationId: result.organizationId,
+      newValue: { customer_id: result.customerId, sessions_revoked: true },
+    });
+
+    // Oturumlar iptal edildi; kullanici yeni e-postasiyla tekrar giris yapmali.
+    res.json({ ok: true, reauth_required: true });
   } catch (err) {
     try { await client.query('rollback'); } catch {}
     next(err);
@@ -615,23 +597,22 @@ router.post('/password-reset/confirm', authLimiter, async (req, res, next) => {
     if (!token) return res.status(400).json({ error: 'Sifirlama token zorunlu' });
 
     const passwordHash = await bcrypt.hash(password, 12);
-    const result = await db.query(
-      `update customer_accounts
-       set password_hash = $1,
-           reset_token_hash = null,
-           reset_expires_at = null,
-           updated_at = now()
-       where reset_token_hash = $2
-         and reset_expires_at > now()
-       returning id`,
-      [passwordHash, sha256(token)]
-    );
+    // Parolayi degistirir, reset token'i tuketir VE mevcut oturumu iptal eder;
+    // boylece eski cookie/token korumali endpointlere erisemez.
+    const updated = await resetCustomerPassword(db, {
+      tokenHash: sha256(token),
+      passwordHash,
+    });
 
-    if (!result.rows[0]) return res.status(404).json({ error: 'Sifirlama baglantisi gecersiz veya suresi doldu' });
+    if (!updated) return res.status(404).json({ error: 'Sifirlama baglantisi gecersiz veya suresi doldu' });
     res.json({ ok: true });
   } catch (err) {
     next(err);
   }
 });
+
+router.requireCustomerAccount = requireCustomerAccount;
+router.accountOrders = accountOrders;
+router.publicAccount = publicAccount;
 
 module.exports = router;

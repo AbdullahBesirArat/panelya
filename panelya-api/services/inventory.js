@@ -41,7 +41,10 @@ async function syncProductStock(client, productIds, { organizationId = null } = 
   if (!ids.length) return;
 
   const params = [ids];
-  const filters = ['product_id = any($1::bigint[])'];
+  // Pasiflenmis (kaldirilmis) varyantlarin stogu, urunun satilabilir toplam
+  // stoguna dahil edilmez. Iade hala ilgili varyant satirina yazilir; bu filtre
+  // yalnizca urun seviyesi toplami hesaplar.
+  const filters = ['product_id = any($1::bigint[])', 'is_active'];
   const productFilters = ['p.id = variant_stock.product_id'];
   if (organizationId) {
     params.push(organizationId);

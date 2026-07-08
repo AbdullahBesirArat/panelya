@@ -4,7 +4,7 @@ const { requireAuth, requireRole } = require('../middleware/auth');
 const { rateLimit } = require('../middleware/security');
 const { reserveStock, syncStockForStatusChange } = require('../services/inventory');
 const { expirePendingOrders } = require('../services/pendingOrders');
-const { cartTotal, priceCartItems } = require('../services/cartPricing');
+const { calculateCartPricing, cartTotal, priceCartItems } = require('../services/cartPricing');
 const { auditLog } = require('../services/audit');
 const { sanitizeCustomer } = require('../services/validation');
 const { resolveOrganization } = require('../services/tenant');
@@ -309,7 +309,10 @@ router.post('/', createOrderLimiter, async (req, res, next) => {
     const items = await priceCartItems(client, req.body.items, { organizationId: organization.id });
     const subtotal = cartTotal(items);
     const checkoutOptions = normalizeCheckoutOptions(req.body, organization.store_settings || {}, subtotal);
-    const total = subtotal + checkoutOptions.shippingFee;
+    const pricing = await calculateCartPricing(client, items, {
+      organizationId: organization.id,
+      shippingFee: checkoutOptions.shippingFee,
+    });
 
     const customerResult = await upsertCustomer(client, organization.id, customer);
 
@@ -323,7 +326,7 @@ router.post('/', createOrderLimiter, async (req, res, next) => {
         organization.id,
         orderCode,
         customerResult.id,
-        total,
+        pricing.total,
         checkoutOptions.paymentMethod,
         checkoutOptions.note,
         checkoutOptions.giftWrap,

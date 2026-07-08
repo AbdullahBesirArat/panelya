@@ -4,6 +4,11 @@ const { requireAuth, requireRole } = require('../middleware/auth');
 const { auditLog } = require('../services/audit');
 const { resolveOrganization, slugify } = require('../services/tenant');
 const { assertPlanCapacity } = require('../services/planLimits');
+const {
+  listCollectionProducts,
+  normalizeMemberIds,
+  replaceCollectionProducts,
+} = require('../services/collectionMemberships');
 
 const router = express.Router();
 const managerOnly = [requireAuth, requireRole(['super_admin', 'owner', 'admin'])];
@@ -132,25 +137,6 @@ router.put('/:id', ...managerOnly, async (req, res, next) => {
   }
 });
 
-function parseTagList(value) {
-  return String(value || '')
-    .split(',')
-    .map((tag) => tag.trim())
-    .filter(Boolean);
-}
-
-function serializeTagList(list) {
-  const seen = new Set();
-  const result = [];
-  for (const tag of list) {
-    const key = tag.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    result.push(tag);
-  }
-  return result.join(',').slice(0, 500);
-}
-
 router.get('/:id/products', requireAuth, requireRole(['super_admin', 'owner', 'admin', 'member', 'viewer']), async (req, res, next) => {
   try {
     const organization = await resolveOrganization(req);
@@ -161,15 +147,11 @@ router.get('/:id/products', requireAuth, requireRole(['super_admin', 'owner', 'a
     const collection = collectionResult.rows[0];
     if (!collection) return res.status(404).json({ error: 'Koleksiyon bulunamadi' });
 
-    const products = await db.query(
-      `select id, name, status, tags
-       from products
-       where organization_id = $1
-       order by name asc, id asc`,
-      [organization.id]
-    );
+    const products = await listCollectionProducts(db, {
+      organizationId: organization.id,
+      collectionId: collection.id,
+    });
 
-    const slug = String(collection.slug || '').toLowerCase();
     res.json({
       collection: { id: collection.id, slug: collection.slug, title: collection.title },
       products: products.rows.map((product) => ({
@@ -177,7 +159,7 @@ router.get('/:id/products', requireAuth, requireRole(['super_admin', 'owner', 'a
         name: product.name,
         status: product.status,
         tags: product.tags || '',
-        is_member: parseTagList(product.tags).some((tag) => tag.toLowerCase() === slug),
+        is_member: Boolean(product.is_member),
       })),
     });
   } catch (err) {
@@ -186,63 +168,41 @@ router.get('/:id/products', requireAuth, requireRole(['super_admin', 'owner', 'a
 });
 
 router.put('/:id/products', ...managerOnly, async (req, res, next) => {
+  const client = await db.pool.connect();
   try {
-    const organization = await resolveOrganization(req);
-    const collectionResult = await db.query(
+    await client.query('begin');
+    const organization = await resolveOrganization(req, client);
+    const collectionResult = await client.query(
       'select id, slug, title from collections where id = $1 and organization_id = $2',
       [req.params.id, organization.id]
     );
     const collection = collectionResult.rows[0];
-    if (!collection) return res.status(404).json({ error: 'Koleksiyon bulunamadi' });
-    const slug = String(collection.slug || '').trim();
-    if (!slug) return res.status(400).json({ error: 'Koleksiyon slug tanimsiz' });
-
-    const memberIds = Array.isArray(req.body && req.body.memberIds) ? req.body.memberIds : [];
-    const memberSet = new Set(
-      memberIds
-        .map((value) => Number(value))
-        .filter((value) => Number.isInteger(value) && value > 0)
-    );
-
-    const products = await db.query(
-      'select id, tags from products where organization_id = $1',
-      [organization.id]
-    );
-
-    const slugKey = slug.toLowerCase();
-    const updates = [];
-    for (const product of products.rows) {
-      const current = parseTagList(product.tags);
-      const hasMember = current.some((tag) => tag.toLowerCase() === slugKey);
-      const shouldBeMember = memberSet.has(Number(product.id));
-      if (hasMember === shouldBeMember) continue;
-
-      let nextTags;
-      if (shouldBeMember) {
-        nextTags = serializeTagList([...current, slug]);
-      } else {
-        nextTags = serializeTagList(current.filter((tag) => tag.toLowerCase() !== slugKey));
-      }
-      updates.push({ id: product.id, tags: nextTags });
+    if (!collection) {
+      await client.query('rollback');
+      return res.status(404).json({ error: 'Koleksiyon bulunamadi' });
     }
 
-    for (const update of updates) {
-      await db.query(
-        'update products set tags = $1, updated_at = now() where id = $2 and organization_id = $3',
-        [update.tags, update.id, organization.id]
-      );
-    }
+    const memberIds = normalizeMemberIds(req.body && req.body.memberIds);
+    const result = await replaceCollectionProducts(client, {
+      organizationId: organization.id,
+      collectionId: collection.id,
+      memberIds,
+    });
+    await client.query('commit');
 
     await auditLog(req, {
       action: 'UPDATE',
       resourceType: 'collection',
       resourceId: collection.id,
-      newValue: { slug, memberCount: memberSet.size, changed: updates.length },
+      newValue: { memberCount: result.memberCount },
     });
 
-    res.json({ updated: updates.length, memberCount: memberSet.size });
+    res.json({ updated: result.memberCount, memberCount: result.memberCount });
   } catch (err) {
+    try { await client.query('rollback'); } catch {}
     next(err);
+  } finally {
+    client.release();
   }
 });
 

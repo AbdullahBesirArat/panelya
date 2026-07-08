@@ -11,16 +11,16 @@ function normalizePaymentMethod(body = {}) {
 }
 
 function normalizeCheckoutOptions(body = {}, settings = {}, subtotal = 0) {
+  // Kargo ucreti HER ZAMAN sunucudaki magaza ayarindan hesaplanir.
+  // Istemciden gelen body.shipping_fee / body.shippingFee bilincli olarak yok
+  // sayilir; eski istemciler bu alani yollasa bile hata verilmez (geri uyumluluk).
   const configuredFee = Number(settings.shippingFee ?? 0);
   const freeShippingThreshold = Number(settings.freeShippingThreshold ?? 0);
   const defaultShippingFee = Number.isFinite(configuredFee) && configuredFee >= 0 ? configuredFee : 0;
-  const hasExplicitShippingFee = body.shipping_fee !== undefined || body.shippingFee !== undefined;
-  const shippingFeeValue = hasExplicitShippingFee
-    ? body.shipping_fee ?? body.shippingFee
-    : (Number.isFinite(freeShippingThreshold) && freeShippingThreshold > 0 && Number(subtotal) >= freeShippingThreshold
-      ? 0
-      : defaultShippingFee);
-  const shippingFee = Number(shippingFeeValue);
+  const qualifiesForFreeShipping = Number.isFinite(freeShippingThreshold)
+    && freeShippingThreshold > 0
+    && Number(subtotal) >= freeShippingThreshold;
+  const shippingFee = qualifiesForFreeShipping ? 0 : defaultShippingFee;
   const paymentMethod = normalizePaymentMethod(body);
 
   if (!Number.isFinite(shippingFee) || shippingFee < 0 || shippingFee > 100000) {

@@ -41,7 +41,7 @@ async function priceCartItems(client, rawItems, { organizationId = null } = {}) 
     ? await client.query(
       `select id, product_id, color, size, sku, stock, status
        from product_variants
-       where id = any($1::bigint[]) and organization_id = $2`,
+       where id = any($1::bigint[]) and organization_id = $2 and is_active`,
       [variantIds, organizationId]
     )
     : { rows: [] };
@@ -78,7 +78,68 @@ function cartTotal(items) {
   );
 }
 
+function roundMoney(value) {
+  return Math.round(Number(value || 0) * 100) / 100;
+}
+
+function campaignDiscount(campaign, subtotal) {
+  if (!campaign || subtotal <= 0) return 0;
+
+  const type = String(campaign.type || '').trim().toLowerCase();
+  const value = Number(campaign.value || 0);
+  if (!Number.isFinite(value) || value <= 0) return 0;
+
+  if (['percentage', 'percent', 'yuzde', 'oran'].includes(type)) {
+    return roundMoney(Math.min(subtotal, subtotal * Math.min(value, 100) / 100));
+  }
+  if (['fixed', 'amount', 'sabit', 'tl'].includes(type)) {
+    return roundMoney(Math.min(subtotal, value));
+  }
+  return 0;
+}
+
+async function selectActiveCampaign(client, organizationId, subtotal) {
+  const result = await client.query(
+    `select id, name, type, value, end_date
+     from campaigns
+     where organization_id = $1
+       and active = true
+       and (end_date is null or end_date >= current_date)
+     order by end_date nulls last, id desc
+     limit 10`,
+    [organizationId]
+  );
+
+  return result.rows.find((campaign) => campaignDiscount(campaign, subtotal) > 0) || null;
+}
+
+async function calculateCartPricing(client, items, { organizationId, shippingFee = 0 } = {}) {
+  const subtotal = roundMoney(cartTotal(items));
+  const campaign = await selectActiveCampaign(client, organizationId, subtotal);
+  const discount = campaignDiscount(campaign, subtotal);
+  const discountedSubtotal = roundMoney(Math.max(0, subtotal - discount));
+  const safeShippingFee = roundMoney(Math.max(0, Number(shippingFee || 0)));
+  const total = roundMoney(discountedSubtotal + safeShippingFee);
+
+  return {
+    subtotal,
+    discount,
+    discountedSubtotal,
+    shippingFee: safeShippingFee,
+    total,
+    campaign: campaign ? {
+      id: campaign.id,
+      name: campaign.name,
+      type: campaign.type,
+      value: campaign.value,
+    } : null,
+  };
+}
+
 module.exports = {
+  calculateCartPricing,
+  campaignDiscount,
   cartTotal,
   priceCartItems,
+  selectActiveCampaign,
 };

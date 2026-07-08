@@ -5,10 +5,27 @@ const { auditLog } = require('../services/audit');
 const { resolveOrganization } = require('../services/tenant');
 const { assertPlanCapacity } = require('../services/planLimits');
 const { syncProductStock } = require('../services/inventory');
+const { syncProductVariants } = require('../services/productVariants');
 
 const router = express.Router();
 const PRODUCT_STATUSES = ['active', 'draft', 'out'];
 const VARIANT_STATUSES = ['active', 'out'];
+
+// Pasif (is_active=false) varyantlari yalnizca GERCEK admin yonetim baglami
+// gorebilir. `attachAuthIfPresent` global middleware'i her gecerli JWT icin
+// req.auth doldurdugundan, salt varlik (`!!req.auth`) guvenli degildir:
+// gelecekte musteri/app veya impersonation tokeni de req.auth'u doldurabilir ve
+// public bir istek pasif varyantlari gormeye baslardi. Bu yuzden acik ve dar bir
+// isaret kullanilir: admin-audience token (actorType === 'admin') + bilinen
+// personel rolu. Musteriye admin-audience token verilmez.
+const VARIANT_ADMIN_ROLES = ['super_admin', 'owner', 'admin', 'member', 'viewer'];
+
+function isAdminManagementRequest(req) {
+  const auth = req && req.auth;
+  return !!auth
+    && auth.actorType === 'admin'
+    && VARIANT_ADMIN_ROLES.includes(auth.role);
+}
 
 function normalizeProductIds(ids) {
   const uniqueIds = [...new Set((Array.isArray(ids) ? ids : []).map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))];
@@ -112,28 +129,6 @@ function normalizeVariants(rawVariants) {
   return variants;
 }
 
-async function replaceProductVariants(client, organizationId, productId, variants) {
-  await client.query(
-    'delete from product_variants where organization_id = $1 and product_id = $2',
-    [organizationId, productId]
-  );
-
-  if (!variants.length) return;
-
-  await client.query(
-    `insert into product_variants (organization_id, product_id, color, size, sku, stock, status)
-     select $1, $2, color, size, sku, stock, status
-     from jsonb_to_recordset($3::jsonb) as item(
-       color text,
-       size text,
-       sku text,
-       stock int,
-       status text
-     )`,
-    [organizationId, productId, JSON.stringify(variants)]
-  );
-}
-
 async function assertCategoryScope(client, organizationId, categoryId) {
   if (categoryId == null) return;
   if (!Number.isInteger(categoryId) || categoryId < 1) {
@@ -150,7 +145,13 @@ async function assertCategoryScope(client, organizationId, categoryId) {
   }
 }
 
-function productSelect(whereClause) {
+// includeInactiveVariants: yalnizca admin (authenticated) yanitlari icin true.
+// Admin pasif (kaldirilmis) varyantlari `is_active` bilgisiyle gorur; public
+// katalog/detay yalnizca aktif varyantlari doner (checkout guvenligi korunur).
+// Filtre koru koru ortak degil, cagirana gore parametreyle uygulanir.
+function productSelect(whereClause, { includeInactiveVariants = false } = {}) {
+  const activeVariantFilter = includeInactiveVariants ? '' : '\n          and pv.is_active';
+  const isActiveField = includeInactiveVariants ? ",\n            'is_active', pv.is_active" : '';
   return `select
     p.id,
     p.name,
@@ -181,12 +182,12 @@ function productSelect(whereClause) {
             'size', pv.size,
             'sku', pv.sku,
             'stock', pv.stock,
-            'status', pv.status
+            'status', pv.status${isActiveField}
           )
           order by pv.color, pv.size, pv.id
         )
         from product_variants pv
-        where pv.product_id = p.id and pv.organization_id = p.organization_id
+        where pv.product_id = p.id and pv.organization_id = p.organization_id${activeVariantFilter}
       ),
       '[]'::jsonb
     ) as variants
@@ -195,9 +196,11 @@ function productSelect(whereClause) {
    where ${whereClause}`;
 }
 
+// fetchProduct yalnizca admin create/update route'larindan cagrilir; bu yuzden
+// pasif varyantlar da (is_active ile) dondurulur.
 async function fetchProduct(client, productId, organizationId) {
   const result = await client.query(
-    `${productSelect('p.id = $1 and p.organization_id = $2')}
+    `${productSelect('p.id = $1 and p.organization_id = $2', { includeInactiveVariants: true })}
      limit 1`,
     [productId, organizationId]
   );
@@ -333,7 +336,7 @@ router.get('/', async (req, res, next) => {
     params.push(paging.limit, paging.offset);
 
     const result = await db.query(
-      `${productSelect(filters.join(' and '))}
+      `${productSelect(filters.join(' and '), { includeInactiveVariants: isAdminManagementRequest(req) })}
        order by p.created_at desc
        limit $${params.length - 1} offset $${params.length}`,
       params
@@ -349,7 +352,10 @@ router.get('/:id', async (req, res, next) => {
   try {
     const organization = await resolveOrganization(req, db, { allowPublic: !req.auth });
     const publicStatusFilter = req.auth ? '' : " and p.status in ('active', 'out')";
-    const result = await db.query(`${productSelect(`p.id = $1 and p.organization_id = $2${publicStatusFilter}`)}`, [req.params.id, organization.id]);
+    const result = await db.query(
+      `${productSelect(`p.id = $1 and p.organization_id = $2${publicStatusFilter}`, { includeInactiveVariants: isAdminManagementRequest(req) })}`,
+      [req.params.id, organization.id]
+    );
 
     if (!result.rows[0]) {
       return res.status(404).json({ error: 'Urun bulunamadi' });
@@ -378,7 +384,7 @@ router.post('/', requireAuth, requireRole(['super_admin', 'owner', 'admin']), as
        returning *`,
       [organization.id, ...params]
     );
-    await replaceProductVariants(client, organization.id, result.rows[0].id, variants);
+    await syncProductVariants(client, organization.id, result.rows[0].id, variants);
     const product = await fetchProduct(client, result.rows[0].id, organization.id);
 
     await auditLog(req, {
@@ -677,7 +683,7 @@ router.put('/:id', requireAuth, requireRole(['super_admin', 'owner', 'admin']), 
       await client.query('rollback');
       return res.status(404).json({ error: 'Urun bulunamadi' });
     }
-    await replaceProductVariants(client, organization.id, req.params.id, variants);
+    await syncProductVariants(client, organization.id, req.params.id, variants);
     const product = await fetchProduct(client, req.params.id, organization.id);
     await auditLog(req, {
       action: 'UPDATE',
@@ -802,3 +808,7 @@ router.delete('/:id', requireAuth, requireRole(['super_admin', 'owner']), async 
 });
 
 module.exports = router;
+// Test edilebilirlik icin ic yardimcilar (route davranisini degistirmez).
+module.exports.productSelect = productSelect;
+module.exports.normalizeVariants = normalizeVariants;
+module.exports.isAdminManagementRequest = isAdminManagementRequest;

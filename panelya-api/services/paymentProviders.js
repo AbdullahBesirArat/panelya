@@ -177,18 +177,64 @@ async function retrieveIyzico({ token, conversationId }) {
   });
 }
 
+// Desteklenen odeme saglayicilari. 'manual' kartli odeme gateway'i degil,
+// havale/IBAN gibi offline odeme akisini temsil eder.
+const KNOWN_PAYMENT_PROVIDERS = new Set(['iyzico', 'mock', 'manual']);
+
+function isProductionEnv() {
+  return (process.env.NODE_ENV || 'development') === 'production';
+}
+
+function providerConfigError(message) {
+  const err = new Error(message);
+  err.status = 500;
+  err.code = 'PAYMENT_PROVIDER_MISCONFIGURED';
+  return err;
+}
+
+function manualProviderError() {
+  const err = new Error('Kartli odeme saglayicisi aktif degil');
+  err.status = 400;
+  err.code = 'CARD_PAYMENT_PROVIDER_INACTIVE';
+  return err;
+}
+
+// Bilinmeyen/yanlis yapilandirilmis PAYMENT_PROVIDER production-benzeri ortamda
+// ASLA sessizce mock odemeye dusmez; acik hata firlatir. Mock yalnizca acikca
+// secildiginde ya da (env tanimsizken) development/test'te kullanilir.
 function providerName() {
-  return (process.env.PAYMENT_PROVIDER || 'mock').toLowerCase();
+  const raw = String(process.env.PAYMENT_PROVIDER || '').trim().toLowerCase();
+
+  if (!raw) {
+    if (isProductionEnv()) {
+      throw providerConfigError('PAYMENT_PROVIDER production ortaminda tanimlanmalidir');
+    }
+    return 'mock';
+  }
+
+  if (!KNOWN_PAYMENT_PROVIDERS.has(raw)) {
+    // Yanlis yapilandirma her ortamda reddedilir (mock fallback yok).
+    throw providerConfigError(`Bilinmeyen PAYMENT_PROVIDER degeri: ${raw}`);
+  }
+  if (raw === 'mock' && isProductionEnv()) {
+    throw providerConfigError('PAYMENT_PROVIDER=mock production ortaminda kullanilamaz');
+  }
+
+  return raw;
 }
 
 async function initializePayment(context) {
-  if (providerName() === 'iyzico') return initializeIyzico(context);
-  return initializeMock(context);
+  const provider = providerName();
+  if (provider === 'iyzico') return initializeIyzico(context);
+  if (provider === 'mock') return initializeMock(context);
+  throw manualProviderError();
 }
 
 async function retrievePayment(context) {
-  if (providerName() === 'iyzico') return retrieveIyzico(context);
-  return { status: 'success', paymentStatus: 'SUCCESS', paymentId: `mock-${context.token}` };
+  const provider = providerName();
+  if (provider === 'iyzico') return retrieveIyzico(context);
+  if (provider === 'mock') return { status: 'success', paymentStatus: 'SUCCESS', paymentId: `mock-${context.token}` };
+  throw manualProviderError();
 }
 
 module.exports = {
@@ -197,4 +243,5 @@ module.exports = {
   providerName,
   successUrl,
   failureUrl,
+  KNOWN_PAYMENT_PROVIDERS,
 };

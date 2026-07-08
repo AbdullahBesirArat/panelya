@@ -6,7 +6,7 @@ const {
   failureUrl,
 } = require('../services/paymentProviders');
 const { reserveStock } = require('../services/inventory');
-const { cartTotal, priceCartItems } = require('../services/cartPricing');
+const { calculateCartPricing, cartTotal, priceCartItems } = require('../services/cartPricing');
 const { isProduction, rateLimit } = require('../middleware/security');
 const { requireCallbackSecret, sanitizeCustomer } = require('../services/validation');
 const { resolveOrganization } = require('../services/tenant');
@@ -26,6 +26,60 @@ const paymentInitLimiter = rateLimit({
 
 function mockAutoPayEnabled() {
   return !isProduction() && process.env.PAYMENT_MOCK_AUTO_PAY === 'true';
+}
+
+function paymentCallbackError(message, status = 400, code = 'PAYMENT_CALLBACK_INVALID') {
+  const error = new Error(message);
+  error.status = status;
+  error.code = code;
+  return error;
+}
+
+async function resolveCallbackOrganizationByToken(store, token) {
+  const result = await store.query(
+    `select organization_id
+     from orders
+     where payment_token = $1
+     order by id asc
+     limit 2`,
+    [token]
+  );
+  if (result.rows.length !== 1) {
+    throw paymentCallbackError('Siparis bulunamadi', 404, 'PAYMENT_CALLBACK_ORDER_NOT_FOUND');
+  }
+  return result.rows[0].organization_id;
+}
+
+async function resolveCallbackOrganizationByOrderCode(store, orderCode) {
+  const result = await store.query(
+    `select organization_id
+     from orders
+     where order_code = $1
+     order by id asc
+     limit 2`,
+    [orderCode]
+  );
+  if (result.rows.length !== 1) {
+    throw paymentCallbackError('Siparis bulunamadi', 404, 'PAYMENT_CALLBACK_ORDER_NOT_FOUND');
+  }
+  return result.rows[0].organization_id;
+}
+
+async function preparePaymentCallbackContext(req, { provider, token, orderCode }, store = db) {
+  const callbackSecretRequired = provider !== 'iyzico'
+    && (isProduction() || process.env.PAYMENT_CALLBACK_SECRET_REQUIRED === 'true' || !token);
+
+  if (callbackSecretRequired && !requireCallbackSecret(req)) {
+    throw paymentCallbackError('Odeme callback dogrulanamadi', 403, 'PAYMENT_CALLBACK_FORBIDDEN');
+  }
+  if (provider === 'iyzico' && !token) {
+    throw paymentCallbackError('Iyzico callback icin token zorunlu', 400, 'PAYMENT_CALLBACK_TOKEN_REQUIRED');
+  }
+
+  if (token) {
+    return { verifiedOrganizationId: await resolveCallbackOrganizationByToken(store, token) };
+  }
+  return { verifiedOrganizationId: await resolveCallbackOrganizationByOrderCode(store, orderCode) };
 }
 
 /**
@@ -77,19 +131,27 @@ router.post('/initialize', paymentInitLimiter, async (req, res, next) => {
 
   try {
     const customer = sanitizeCustomer(req.body.customer || {});
-    const checkoutOptions = normalizeCheckoutOptions(req.body);
-    const provider = checkoutOptions.paymentMethod === 'iban'
-      ? 'manual'
-      : providerName();
 
     await client.query('begin');
     const organization = await resolveOrganization(req, client, { allowPublic: true });
     await assertPlanCapacity(client, organization.id, 'orders_month');
     const items = await priceCartItems(client, req.body.items, { organizationId: organization.id });
 
+    // Once urunleri sunucuda fiyatlandir, ara toplami hesapla; ardindan magaza
+    // ayarlariyla (shippingFee / freeShippingThreshold / paymentEnabled) checkout
+    // seceneklerini belirle. Kargo istemciden asla alinmaz.
+    const subtotal = cartTotal(items);
+    const checkoutOptions = normalizeCheckoutOptions(req.body, organization.store_settings || {}, subtotal);
+    const provider = checkoutOptions.paymentMethod === 'iban'
+      ? 'manual'
+      : providerName();
+
     const customerResult = await upsertCustomer(client, organization.id, customer);
 
-    const calculatedTotal = cartTotal(items) + checkoutOptions.shippingFee;
+    const pricing = await calculateCartPricing(client, items, {
+      organizationId: organization.id,
+      shippingFee: checkoutOptions.shippingFee,
+    });
     const orderCode = await nextOrderCode(client);
     let orderResult = await client.query(
       `insert into orders
@@ -100,7 +162,7 @@ router.post('/initialize', paymentInitLimiter, async (req, res, next) => {
         organization.id,
         orderCode,
         customerResult.id,
-        calculatedTotal,
+        pricing.total,
         provider,
         checkoutOptions.paymentMethod,
         checkoutOptions.note,
@@ -143,6 +205,7 @@ router.post('/initialize', paymentInitLimiter, async (req, res, next) => {
       provider,
       order: orderResult.rows[0],
       orderCode,
+      pricing,
       paymentPageUrl: payment.paymentPageUrl,
       failureUrl: payment.failureUrl || failureUrl(req, orderCode),
     });
@@ -213,23 +276,15 @@ router.post('/callback', async (req, res, next) => {
     if (!orderCode && !token) return res.status(400).json({ error: 'orderCode veya token zorunlu' });
 
     const provider = providerName();
-    const callbackSecretRequired = provider !== 'iyzico'
-      && (isProduction() || process.env.PAYMENT_CALLBACK_SECRET_REQUIRED === 'true');
-
-    if (callbackSecretRequired && !requireCallbackSecret(req)) {
-      return res.status(403).json({ error: 'Odeme callback dogrulanamadi' });
-    }
-    if (provider === 'iyzico' && !token) {
-      return res.status(400).json({ error: 'Iyzico callback icin token zorunlu' });
-    }
+    const callbackContext = await preparePaymentCallbackContext(req, { provider, token, orderCode });
 
     const event = await enqueuePaymentCallbackEvent(req, {
       provider,
       orderCode,
       token,
       status,
-    });
-    const result = await processPaymentCallbackEvent(req, event.id);
+    }, db, callbackContext);
+    const result = await processPaymentCallbackEvent(req, event.id, callbackContext);
 
     if (req.is('application/x-www-form-urlencoded')) {
       return res.redirect(result.redirectUrl);
@@ -240,5 +295,9 @@ router.post('/callback', async (req, res, next) => {
     next(err);
   }
 });
+
+router.preparePaymentCallbackContext = preparePaymentCallbackContext;
+router.resolveCallbackOrganizationByToken = resolveCallbackOrganizationByToken;
+router.resolveCallbackOrganizationByOrderCode = resolveCallbackOrganizationByOrderCode;
 
 module.exports = router;

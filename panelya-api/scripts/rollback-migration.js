@@ -3,21 +3,25 @@ require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
 const db = require('../db');
+const {
+  MIGRATION_ADVISORY_LOCK_KEY,
+  acquireMigrationLock,
+  ensureMigrationsTable,
+  finalizeMigrationSession,
+} = require('./migrationSupport');
 
 const migrationsDir = path.join(__dirname, '..', 'db', 'migrations');
 
-async function ensureMigrationsTable() {
-  await db.query(
-    `create table if not exists schema_migrations (
-      filename text primary key,
-      checksum text not null,
-      applied_at timestamptz not null default now()
-    )`
-  );
+function defaultDownMigrationExists(downFile) {
+  return fs.existsSync(path.join(migrationsDir, downFile));
 }
 
-async function lastAppliedMigration() {
-  const result = await db.query(
+function defaultReadDownMigration(downFile) {
+  return fs.readFileSync(path.join(migrationsDir, downFile), 'utf8');
+}
+
+async function lastAppliedMigration(client) {
+  const result = await client.query(
     `select filename
      from schema_migrations
      order by applied_at desc, filename desc
@@ -26,40 +30,76 @@ async function lastAppliedMigration() {
   return result.rows[0]?.filename || null;
 }
 
-async function main() {
-  await ensureMigrationsTable();
-  const target = process.argv[2] || await lastAppliedMigration();
+// Rollback akisi TEK client uzerinde ve advisory lock altinda calisir.
+// Down migration SQL, schema_migrations satir silme ve commit/rollback ayni
+// client'ta yurutulur. Bagimliliklar enjekte edilebilir (fake pool ile test).
+async function runRollback({
+  pool = db.pool,
+  target: targetArg = process.argv[2],
+  downMigrationExists = defaultDownMigrationExists,
+  readDownMigration = defaultReadDownMigration,
+  logger = console,
+  lockKey = MIGRATION_ADVISORY_LOCK_KEY,
+} = {}) {
+  const client = await pool.connect();
+  let lockAcquired = false;
+  let primaryError = null;
 
-  if (!target) {
-    console.log('Geri alinacak migration yok.');
-    return;
-  }
-
-  const downFile = target.replace(/\.sql$/i, '.down.sql');
-  const downPath = path.join(migrationsDir, downFile);
-
-  if (!fs.existsSync(downPath)) {
-    throw new Error(`${target}: rollback dosyasi bulunamadi (${downFile})`);
-  }
-
-  const sql = fs.readFileSync(downPath, 'utf8');
-
-  await db.query('begin');
   try {
-    await db.query(sql);
-    await db.query('delete from schema_migrations where filename = $1', [target]);
-    await db.query('commit');
-    console.log(`Migration geri alindi: ${target}`);
+    await acquireMigrationLock(client, lockKey);
+    lockAcquired = true;
+
+    await ensureMigrationsTable(client);
+    const target = targetArg || await lastAppliedMigration(client);
+
+    if (!target) {
+      logger.log('Geri alinacak migration yok.');
+    } else {
+      const downFile = target.replace(/\.sql$/i, '.down.sql');
+      if (!downMigrationExists(downFile)) {
+        throw new Error(`${target}: rollback dosyasi bulunamadi (${downFile})`);
+      }
+
+      const sql = readDownMigration(downFile);
+
+      await client.query('begin');
+      try {
+        await client.query(sql);
+        await client.query('delete from schema_migrations where filename = $1', [target]);
+        await client.query('commit');
+        logger.log(`Migration geri alindi: ${target}`);
+      } catch (err) {
+        await client.query('rollback');
+        err.message = `${target}: ${err.message}`;
+        throw err;
+      }
+    }
   } catch (err) {
-    await db.query('rollback');
-    err.message = `${target}: ${err.message}`;
-    throw err;
+    // Asil rollback hatasini yakala; unlock hatasi bunu gölgelemesin.
+    primaryError = err;
+  }
+
+  // Lock birakilir + client release edilir; asil hata varsa korunur ve firlatilir.
+  await finalizeMigrationSession(client, { lockAcquired, lockKey, primaryError, logger });
+}
+
+async function main() {
+  try {
+    await runRollback();
+  } finally {
+    await db.pool.end();
   }
 }
 
-main()
-  .catch((err) => {
+if (require.main === module) {
+  main().catch((err) => {
     console.error(err.message);
     process.exitCode = 1;
-  })
-  .finally(() => db.pool.end());
+  });
+}
+
+module.exports = {
+  runRollback,
+  main,
+  MIGRATION_ADVISORY_LOCK_KEY,
+};

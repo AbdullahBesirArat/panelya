@@ -133,6 +133,14 @@ create table if not exists collections (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists product_collections (
+  id bigserial primary key,
+  organization_id uuid not null references organizations(id) on delete cascade,
+  collection_id bigint not null references collections(id) on delete cascade,
+  product_id bigint not null references products(id) on delete cascade,
+  created_at timestamptz not null default now()
+);
+
 create table if not exists slider_items (
   id bigserial primary key,
   organization_id uuid not null references organizations(id) on delete cascade,
@@ -197,6 +205,8 @@ create index if not exists idx_product_variants_product on product_variants(prod
 create index if not exists idx_product_variants_org_product on product_variants(organization_id, product_id);
 create unique index if not exists idx_collections_org_slug_unique on collections (organization_id, slug);
 create index if not exists idx_collections_org_active_sort on collections (organization_id, active, sort_order, id);
+create unique index if not exists idx_product_collections_unique on product_collections (organization_id, collection_id, product_id);
+create index if not exists idx_product_collections_product on product_collections (organization_id, product_id);
 create index if not exists idx_products_status on products(status);
 create index if not exists idx_products_created_at on products(created_at desc);
 create index if not exists idx_products_name_trgm on products using gin (name gin_trgm_ops);

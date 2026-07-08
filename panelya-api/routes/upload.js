@@ -151,4 +151,6 @@ router.post('/', requireAuth, requireRole(['super_admin', 'owner', 'admin']), up
   }
 });
 
+router.detectImageFormat = detectImageFormat;
+
 module.exports = router;

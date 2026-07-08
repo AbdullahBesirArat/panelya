@@ -1376,8 +1376,8 @@ export function ContentSection({
                   {collectionProductsModal.title} – Ürünleri yönet
                 </h3>
                 <p className="mt-1 text-xs text-zinc-500">
-                  Seçtiğiniz ürünlerin etiketlerine <code>{collectionProductsModal.slug}</code> otomatik
-                  eklenir/çıkarılır. Diğer etiketler korunur.
+                  Seçtiğiniz ürünler bu koleksiyona güvenli ilişki kaydıyla bağlanır.
+                  Ürün etiketleri değiştirilmez.
                 </p>
               </div>
               <Button
