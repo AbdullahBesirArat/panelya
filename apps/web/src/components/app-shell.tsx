@@ -85,8 +85,8 @@ export function AppShell({
   useEffect(() => {
     if (isError && hydrated && (authErrorStatus === 401 || authErrorStatus === 403)) {
       pushToast({
-        title: "Oturum sÃ¼resi doldu",
-        description: "Girdileriniz bu tarayÄ±cÄ±da korunur. Devam etmek iÃ§in tekrar giriÅŸ yapÄ±n.",
+        title: "Oturum süresi doldu",
+        description: "Girdileriniz bu tarayıcıda korunur. Devam etmek için tekrar giriş yapın.",
         tone: "error",
       });
       clearSession();

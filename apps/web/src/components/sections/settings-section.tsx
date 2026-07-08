@@ -379,9 +379,9 @@ export function SettingsSection({
             </div>
             <div className="rounded-lg border border-line bg-zinc-50 p-4">
               <div className="mb-4">
-                <p className="text-sm font-semibold text-ink">AlÄ±ÅŸveriÅŸ NotlarÄ±</p>
+                <p className="text-sm font-semibold text-ink">Alışveriş Notları</p>
                 <p className="mt-1 text-xs text-zinc-500">
-                  ÃœrÃ¼n detayÄ±ndaki hÄ±zlÄ± bilgilendirme kartlarÄ± bu ayarlardan oluÅŸturulur.
+                  Ürün detayındaki hızlı bilgilendirme kartları bu ayarlardan oluşturulur.
                 </p>
               </div>
               <div className="space-y-4">
@@ -393,18 +393,18 @@ export function SettingsSection({
                       name="shoppingFreeShippingEnabled"
                       type="checkbox"
                     />
-                    Ãœcretsiz kargo kartÄ± aktif
+                    Ücretsiz kargo kartı aktif
                   </label>
                   <div className="grid gap-2">
-                    <FieldLabel htmlFor="shoppingFreeShippingDescription">Ãœcretsiz kargo aÃ§Ä±klamasÄ±</FieldLabel>
+                    <FieldLabel htmlFor="shoppingFreeShippingDescription">Ücretsiz kargo açıklaması</FieldLabel>
                     <textarea
                       className="focus-ring min-h-20 rounded-lg border border-line bg-white px-3 py-3 text-sm"
-                      defaultValue={storeSettings.shoppingNotes?.freeShipping?.description || "{amount} TL Ã¼zeri sipariÅŸlerde TÃ¼rkiye geneli Ã¼cretsiz teslimat."}
+                      defaultValue={storeSettings.shoppingNotes?.freeShipping?.description || "{amount} TL üzeri siparişlerde Türkiye geneli ücretsiz teslimat."}
                       disabled={!canManageSettings || settingsMutation.isPending}
                       id="shoppingFreeShippingDescription"
                       name="shoppingFreeShippingDescription"
                     />
-                    <InlineHint>Limit iÃ§in mevcut Ã¼cretsiz kargo alanÄ± kullanÄ±lÄ±r; metinde {"{amount}"} yazabilirsiniz.</InlineHint>
+                    <InlineHint>Limit için mevcut ücretsiz kargo alanı kullanılır; metinde {"{amount}"} yazabilirsiniz.</InlineHint>
                   </div>
                 </div>
                 <div className="rounded-lg border border-line bg-white p-4">
@@ -415,21 +415,21 @@ export function SettingsSection({
                       name="shoppingReturnsEnabled"
                       type="checkbox"
                     />
-                    Ä°ade/deÄŸiÅŸim kartÄ± aktif
+                    İade/değişim kartı aktif
                   </label>
                   <div className="grid gap-3 sm:grid-cols-[1fr_140px]">
                     <div className="grid gap-2">
-                      <FieldLabel htmlFor="shoppingReturnsTitle">Ä°ade baÅŸlÄ±ÄŸÄ±</FieldLabel>
+                      <FieldLabel htmlFor="shoppingReturnsTitle">İade başlığı</FieldLabel>
                       <input
                         className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
-                        defaultValue={storeSettings.shoppingNotes?.returns?.title || "Kolay Ä°ade"}
+                        defaultValue={storeSettings.shoppingNotes?.returns?.title || "Kolay İade"}
                         disabled={!canManageSettings || settingsMutation.isPending}
                         id="shoppingReturnsTitle"
                         name="shoppingReturnsTitle"
                       />
                     </div>
                     <div className="grid gap-2">
-                      <FieldLabel htmlFor="shoppingReturnsDays">Ä°ade sÃ¼resi</FieldLabel>
+                      <FieldLabel htmlFor="shoppingReturnsDays">İade süresi</FieldLabel>
                       <input
                         className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
                         defaultValue={storeSettings.shoppingNotes?.returns?.days ?? 14}
@@ -442,10 +442,10 @@ export function SettingsSection({
                       />
                     </div>
                     <div className="grid gap-2 sm:col-span-2">
-                      <FieldLabel htmlFor="shoppingReturnsDescription">Ä°ade aÃ§Ä±klamasÄ±</FieldLabel>
+                      <FieldLabel htmlFor="shoppingReturnsDescription">İade açıklaması</FieldLabel>
                       <textarea
                         className="focus-ring min-h-20 rounded-lg border border-line bg-white px-3 py-3 text-sm"
-                        defaultValue={storeSettings.shoppingNotes?.returns?.description || "Ä°ade ve deÄŸiÅŸim sÃ¼reci iÃ§in sipariÅŸ sonrasÄ± destek ekibi yanÄ±nÄ±zda."}
+                        defaultValue={storeSettings.shoppingNotes?.returns?.description || "İade ve değişim süreci için sipariş sonrası destek ekibi yanınızda."}
                         disabled={!canManageSettings || settingsMutation.isPending}
                         id="shoppingReturnsDescription"
                         name="shoppingReturnsDescription"
@@ -461,30 +461,30 @@ export function SettingsSection({
                       name="shoppingPaymentEnabled"
                       type="checkbox"
                     />
-                    Ã–deme bilgilendirme kartÄ± aktif
+                    Ödeme bilgilendirme kartı aktif
                   </label>
                   <div className="grid gap-3 sm:grid-cols-2">
                     <div className="grid gap-2">
-                      <FieldLabel htmlFor="shoppingPaymentTitle">Ã–deme baÅŸlÄ±ÄŸÄ±</FieldLabel>
+                      <FieldLabel htmlFor="shoppingPaymentTitle">Ödeme başlığı</FieldLabel>
                       <input
                         className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
-                        defaultValue={storeSettings.shoppingNotes?.payment?.title || "GÃ¼venli Ã–deme"}
+                        defaultValue={storeSettings.shoppingNotes?.payment?.title || "Güvenli Ödeme"}
                         disabled={!canManageSettings || settingsMutation.isPending}
                         id="shoppingPaymentTitle"
                         name="shoppingPaymentTitle"
                       />
                     </div>
                     <div className="grid gap-2 sm:col-span-2">
-                      <FieldLabel htmlFor="shoppingPaymentDescription">Ã–deme aÃ§Ä±klamasÄ± override</FieldLabel>
+                      <FieldLabel htmlFor="shoppingPaymentDescription">Ödeme açıklaması override</FieldLabel>
                       <textarea
                         className="focus-ring min-h-20 rounded-lg border border-line bg-white px-3 py-3 text-sm"
                         defaultValue={storeSettings.shoppingNotes?.payment?.description || ""}
                         disabled={!canManageSettings || settingsMutation.isPending}
                         id="shoppingPaymentDescription"
                         name="shoppingPaymentDescription"
-                        placeholder="BoÅŸ bÄ±rakÄ±rsanÄ±z aktif Ã¶deme yÃ¶ntemlerine gÃ¶re otomatik metin oluÅŸur."
+                        placeholder="Boş bırakırsanız aktif ödeme yöntemlerine göre otomatik metin oluşur."
                       />
-                      <InlineHint>KartlÄ± Ã¶deme kapalÄ±ysa iyzico metni otomatik gÃ¶sterilmez.</InlineHint>
+                      <InlineHint>Kartlı ödeme kapalıysa iyzico metni otomatik gösterilmez.</InlineHint>
                     </div>
                   </div>
                 </div>
