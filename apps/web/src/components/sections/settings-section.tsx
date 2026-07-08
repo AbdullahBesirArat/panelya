@@ -148,6 +148,23 @@ export function SettingsSection({
         ibanHolderName: String(form.get("ibanHolderName") || "").trim(),
         bankName: String(form.get("bankName") || "").trim(),
         paymentNote: String(form.get("paymentNote") || "").trim(),
+        shoppingNotes: {
+          freeShipping: {
+            enabled: form.get("shoppingFreeShippingEnabled") === "on",
+            description: String(form.get("shoppingFreeShippingDescription") || "").trim(),
+          },
+          returns: {
+            enabled: form.get("shoppingReturnsEnabled") === "on",
+            title: String(form.get("shoppingReturnsTitle") || "").trim(),
+            description: String(form.get("shoppingReturnsDescription") || "").trim(),
+            days: numberFromForm(form.get("shoppingReturnsDays")),
+          },
+          payment: {
+            enabled: form.get("shoppingPaymentEnabled") === "on",
+            title: String(form.get("shoppingPaymentTitle") || "").trim(),
+            description: String(form.get("shoppingPaymentDescription") || "").trim(),
+          },
+        },
       },
     });
   }
@@ -357,6 +374,119 @@ export function SettingsSection({
                     name="paymentNote"
                     placeholder="Havale sonrası sipariş numaranızı açıklamaya yazınız."
                   />
+                </div>
+              </div>
+            </div>
+            <div className="rounded-lg border border-line bg-zinc-50 p-4">
+              <div className="mb-4">
+                <p className="text-sm font-semibold text-ink">AlÄ±ÅŸveriÅŸ NotlarÄ±</p>
+                <p className="mt-1 text-xs text-zinc-500">
+                  ÃœrÃ¼n detayÄ±ndaki hÄ±zlÄ± bilgilendirme kartlarÄ± bu ayarlardan oluÅŸturulur.
+                </p>
+              </div>
+              <div className="space-y-4">
+                <div className="rounded-lg border border-line bg-white p-4">
+                  <label className="mb-3 flex items-center gap-2 text-sm font-semibold text-ink">
+                    <input
+                      defaultChecked={storeSettings.shoppingNotes?.freeShipping?.enabled !== false}
+                      disabled={!canManageSettings || settingsMutation.isPending}
+                      name="shoppingFreeShippingEnabled"
+                      type="checkbox"
+                    />
+                    Ãœcretsiz kargo kartÄ± aktif
+                  </label>
+                  <div className="grid gap-2">
+                    <FieldLabel htmlFor="shoppingFreeShippingDescription">Ãœcretsiz kargo aÃ§Ä±klamasÄ±</FieldLabel>
+                    <textarea
+                      className="focus-ring min-h-20 rounded-lg border border-line bg-white px-3 py-3 text-sm"
+                      defaultValue={storeSettings.shoppingNotes?.freeShipping?.description || "{amount} TL Ã¼zeri sipariÅŸlerde TÃ¼rkiye geneli Ã¼cretsiz teslimat."}
+                      disabled={!canManageSettings || settingsMutation.isPending}
+                      id="shoppingFreeShippingDescription"
+                      name="shoppingFreeShippingDescription"
+                    />
+                    <InlineHint>Limit iÃ§in mevcut Ã¼cretsiz kargo alanÄ± kullanÄ±lÄ±r; metinde {"{amount}"} yazabilirsiniz.</InlineHint>
+                  </div>
+                </div>
+                <div className="rounded-lg border border-line bg-white p-4">
+                  <label className="mb-3 flex items-center gap-2 text-sm font-semibold text-ink">
+                    <input
+                      defaultChecked={storeSettings.shoppingNotes?.returns?.enabled !== false}
+                      disabled={!canManageSettings || settingsMutation.isPending}
+                      name="shoppingReturnsEnabled"
+                      type="checkbox"
+                    />
+                    Ä°ade/deÄŸiÅŸim kartÄ± aktif
+                  </label>
+                  <div className="grid gap-3 sm:grid-cols-[1fr_140px]">
+                    <div className="grid gap-2">
+                      <FieldLabel htmlFor="shoppingReturnsTitle">Ä°ade baÅŸlÄ±ÄŸÄ±</FieldLabel>
+                      <input
+                        className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
+                        defaultValue={storeSettings.shoppingNotes?.returns?.title || "Kolay Ä°ade"}
+                        disabled={!canManageSettings || settingsMutation.isPending}
+                        id="shoppingReturnsTitle"
+                        name="shoppingReturnsTitle"
+                      />
+                    </div>
+                    <div className="grid gap-2">
+                      <FieldLabel htmlFor="shoppingReturnsDays">Ä°ade sÃ¼resi</FieldLabel>
+                      <input
+                        className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
+                        defaultValue={storeSettings.shoppingNotes?.returns?.days ?? 14}
+                        disabled={!canManageSettings || settingsMutation.isPending}
+                        id="shoppingReturnsDays"
+                        min="0"
+                        name="shoppingReturnsDays"
+                        step="1"
+                        type="number"
+                      />
+                    </div>
+                    <div className="grid gap-2 sm:col-span-2">
+                      <FieldLabel htmlFor="shoppingReturnsDescription">Ä°ade aÃ§Ä±klamasÄ±</FieldLabel>
+                      <textarea
+                        className="focus-ring min-h-20 rounded-lg border border-line bg-white px-3 py-3 text-sm"
+                        defaultValue={storeSettings.shoppingNotes?.returns?.description || "Ä°ade ve deÄŸiÅŸim sÃ¼reci iÃ§in sipariÅŸ sonrasÄ± destek ekibi yanÄ±nÄ±zda."}
+                        disabled={!canManageSettings || settingsMutation.isPending}
+                        id="shoppingReturnsDescription"
+                        name="shoppingReturnsDescription"
+                      />
+                    </div>
+                  </div>
+                </div>
+                <div className="rounded-lg border border-line bg-white p-4">
+                  <label className="mb-3 flex items-center gap-2 text-sm font-semibold text-ink">
+                    <input
+                      defaultChecked={storeSettings.shoppingNotes?.payment?.enabled !== false}
+                      disabled={!canManageSettings || settingsMutation.isPending}
+                      name="shoppingPaymentEnabled"
+                      type="checkbox"
+                    />
+                    Ã–deme bilgilendirme kartÄ± aktif
+                  </label>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="grid gap-2">
+                      <FieldLabel htmlFor="shoppingPaymentTitle">Ã–deme baÅŸlÄ±ÄŸÄ±</FieldLabel>
+                      <input
+                        className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
+                        defaultValue={storeSettings.shoppingNotes?.payment?.title || "GÃ¼venli Ã–deme"}
+                        disabled={!canManageSettings || settingsMutation.isPending}
+                        id="shoppingPaymentTitle"
+                        name="shoppingPaymentTitle"
+                      />
+                    </div>
+                    <div className="grid gap-2 sm:col-span-2">
+                      <FieldLabel htmlFor="shoppingPaymentDescription">Ã–deme aÃ§Ä±klamasÄ± override</FieldLabel>
+                      <textarea
+                        className="focus-ring min-h-20 rounded-lg border border-line bg-white px-3 py-3 text-sm"
+                        defaultValue={storeSettings.shoppingNotes?.payment?.description || ""}
+                        disabled={!canManageSettings || settingsMutation.isPending}
+                        id="shoppingPaymentDescription"
+                        name="shoppingPaymentDescription"
+                        placeholder="BoÅŸ bÄ±rakÄ±rsanÄ±z aktif Ã¶deme yÃ¶ntemlerine gÃ¶re otomatik metin oluÅŸur."
+                      />
+                      <InlineHint>KartlÄ± Ã¶deme kapalÄ±ysa iyzico metni otomatik gÃ¶sterilmez.</InlineHint>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>

@@ -58,7 +58,7 @@ import {
 
 const productStatusOptions: ProductStatus[] = ["active", "draft", "out"];
 const productColorPresets = [
-  { name: "Altın", value: "#d6bf6a" },
+  { name: "AltÄ±n", value: "#d6bf6a" },
   { name: "Bej", value: "#d8c3a5" },
   { name: "Beyaz", value: "#f7f3ea" },
   { name: "Bordo", value: "#8f2532" },
@@ -66,19 +66,19 @@ const productColorPresets = [
   { name: "Gri", value: "#b8b8b8" },
   { name: "Haki", value: "#78824f" },
   { name: "Kahverengi", value: "#8a5a32" },
-  { name: "Kırmızı", value: "#d80922" },
+  { name: "KÄ±rmÄ±zÄ±", value: "#d80922" },
   { name: "Lacivert", value: "#243f8f" },
   { name: "Mavi", value: "#7eb0df" },
   { name: "Metalik", value: "#c8b9aa" },
   { name: "Mor", value: "#7c35c8" },
   { name: "Pembe", value: "#ee93cf" },
-  { name: "Sarı", value: "#ffd91a" },
+  { name: "SarÄ±", value: "#ffd91a" },
   { name: "Siyah", value: "#111111" },
   { name: "Turkuaz", value: "#3cc2aa" },
   { name: "Turuncu", value: "#f29a1f" },
-  { name: "Yeşil", value: "#69c82d" },
+  { name: "YeÅŸil", value: "#69c82d" },
   { name: "Krem", value: "#ede8dc" },
-  { name: "Çok Renkli", value: "#d84fd8" },
+  { name: "Ã‡ok Renkli", value: "#d84fd8" },
 ];
 const productSizePresets = [
   "Standart",
@@ -92,14 +92,14 @@ const productSizePresets = [
   ...Array.from({ length: 27 }, (_, index) => String(34 + index)),
 ];
 const productFallbackIconOptions = [
-  { label: "Elbise", value: "👗" },
-  { label: "Dış giyim", value: "🧥" },
-  { label: "Tesettür", value: "🧕" },
-  { label: "Çanta", value: "👜" },
-  { label: "Ayakkabı", value: "👠" },
-  { label: "Aksesuar", value: "◇" },
+  { label: "Elbise", value: "ğŸ‘—" },
+  { label: "DÄ±ÅŸ giyim", value: "ğŸ§¥" },
+  { label: "TesettÃ¼r", value: "ğŸ§•" },
+  { label: "Ã‡anta", value: "ğŸ‘œ" },
+  { label: "AyakkabÄ±", value: "ğŸ‘ " },
+  { label: "Aksesuar", value: "â—‡" },
   { label: "Suvera", value: "SU" },
-  { label: "Klasik", value: "✦" },
+  { label: "Klasik", value: "âœ¦" },
 ];
 type ProductPayload = {
   name: string;
@@ -160,7 +160,7 @@ function splitImageLines(value: string) {
 function parseMoneyInput(value: string) {
   const cleaned = value
     .trim()
-    .replace(/[₺\s]/g, "")
+    .replace(/[â‚º\s]/g, "")
     .replace(/[^0-9.,-]/g, "");
 
   if (!cleaned) return NaN;
@@ -350,7 +350,7 @@ export function ProductsSection({
       setCustomColorName("");
       setCustomColorHex("#d8c3a5");
       setShowCustomColorForm(false);
-      pushToast({ title: "Özel renk eklendi", description: newColor.name, tone: "success" });
+      pushToast({ title: "Ã–zel renk eklendi", description: newColor.name, tone: "success" });
     },
   });
 
@@ -363,7 +363,7 @@ export function ProductsSection({
       resetCategoryForm();
       pushToast({
         title: "Kategori eklendi",
-        description: "Katalog listesi güncellendi.",
+        description: "Katalog listesi gÃ¼ncellendi.",
         tone: "success",
       });
       await Promise.all([
@@ -382,8 +382,8 @@ export function ProductsSection({
     onSuccess: async () => {
       resetCategoryForm();
       pushToast({
-        title: "Kategori güncellendi",
-        description: "Kategori görseli ve bilgileri yenilendi.",
+        title: "Kategori gÃ¼ncellendi",
+        description: "Kategori gÃ¶rseli ve bilgileri yenilendi.",
         tone: "success",
       });
       await Promise.all([
@@ -399,8 +399,8 @@ export function ProductsSection({
       clearProductFormDraft(productDraftKey);
       resetProductForm();
       pushToast({
-        title: "Ürün oluşturuldu",
-        description: "Yeni ürün katalogda hazır.",
+        title: "ÃœrÃ¼n oluÅŸturuldu",
+        description: "Yeni Ã¼rÃ¼n katalogda hazÄ±r.",
         tone: "success",
       });
       await Promise.all([
@@ -418,8 +418,8 @@ export function ProductsSection({
     onSuccess: async () => {
       resetProductForm();
       pushToast({
-        title: "Ürün güncellendi",
-        description: "Katalog kaydı yenilendi.",
+        title: "ÃœrÃ¼n gÃ¼ncellendi",
+        description: "Katalog kaydÄ± yenilendi.",
         tone: "success",
       });
       await Promise.all([
@@ -433,8 +433,8 @@ export function ProductsSection({
     mutationFn: deleteProduct,
     onSuccess: async () => {
       pushToast({
-        title: "Ürün silindi",
-        description: "Katalog kaydı kaldırıldı.",
+        title: "ÃœrÃ¼n silindi",
+        description: "Katalog kaydÄ± kaldÄ±rÄ±ldÄ±.",
         tone: "info",
       });
       await Promise.all([
@@ -449,8 +449,8 @@ export function ProductsSection({
     onSuccess: async (response) => {
       setSelectedProductIds([]);
       pushToast({
-        title: "Toplu işlem tamamlandı",
-        description: `${response.affectedCount} ürün güncellendi.`,
+        title: "Toplu iÅŸlem tamamlandÄ±",
+        description: `${response.affectedCount} Ã¼rÃ¼n gÃ¼ncellendi.`,
         tone: "success",
       });
       await Promise.all([
@@ -465,7 +465,7 @@ export function ProductsSection({
     onSuccess: async () => {
       pushToast({
         title: "Kategori silindi",
-        description: "Katalog yapısı güncellendi.",
+        description: "Katalog yapÄ±sÄ± gÃ¼ncellendi.",
         tone: "info",
       });
       await Promise.all([
@@ -481,8 +481,8 @@ export function ProductsSection({
       setCategoryFeaturedProducts(targetId, productIds),
     onSuccess: async () => {
       pushToast({
-        title: "Öne çıkanlar güncellendi",
-        description: "Suvera kategori sayfasında öne çıkan ürünler yenilendi.",
+        title: "Ã–ne Ã§Ä±kanlar gÃ¼ncellendi",
+        description: "Suvera kategori sayfasÄ±nda Ã¶ne Ã§Ä±kan Ã¼rÃ¼nler yenilendi.",
         tone: "success",
       });
       await Promise.all([
@@ -502,8 +502,8 @@ export function ProductsSection({
         imagesText: [current.imagesText.trim(), ...uploadedLines].filter(Boolean).join("\n"),
       }));
       pushToast({
-        title: "Görseller yüklendi",
-        description: `${uploaded.length} görsel ürüne eklendi.`,
+        title: "GÃ¶rseller yÃ¼klendi",
+        description: `${uploaded.length} gÃ¶rsel Ã¼rÃ¼ne eklendi.`,
         tone: "success",
       });
     },
@@ -516,8 +516,8 @@ export function ProductsSection({
       if (!uploaded) return;
       setCategoryForm((current) => ({ ...current, imageUrl: uploaded }));
       pushToast({
-        title: "Kategori görseli yüklendi",
-        description: "Görsel kategori formuna eklendi.",
+        title: "Kategori gÃ¶rseli yÃ¼klendi",
+        description: "GÃ¶rsel kategori formuna eklendi.",
         tone: "success",
       });
     },
@@ -527,7 +527,7 @@ export function ProductsSection({
   if (summaryQuery.isError || categoriesQuery.isError || (productsQuery.isError && !productsQuery.data) || !summaryQuery.data || !categoriesQuery.data || !productsQuery.data) {
     return (
       <SectionError
-        message="Katalog verisi yüklenemedi."
+        message="Katalog verisi yÃ¼klenemedi."
         onRetry={() => {
           void summaryQuery.refetch();
           void categoriesQuery.refetch();
@@ -731,12 +731,12 @@ export function ProductsSection({
       imagesText: joinLines(product.images),
       tags: product.tags || "",
       description: product.description || "",
-      productStory: product.product_story || "",
+      productStory: product.product_story || String(product.details?.story || ""),
       shortDescription: String(product.details?.short_description || ""),
       story: String(product.details?.story || ""),
       measurements: String(product.details?.measurements || ""),
       deliveryNote: String(product.details?.delivery_note || ""),
-      emoji: product.emoji || "👗",
+      emoji: product.emoji || "ğŸ‘—",
     });
     setImageColor(product.colors[0] || "");
   }
@@ -770,22 +770,22 @@ export function ProductsSection({
       : Number(productForm.stock);
 
     if (!productForm.name.trim()) {
-      setProductFormError("Ürün adı zorunlu.");
+      setProductFormError("ÃœrÃ¼n adÄ± zorunlu.");
       return;
     }
 
     if (!Number.isFinite(price) || price <= 0) {
-      setProductFormError("Geçerli bir fiyat girin. Örnek: 1200 veya 1.200,50");
+      setProductFormError("GeÃ§erli bir fiyat girin. Ã–rnek: 1200 veya 1.200,50");
       return;
     }
 
     if (salePrice != null && (!Number.isFinite(salePrice) || salePrice < 0)) {
-      setProductFormError("İndirimli fiyat geçerli değil. Boş bırakabilir ya da 950 gibi yazabilirsiniz.");
+      setProductFormError("Ä°ndirimli fiyat geÃ§erli deÄŸil. BoÅŸ bÄ±rakabilir ya da 950 gibi yazabilirsiniz.");
       return;
     }
 
     if (!Number.isFinite(stock) || stock < 0) {
-      setProductFormError("Stok sayısı geçerli değil. Renk/beden stoklarını kontrol edin.");
+      setProductFormError("Stok sayÄ±sÄ± geÃ§erli deÄŸil. Renk/beden stoklarÄ±nÄ± kontrol edin.");
       return;
     }
 
@@ -802,7 +802,7 @@ export function ProductsSection({
       images: splitImageLines(productForm.imagesText),
       details: {
         short_description: productForm.shortDescription.trim(),
-        story: productForm.story.trim(),
+        story: "",
         measurements: productForm.measurements.trim(),
         delivery_note: productForm.deliveryNote.trim(),
       },
@@ -824,22 +824,22 @@ export function ProductsSection({
     <>
       <MetricGrid
         metrics={[
-          { label: "Aktif ürün", value: formatCount(summary.metrics.active_products), tone: "mint" },
+          { label: "Aktif Ã¼rÃ¼n", value: formatCount(summary.metrics.active_products), tone: "mint" },
           { label: "Taslak", value: formatCount(summary.metrics.draft_products), tone: "sun" },
-          { label: "Tükendi", value: formatCount(summary.metrics.out_of_stock_products), tone: "coral" },
+          { label: "TÃ¼kendi", value: formatCount(summary.metrics.out_of_stock_products), tone: "coral" },
           { label: "Kategori", value: formatCount(summary.metrics.category_count), tone: "leaf" },
         ]}
       />
       <div className="grid gap-5 xl:grid-cols-[1.2fr_0.8fr]">
         <Panel
-          title="Ürünler"
-          description="Türkiye mağaza vitrini için katalog kayıtları"
+          title="ÃœrÃ¼nler"
+          description="TÃ¼rkiye maÄŸaza vitrini iÃ§in katalog kayÄ±tlarÄ±"
           actions={(
             <div className="flex flex-wrap gap-2">
               <input
                 className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
                 onChange={(event) => setSearch(event.target.value)}
-                placeholder="Ürün ara"
+                placeholder="ÃœrÃ¼n ara"
                 value={search}
               />
               <select
@@ -847,7 +847,7 @@ export function ProductsSection({
                 onChange={(event) => setCategoryId(event.target.value)}
                 value={categoryId}
               >
-                <option value="">Tüm kategoriler</option>
+                <option value="">TÃ¼m kategoriler</option>
                 {categories.map((category) => (
                   <option key={category.id} value={category.id}>{category.name}</option>
                 ))}
@@ -857,14 +857,14 @@ export function ProductsSection({
                 onChange={(event) => setStatus(event.target.value as ProductStatus | "")}
                 value={status}
               >
-                <option value="">Tüm durumlar</option>
+                <option value="">TÃ¼m durumlar</option>
                 {productStatusOptions.map((option) => (
                   <option key={option} value={option}>{productStatusLabels[option]}</option>
                 ))}
               </select>
               {productsQuery.isFetching ? (
                 <span className="inline-flex h-10 items-center rounded-lg border border-line px-3 text-xs font-semibold text-zinc-500">
-                  Güncelleniyor
+                  GÃ¼ncelleniyor
                 </span>
               ) : null}
             </div>
@@ -872,13 +872,13 @@ export function ProductsSection({
         >
           {canManageCatalog && products.length > 0 ? (
             <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-line bg-zinc-50 px-3 py-3">
-              <span className="text-xs font-semibold text-zinc-600">{selectedProductIds.length} ürün seçili</span>
+              <span className="text-xs font-semibold text-zinc-600">{selectedProductIds.length} Ã¼rÃ¼n seÃ§ili</span>
               <button
                 className="focus-ring inline-flex h-9 items-center rounded-lg border border-line bg-white px-3 text-xs font-semibold text-ink"
                 onClick={toggleVisibleProductSelection}
                 type="button"
               >
-                {products.every((product) => selectedProductIds.includes(product.id)) ? "Görünenleri bırak" : "Görünenleri seç"}
+                {products.every((product) => selectedProductIds.includes(product.id)) ? "GÃ¶rÃ¼nenleri bÄ±rak" : "GÃ¶rÃ¼nenleri seÃ§"}
               </button>
               <select
                 className="focus-ring h-9 rounded-lg border border-line bg-white px-2 text-xs"
@@ -913,7 +913,7 @@ export function ProductsSection({
                 onClick={() => runBulkAction("category")}
                 type="button"
               >
-                Kategoriye taşı
+                Kategoriye taÅŸÄ±
               </button>
               {canDeleteCatalog ? (
                 <button
@@ -922,15 +922,15 @@ export function ProductsSection({
                   onClick={() => runBulkAction("delete")}
                   type="button"
                 >
-                  Seçili ürünleri sil
+                  SeÃ§ili Ã¼rÃ¼nleri sil
                 </button>
               ) : null}
               {bulkProductsMutation.isError ? <InlineError message={bulkProductsMutation.error.message} /> : null}
             </div>
           ) : null}
           <DataGrid
-            columns={["Seç", "Ürün", "Kategori", "Vitrin", "Fiyat", "Stok", "Aksiyon"]}
-            emptyMessage="Bu filtrelerle ürün bulunamadı."
+            columns={["SeÃ§", "ÃœrÃ¼n", "Kategori", "Vitrin", "Fiyat", "Stok", "Aksiyon"]}
+            emptyMessage="Bu filtrelerle Ã¼rÃ¼n bulunamadÄ±."
             rows={products}
             renderRow={(product) => (
               <tr key={product.id}>
@@ -947,9 +947,9 @@ export function ProductsSection({
                   <div className="space-y-1">
                     <p className="font-semibold text-ink">{product.name}</p>
                     <p className="text-xs text-zinc-500">
-                      {product.emoji || "Ürün"}
+                      {product.emoji || "ÃœrÃ¼n"}
                       {" - "}
-                      {product.images.length} görsel
+                      {product.images.length} gÃ¶rsel
                       {product.tags ? ` - ${product.tags}` : ""}
                     </p>
                   </div>
@@ -966,7 +966,7 @@ export function ProductsSection({
                   <div className="space-y-2">
                     <p>{formatCount(product.stock)}</p>
                     <StatusPill tone={product.stock === 0 ? "coral" : product.status === "active" ? "mint" : "sun"}>
-                      {product.stock === 0 ? "Tükendi" : productStatusLabels[product.status]}
+                      {product.stock === 0 ? "TÃ¼kendi" : productStatusLabels[product.status]}
                     </StatusPill>
                   </div>
                 </DataCell>
@@ -978,7 +978,7 @@ export function ProductsSection({
                         onClick={() => startEditingProduct(product)}
                         type="button"
                       >
-                        Düzenle
+                        DÃ¼zenle
                       </button>
                     ) : null}
                     {canDeleteCatalog ? (
@@ -1001,8 +1001,8 @@ export function ProductsSection({
 
         <div className="space-y-5">
           <Panel
-            title={editingProductId ? "Ürünü düzenle" : "Hızlı ürün oluştur"}
-            description={editingProductId ? "Sadece değiştirmek istediğin alanları güncelle." : "Ürün adı, fiyat, stok ve görsellerle ürünü birkaç adımda yayına hazırla."}
+            title={editingProductId ? "ÃœrÃ¼nÃ¼ dÃ¼zenle" : "HÄ±zlÄ± Ã¼rÃ¼n oluÅŸtur"}
+            description={editingProductId ? "Sadece deÄŸiÅŸtirmek istediÄŸin alanlarÄ± gÃ¼ncelle." : "ÃœrÃ¼n adÄ±, fiyat, stok ve gÃ¶rsellerle Ã¼rÃ¼nÃ¼ birkaÃ§ adÄ±mda yayÄ±na hazÄ±rla."}
           >
             <div className="space-y-5">
               <div className="grid gap-3 sm:grid-cols-3">
@@ -1011,17 +1011,17 @@ export function ProductsSection({
                   <p className="mt-1 text-sm font-semibold text-ink">Ad, fiyat ve stok</p>
                 </div>
                 <div className="rounded-lg border border-line bg-zinc-50 px-3 py-3">
-                  <p className="text-xs font-semibold uppercase text-zinc-500">2. Görsel</p>
-                  <p className="mt-1 text-sm font-semibold text-ink">Kapak fotoğrafını yükle</p>
+                  <p className="text-xs font-semibold uppercase text-zinc-500">2. GÃ¶rsel</p>
+                  <p className="mt-1 text-sm font-semibold text-ink">Kapak fotoÄŸrafÄ±nÄ± yÃ¼kle</p>
                 </div>
                 <div className="rounded-lg border border-line bg-zinc-50 px-3 py-3">
-                  <p className="text-xs font-semibold uppercase text-zinc-500">3. Yayın</p>
-                  <p className="mt-1 text-sm font-semibold text-ink">Aktif veya taslak seç</p>
+                  <p className="text-xs font-semibold uppercase text-zinc-500">3. YayÄ±n</p>
+                  <p className="mt-1 text-sm font-semibold text-ink">Aktif veya taslak seÃ§</p>
                 </div>
               </div>
               <form className="grid gap-4" onSubmit={submitProduct}>
                 <div className="flex items-center justify-between gap-3">
-                  <FieldLabel htmlFor="product-name">{editingProductId ? "Ürünü düzenle" : "Yeni ürün"}</FieldLabel>
+                  <FieldLabel htmlFor="product-name">{editingProductId ? "ÃœrÃ¼nÃ¼ dÃ¼zenle" : "Yeni Ã¼rÃ¼n"}</FieldLabel>
                   {editingProductId ? (
                     <button
                       className="focus-ring rounded-lg border border-line px-3 py-1.5 text-xs font-semibold text-zinc-600"
@@ -1045,12 +1045,12 @@ export function ProductsSection({
                   className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
                   id="product-name"
                   onChange={(event) => setProductForm((current) => ({ ...current, name: event.target.value }))}
-                  placeholder="Ürün adı"
+                  placeholder="ÃœrÃ¼n adÄ±"
                   value={productForm.name}
                 />
                 <div className="grid gap-4">
                   <div className="space-y-2">
-                    <FieldLabel htmlFor="product-fallback-icon">Fotoğraf yoksa görünecek simge</FieldLabel>
+                    <FieldLabel htmlFor="product-fallback-icon">FotoÄŸraf yoksa gÃ¶rÃ¼necek simge</FieldLabel>
                     <div className="grid grid-cols-2 gap-2 lg:grid-cols-4" id="product-fallback-icon">
                       {productFallbackIconOptions.map((option) => {
                         const selected = productForm.emoji === option.value;
@@ -1072,7 +1072,7 @@ export function ProductsSection({
                         );
                       })}
                     </div>
-                    <InlineHint>Ürün fotoğrafı yoksa vitrinde bu simge görünür; fotoğraf varsa kullanılmaz.</InlineHint>
+                    <InlineHint>ÃœrÃ¼n fotoÄŸrafÄ± yoksa vitrinde bu simge gÃ¶rÃ¼nÃ¼r; fotoÄŸraf varsa kullanÄ±lmaz.</InlineHint>
                   </div>
                   <div className="space-y-2">
                     <FieldLabel htmlFor="product-new-tag">Etiketler</FieldLabel>
@@ -1083,17 +1083,17 @@ export function ProductsSection({
                             className="focus-ring inline-flex items-center gap-2 rounded-full bg-white px-3 py-1.5 text-xs font-semibold text-ink shadow-sm"
                             key={tag}
                             onClick={() => removeProductTag(tag)}
-                            title="Etiketi kaldır"
+                            title="Etiketi kaldÄ±r"
                             type="button"
                           >
                             {tag}
-                            <span className="text-zinc-400">×</span>
+                            <span className="text-zinc-400">Ã—</span>
                           </button>
                         ))}
                       </div>
                     ) : (
                       <div className="rounded-lg border border-dashed border-line bg-zinc-50 px-3 py-2 text-xs text-zinc-500">
-                        Henüz etiket seçilmedi.
+                        HenÃ¼z etiket seÃ§ilmedi.
                       </div>
                     )}
                     {availableProductTags.length ? (
@@ -1138,7 +1138,7 @@ export function ProductsSection({
                         Ekle
                       </button>
                     </div>
-                    <InlineHint>Mevcut etiketlerden seçebilir veya yeni etiket yazıp bu üründe kullanabilirsin.</InlineHint>
+                    <InlineHint>Mevcut etiketlerden seÃ§ebilir veya yeni etiket yazÄ±p bu Ã¼rÃ¼nde kullanabilirsin.</InlineHint>
                   </div>
                 </div>
                 <div className="grid gap-3 sm:grid-cols-2">
@@ -1147,7 +1147,7 @@ export function ProductsSection({
                     onChange={(event) => setProductForm((current) => ({ ...current, categoryId: event.target.value }))}
                     value={productForm.categoryId}
                   >
-                    <option value="">Kategori seç</option>
+                    <option value="">Kategori seÃ§</option>
                     {categories.map((category) => (
                       <option key={category.id} value={category.id}>{category.name}</option>
                     ))}
@@ -1174,7 +1174,7 @@ export function ProductsSection({
                     className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
                     inputMode="decimal"
                     onChange={(event) => setProductForm((current) => ({ ...current, salePrice: event.target.value }))}
-                    placeholder="İndirimli fiyat"
+                    placeholder="Ä°ndirimli fiyat"
                     value={productForm.salePrice}
                   />
                   <input
@@ -1188,13 +1188,13 @@ export function ProductsSection({
                 </div>
                 <details className="group rounded-lg border border-line bg-zinc-50">
                   <summary className="focus-ring flex cursor-pointer list-none items-center justify-between gap-3 rounded-lg px-4 py-3 text-sm font-semibold text-ink">
-                    <span>Renk, beden ve stok akışı (önce renk, sonra beden, sonra stok)</span>
-                    <span className="text-xs font-semibold text-zinc-500 group-open:hidden">Aç</span>
+                    <span>Renk, beden ve stok akÄ±ÅŸÄ± (Ã¶nce renk, sonra beden, sonra stok)</span>
+                    <span className="text-xs font-semibold text-zinc-500 group-open:hidden">AÃ§</span>
                     <span className="hidden text-xs font-semibold text-zinc-500 group-open:inline">Kapat</span>
                   </summary>
                   <div className="space-y-4 border-t border-line bg-white px-4 py-4">
                     <div className="space-y-2">
-                      <FieldLabel htmlFor="product-colors">Renk seç (seçilen her renk için beden ve stok kutuları açılır)</FieldLabel>
+                      <FieldLabel htmlFor="product-colors">Renk seÃ§ (seÃ§ilen her renk iÃ§in beden ve stok kutularÄ± aÃ§Ä±lÄ±r)</FieldLabel>
                       <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3" id="product-colors">
                         {productColorPresets.map((color) => {
                           const entry = `${color.name} ${color.value}`;
@@ -1237,7 +1237,7 @@ export function ProductsSection({
                                   style={{ background: color.hex }}
                                 />
                                 <span className="text-xs font-semibold leading-tight text-zinc-800">{color.name}</span>
-                                <span className="ml-auto text-[10px] text-zinc-400">Özel</span>
+                                <span className="ml-auto text-[10px] text-zinc-400">Ã–zel</span>
                               </button>
                             );
                           })}
@@ -1246,11 +1246,11 @@ export function ProductsSection({
                       {showCustomColorForm ? (
                         <div className="mt-2 flex flex-wrap items-end gap-2 rounded-lg border border-line bg-zinc-50 p-3">
                           <div className="grid gap-1">
-                            <label className="text-xs font-semibold text-zinc-600">Renk adı</label>
+                            <label className="text-xs font-semibold text-zinc-600">Renk adÄ±</label>
                             <input
                               className="focus-ring h-9 rounded-md border border-line bg-white px-2 text-sm"
                               onChange={(e) => setCustomColorName(e.target.value)}
-                              placeholder="ör: Bakır"
+                              placeholder="Ã¶r: BakÄ±r"
                               value={customColorName}
                             />
                           </div>
@@ -1280,7 +1280,7 @@ export function ProductsSection({
                             {customColorMutation.isPending ? "Ekleniyor" : "Ekle"}
                           </Button>
                           <Button onClick={() => setShowCustomColorForm(false)} type="button" variant="outline">
-                            İptal
+                            Ä°ptal
                           </Button>
                         </div>
                       ) : (
@@ -1290,10 +1290,10 @@ export function ProductsSection({
                           onClick={() => setShowCustomColorForm(true)}
                           type="button"
                         >
-                          + Özel Renk Ekle
+                          + Ã–zel Renk Ekle
                         </button>
                       )}
-                      <InlineHint>Renk adı sitede müşteriye görünür; renk kodu seçim butonunun ve görsel eşleşmenin rengini belirler.</InlineHint>
+                      <InlineHint>Renk adÄ± sitede mÃ¼ÅŸteriye gÃ¶rÃ¼nÃ¼r; renk kodu seÃ§im butonunun ve gÃ¶rsel eÅŸleÅŸmenin rengini belirler.</InlineHint>
                     </div>
                     {productColors.length > 0 ? (
                       <div className="space-y-3">
@@ -1316,11 +1316,11 @@ export function ProductsSection({
                                   onClick={() => removeProductColor(color)}
                                   type="button"
                                 >
-                                  Rengi kaldır
+                                  Rengi kaldÄ±r
                                 </button>
                               </div>
                               <div className="mt-3 space-y-2">
-                                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-500">Beden seç</p>
+                                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-500">Beden seÃ§</p>
                                 <div className="flex flex-wrap gap-2">
                                   {productSizePresets.map((size) => {
                                     const isSelected = colorVariants.some((variant) => sameEntry(variant.size, size));
@@ -1343,7 +1343,7 @@ export function ProductsSection({
                                 </div>
                               </div>
                               <div className="mt-3 space-y-2">
-                                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-500">Stok sayısı</p>
+                                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-500">Stok sayÄ±sÄ±</p>
                                 {colorVariants.length > 0 ? (
                                   <div className="grid gap-2 sm:grid-cols-2">
                                     {colorVariants.map((variant) => (
@@ -1358,7 +1358,7 @@ export function ProductsSection({
                                             onClick={() => removeVariantSize(color, variant.size)}
                                             type="button"
                                           >
-                                            Kaldır
+                                            KaldÄ±r
                                           </button>
                                         </div>
                                         <input
@@ -1374,7 +1374,7 @@ export function ProductsSection({
                                     ))}
                                   </div>
                                 ) : (
-                                  <InlineHint>Bu renk için önce beden seçin; ardından her bedenin stok kutusu burada açılır.</InlineHint>
+                                  <InlineHint>Bu renk iÃ§in Ã¶nce beden seÃ§in; ardÄ±ndan her bedenin stok kutusu burada aÃ§Ä±lÄ±r.</InlineHint>
                                 )}
                               </div>
                             </div>
@@ -1383,24 +1383,24 @@ export function ProductsSection({
                       </div>
                     ) : (
                       <div className="rounded-lg border border-dashed border-line bg-zinc-50 px-3 py-4 text-sm text-zinc-500">
-                        Önce bir renk seçin. Renk seçilince hemen altında beden ve stok kutuları açılır.
+                        Ã–nce bir renk seÃ§in. Renk seÃ§ilince hemen altÄ±nda beden ve stok kutularÄ± aÃ§Ä±lÄ±r.
                       </div>
                     )}
                     <div className="rounded-lg border border-line bg-zinc-50 px-3 py-2 text-xs text-zinc-600">
-                      Toplam stok, seçilen renk/beden kutularındaki stokların toplamından otomatik hesaplanır.
+                      Toplam stok, seÃ§ilen renk/beden kutularÄ±ndaki stoklarÄ±n toplamÄ±ndan otomatik hesaplanÄ±r.
                     </div>
                   </div>
                 </details>
                 <div className="space-y-2">
                   <div className="flex items-center justify-between gap-3">
-                    <FieldLabel htmlFor="product-images">Ürün görselleri (kapak ve renk seçilince değişen galeri)</FieldLabel>
+                    <FieldLabel htmlFor="product-images">ÃœrÃ¼n gÃ¶rselleri (kapak ve renk seÃ§ilince deÄŸiÅŸen galeri)</FieldLabel>
                     <div className="flex flex-wrap items-center justify-end gap-2">
                       <select
                         className="focus-ring h-9 rounded-lg border border-line bg-white px-2 text-xs"
                         onChange={(event) => setImageColor(event.target.value)}
                         value={imageColor}
                       >
-                          <option value="">Genel görsel</option>
+                          <option value="">Genel gÃ¶rsel</option>
                         {productColors.map((color) => (
                           <option key={color} value={color}>{colorEntryLabel(color)}</option>
                         ))}
@@ -1419,7 +1419,7 @@ export function ProductsSection({
                           }}
                           type="file"
                         />
-                        {uploadImagesMutation.isPending ? "Yükleniyor" : "Görsel yükle"}
+                        {uploadImagesMutation.isPending ? "YÃ¼kleniyor" : "GÃ¶rsel yÃ¼kle"}
                       </label>
                     </div>
                   </div>
@@ -1427,10 +1427,10 @@ export function ProductsSection({
                     className="focus-ring min-h-32 rounded-lg border border-line bg-white px-3 py-3 text-sm"
                     id="product-images"
                     onChange={(event) => setProductForm((current) => ({ ...current, imagesText: event.target.value }))}
-                    placeholder={"Önce renk seçip görsel yükleyin ya da elle yazın\n#111111 | /uploads/siyah.webp\n#d8c6b0 | /uploads/ekru.webp\n/uploads/genel-kapak.webp"}
+                    placeholder={"Ã–nce renk seÃ§ip gÃ¶rsel yÃ¼kleyin ya da elle yazÄ±n\n#111111 | /uploads/siyah.webp\n#d8c6b0 | /uploads/ekru.webp\n/uploads/genel-kapak.webp"}
                     value={productForm.imagesText}
                   />
-                  <InlineHint>Renk seçiliyken yüklenen görsel o renge bağlanır. Düz linkler genel galeri görseli olur.</InlineHint>
+                  <InlineHint>Renk seÃ§iliyken yÃ¼klenen gÃ¶rsel o renge baÄŸlanÄ±r. DÃ¼z linkler genel galeri gÃ¶rseli olur.</InlineHint>
                   {imageEntries.length > 0 ? (
                     <div className="grid gap-3 sm:grid-cols-3">
                       {imageEntries.slice(0, 9).map((entry, index) => (
@@ -1444,7 +1444,7 @@ export function ProductsSection({
                             width={240}
                           />
                           <p className="truncate px-3 py-2 text-xs font-semibold text-zinc-600">
-                            {entry.color ? `${colorEntryLabel(entry.color)} rengi` : "Genel görsel"}
+                            {entry.color ? `${colorEntryLabel(entry.color)} rengi` : "Genel gÃ¶rsel"}
                           </p>
                         </div>
                       ))}
@@ -1453,70 +1453,61 @@ export function ProductsSection({
                   {uploadImagesMutation.isError ? <InlineError message={uploadImagesMutation.error.message} /> : null}
                 </div>
                 <div className="space-y-2">
-                  <FieldLabel htmlFor="product-short-description">Kısa açıklama (fiyatın altında görünen kısa ürün özeti)</FieldLabel>
+                  <FieldLabel htmlFor="product-short-description">KÄ±sa aÃ§Ä±klama (fiyatÄ±n altÄ±nda gÃ¶rÃ¼nen kÄ±sa Ã¼rÃ¼n Ã¶zeti)</FieldLabel>
                   <textarea
                     className="focus-ring min-h-24 rounded-lg border border-line bg-white px-3 py-3 text-sm"
                     id="product-short-description"
                     onChange={(event) => setProductForm((current) => ({ ...current, shortDescription: event.target.value }))}
-                    placeholder="Detay sayfasında fiyatın altında kısa özet olarak görünür."
+                    placeholder="Detay sayfasÄ±nda fiyatÄ±n altÄ±nda kÄ±sa Ã¶zet olarak gÃ¶rÃ¼nÃ¼r."
                     value={productForm.shortDescription}
                   />
                 </div>
                 <details className="group rounded-lg border border-line bg-zinc-50">
                   <summary className="focus-ring flex cursor-pointer list-none items-center justify-between gap-3 rounded-lg px-4 py-3 text-sm font-semibold text-ink">
-                    <span>Uzun açıklama, ölçü ve teslimat notu (ürün detayındaki bilgi sekmeleri)</span>
-                    <span className="text-xs font-semibold text-zinc-500 group-open:hidden">Aç</span>
+                    <span>Uzun aÃ§Ä±klama, Ã¶lÃ§Ã¼ ve teslimat notu (Ã¼rÃ¼n detayÄ±ndaki bilgi sekmeleri)</span>
+                    <span className="text-xs font-semibold text-zinc-500 group-open:hidden">AÃ§</span>
                     <span className="hidden text-xs font-semibold text-zinc-500 group-open:inline">Kapat</span>
                   </summary>
                   <div className="space-y-4 border-t border-line bg-white px-4 py-4">
                     <div className="space-y-2">
-                      <FieldLabel htmlFor="product-description">Ana açıklama (ürünün genel metni ve SEO içeriği)</FieldLabel>
+                      <FieldLabel htmlFor="product-description">Ana aÃ§Ä±klama (Ã¼rÃ¼nÃ¼n genel metni ve SEO iÃ§eriÄŸi)</FieldLabel>
                       <textarea
                         className="focus-ring min-h-32 rounded-lg border border-line bg-white px-3 py-3 text-sm"
                         id="product-description"
                         onChange={(event) => setProductForm((current) => ({ ...current, description: event.target.value }))}
-                        placeholder="Genel ürün açıklaması. Hikaye ve ölçü metni için kaynak olarak da kullanılabilir."
+                        placeholder="Genel ürün açıklaması. Ölçü metni ve SEO için kaynak olarak da kullanılabilir."
                         value={productForm.description}
                       />
                     </div>
                     <div className="space-y-2">
-                      <FieldLabel htmlFor="product-story">Ürün Hikayesi (detay sayfasındaki &ldquo;Ürün Hikayesi&rdquo; accordion içeriği)</FieldLabel>
-                      <textarea
-                        className="focus-ring min-h-32 rounded-lg border border-line bg-white px-3 py-3 text-sm"
-                        id="product-story"
-                        onChange={(event) => setProductForm((current) => ({ ...current, story: event.target.value }))}
-                        placeholder="Detay sayfasındaki Ürün Hikayesi accordion'ı için paragraflar."
-                        value={productForm.story}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <FieldLabel htmlFor="product-product-story">Ürünün Duruşu (detay sayfasındaki bağımsız &ldquo;Ürünün Duruşu&rdquo; bölümü)</FieldLabel>
+                      <FieldLabel htmlFor="product-product-story">Ürünün Duruşu</FieldLabel>
                       <textarea
                         className="focus-ring min-h-32 rounded-lg border border-line bg-white px-3 py-3 text-sm"
                         id="product-product-story"
                         onChange={(event) => setProductForm((current) => ({ ...current, productStory: event.target.value }))}
-                        placeholder="Kumaş, kalıp ve kullanım hissi; ürünün duruşunu anlatan bağımsız metin."
+                        placeholder="Ürünün kumaş duruşu, kalıp hissi, kullanım tarzı ve kombin etkisini anlatın."
                         value={productForm.productStory}
                       />
+                      <InlineHint>Bu metin Suvera ürün detayında &ldquo;Ürünün Duruşu&rdquo; olarak gösterilir.</InlineHint>
                     </div>
                     <div className="grid gap-3 sm:grid-cols-2">
                       <div className="space-y-2">
-                        <FieldLabel htmlFor="product-measurements">Ölçü bilgileri (detay sayfasındaki ölçü tablosu)</FieldLabel>
+                        <FieldLabel htmlFor="product-measurements">Ã–lÃ§Ã¼ bilgileri (detay sayfasÄ±ndaki Ã¶lÃ§Ã¼ tablosu)</FieldLabel>
                         <textarea
                           className="focus-ring min-h-32 rounded-lg border border-line bg-white px-3 py-3 text-sm"
                           id="product-measurements"
                           onChange={(event) => setProductForm((current) => ({ ...current, measurements: event.target.value }))}
-                          placeholder={"Her satıra bir ölçü satırı yazın\nBoy: 138 cm\nGöğüs: 110 cm"}
+                          placeholder={"Her satÄ±ra bir Ã¶lÃ§Ã¼ satÄ±rÄ± yazÄ±n\nBoy: 138 cm\nGÃ¶ÄŸÃ¼s: 110 cm"}
                           value={productForm.measurements}
                         />
                       </div>
                       <div className="space-y-2">
-                        <FieldLabel htmlFor="product-delivery-note">Teslimat notu (kargo, iade ve hazırlık bilgisi)</FieldLabel>
+                        <FieldLabel htmlFor="product-delivery-note">Teslimat notu (kargo, iade ve hazÄ±rlÄ±k bilgisi)</FieldLabel>
                         <textarea
                           className="focus-ring min-h-32 rounded-lg border border-line bg-white px-3 py-3 text-sm"
                           id="product-delivery-note"
                           onChange={(event) => setProductForm((current) => ({ ...current, deliveryNote: event.target.value }))}
-                          placeholder="Kargo süresi, iade veya teslimat bilgilendirmeleri."
+                          placeholder="Kargo sÃ¼resi, iade veya teslimat bilgilendirmeleri."
                           value={productForm.deliveryNote}
                         />
                       </div>
@@ -1529,12 +1520,12 @@ export function ProductsSection({
                   type="submit"
                 >
                   {updateProductMutation.isPending
-                    ? "Güncelleniyor"
+                    ? "GÃ¼ncelleniyor"
                     : productMutation.isPending
-                      ? "Oluşturuluyor"
+                      ? "OluÅŸturuluyor"
                       : editingProductId
-                        ? "Ürünü güncelle"
-                        : "Ürün oluştur"}
+                        ? "ÃœrÃ¼nÃ¼ gÃ¼ncelle"
+                        : "ÃœrÃ¼n oluÅŸtur"}
                 </button>
                 {productFormError ? <InlineError message={productFormError} /> : null}
                 {productMutation.isError && <InlineError message={productMutation.error.message} />}
@@ -1543,17 +1534,17 @@ export function ProductsSection({
             </div>
           </Panel>
 
-          <Panel title="Kategori ayarları" description="Kategori ekleme nadiren kullanılan bir ayar olarak burada tutulur.">
+          <Panel title="Kategori ayarlarÄ±" description="Kategori ekleme nadiren kullanÄ±lan bir ayar olarak burada tutulur.">
             <details className="group rounded-lg border border-line bg-zinc-50">
               <summary className="focus-ring flex cursor-pointer list-none items-center justify-between gap-3 rounded-lg px-4 py-3 text-sm font-semibold text-ink">
-                <span>{editingCategoryId ? "Kategoriyi düzenle" : "Kategori ekle veya düzenle"}</span>
-                <span className="text-xs font-semibold text-zinc-500 group-open:hidden">Aç</span>
+                <span>{editingCategoryId ? "Kategoriyi dÃ¼zenle" : "Kategori ekle veya dÃ¼zenle"}</span>
+                <span className="text-xs font-semibold text-zinc-500 group-open:hidden">AÃ§</span>
                 <span className="hidden text-xs font-semibold text-zinc-500 group-open:inline">Kapat</span>
               </summary>
               <form className="space-y-3 border-t border-line bg-white px-4 py-4" onSubmit={submitCategory}>
                 <div className="flex items-center justify-between gap-3">
                   <FieldLabel htmlFor="category-name">
-                    {editingCategoryId ? "Kategoriyi düzenle" : "Yeni kategori"} (Suvera ana sayfasındaki kategori kartını besler)
+                    {editingCategoryId ? "Kategoriyi dÃ¼zenle" : "Yeni kategori"} (Suvera ana sayfasÄ±ndaki kategori kartÄ±nÄ± besler)
                   </FieldLabel>
                   {editingCategoryId ? (
                     <button
@@ -1561,7 +1552,7 @@ export function ProductsSection({
                       onClick={resetCategoryForm}
                       type="button"
                     >
-                      Vazgeç
+                      VazgeÃ§
                     </button>
                   ) : null}
                 </div>
@@ -1570,7 +1561,7 @@ export function ProductsSection({
                     className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
                     id="category-name"
                     onChange={(event) => setCategoryForm((current) => ({ ...current, name: event.target.value }))}
-                    placeholder="Kategori adı"
+                    placeholder="Kategori adÄ±"
                     value={categoryForm.name}
                   />
                   <input
@@ -1584,7 +1575,7 @@ export function ProductsSection({
                   <input
                     className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
                     onChange={(event) => setCategoryForm((current) => ({ ...current, imageUrl: event.target.value }))}
-                    placeholder="Kategori görsel URL'si veya /uploads yolu (öneri: yatay 1600x900)"
+                    placeholder="Kategori gÃ¶rsel URL'si veya /uploads yolu (Ã¶neri: yatay 1600x900)"
                     value={categoryForm.imageUrl}
                   />
                   <label className="focus-ring inline-flex h-10 cursor-pointer items-center justify-center rounded-lg border border-line px-3 text-xs font-semibold text-ink">
@@ -1600,10 +1591,10 @@ export function ProductsSection({
                       }}
                       type="file"
                     />
-                    {uploadCategoryImageMutation.isPending ? "Yükleniyor" : "Kategori görseli yükle"}
+                    {uploadCategoryImageMutation.isPending ? "YÃ¼kleniyor" : "Kategori gÃ¶rseli yÃ¼kle"}
                   </label>
                 </div>
-                <InlineHint>Suvera ana sayfada ve kategori sayfasında bu fotoğrafı alana göre kırpar. Ürünü ortada bırakan yatay 1600x900, aydınlık bir görsel kullan.</InlineHint>
+                <InlineHint>Suvera ana sayfada ve kategori sayfasÄ±nda bu fotoÄŸrafÄ± alana gÃ¶re kÄ±rpar. ÃœrÃ¼nÃ¼ ortada bÄ±rakan yatay 1600x900, aydÄ±nlÄ±k bir gÃ¶rsel kullan.</InlineHint>
                 {categoryForm.imageUrl ? (
                   <div className="overflow-hidden rounded-lg border border-line bg-zinc-100">
                     <Image
@@ -1614,7 +1605,7 @@ export function ProductsSection({
                       unoptimized
                       width={640}
                     />
-                    <p className="px-3 py-2 text-xs font-semibold text-zinc-600">Suvera kategori kartı önizlemesi</p>
+                    <p className="px-3 py-2 text-xs font-semibold text-zinc-600">Suvera kategori kartÄ± Ã¶nizlemesi</p>
                   </div>
                 ) : null}
                 <button
@@ -1623,14 +1614,14 @@ export function ProductsSection({
                   type="submit"
                 >
                   {updateCategoryMutation.isPending
-                    ? "Güncelleniyor"
+                    ? "GÃ¼ncelleniyor"
                     : categoryMutation.isPending
                       ? "Ekleniyor"
                       : editingCategoryId
-                        ? "Kategoriyi güncelle"
+                        ? "Kategoriyi gÃ¼ncelle"
                         : "Kategori ekle"}
                 </button>
-                {!canManageCatalog && <InlineHint>Bu alanda yazma yetkisi için sahip veya yönetici rolüne ihtiyaç var.</InlineHint>}
+                {!canManageCatalog && <InlineHint>Bu alanda yazma yetkisi iÃ§in sahip veya yÃ¶netici rolÃ¼ne ihtiyaÃ§ var.</InlineHint>}
                 {categoryMutation.isError && <InlineError message={categoryMutation.error.message} />}
                 {updateCategoryMutation.isError && <InlineError message={updateCategoryMutation.error.message} />}
                 {uploadCategoryImageMutation.isError && <InlineError message={uploadCategoryImageMutation.error.message} />}
@@ -1638,7 +1629,7 @@ export function ProductsSection({
             </details>
 
             <div className="mt-4 space-y-3">
-              {categories.length === 0 && <InlineHint>Henüz kategori yok. Ürünleri kategorisiz de oluşturabilirsin.</InlineHint>}
+              {categories.length === 0 && <InlineHint>HenÃ¼z kategori yok. ÃœrÃ¼nleri kategorisiz de oluÅŸturabilirsin.</InlineHint>}
               {categories.map((category) => {
                 const isFeaturedOpen = featuredCategoryId === category.id;
                 const featuredProducts = featuredCategoryProductsQuery.data ?? [];
@@ -1676,7 +1667,7 @@ export function ProductsSection({
                             onClick={() => setFeaturedCategoryId(isFeaturedOpen ? null : category.id)}
                             type="button"
                           >
-                            {isFeaturedOpen ? "Öne çıkanları kapat" : "Öne çıkanlar"}
+                            {isFeaturedOpen ? "Ã–ne Ã§Ä±kanlarÄ± kapat" : "Ã–ne Ã§Ä±kanlar"}
                           </button>
                         ) : null}
                         {canManageCatalog ? (
@@ -1685,7 +1676,7 @@ export function ProductsSection({
                             onClick={() => startEditingCategory(category)}
                             type="button"
                           >
-                            Düzenle
+                            DÃ¼zenle
                           </button>
                         ) : null}
                         {canDeleteCatalog ? (
@@ -1704,18 +1695,18 @@ export function ProductsSection({
                       <div className="space-y-3 border-t border-line bg-zinc-50 px-4 py-4">
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <p className="text-xs font-semibold uppercase tracking-[1.5px] text-zinc-600">
-                            Suvera &ldquo;{category.name}&rdquo; sayfasındaki öne çıkanlar
+                            Suvera &ldquo;{category.name}&rdquo; sayfasÄ±ndaki Ã¶ne Ã§Ä±kanlar
                           </p>
                           <p className="text-xs text-zinc-500">
-                            Seçili: <strong>{featuredSelection.size}</strong> ürün
+                            SeÃ§ili: <strong>{featuredSelection.size}</strong> Ã¼rÃ¼n
                           </p>
                         </div>
                         {isLoadingFeatured ? (
-                          <InlineHint>Kategori ürünleri yükleniyor.</InlineHint>
+                          <InlineHint>Kategori Ã¼rÃ¼nleri yÃ¼kleniyor.</InlineHint>
                         ) : featuredCategoryProductsQuery.isError ? (
-                          <InlineError message="Kategori ürünleri yüklenemedi." />
+                          <InlineError message="Kategori Ã¼rÃ¼nleri yÃ¼klenemedi." />
                         ) : featuredProducts.length === 0 ? (
-                          <InlineHint>Bu kategoride henüz ürün yok.</InlineHint>
+                          <InlineHint>Bu kategoride henÃ¼z Ã¼rÃ¼n yok.</InlineHint>
                         ) : (
                           <>
                             <div className="grid max-h-72 gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
@@ -1754,16 +1745,16 @@ export function ProductsSection({
                                 })}
                                 type="button"
                               >
-                                {featuredCategoryMutation.isPending ? "Kaydediliyor" : "Öne çıkanları kaydet"}
+                                {featuredCategoryMutation.isPending ? "Kaydediliyor" : "Ã–ne Ã§Ä±kanlarÄ± kaydet"}
                               </button>
                               <button
                                 className="focus-ring inline-flex h-9 items-center rounded-lg border border-line px-3 text-xs font-semibold text-zinc-600"
                                 onClick={() => setFeaturedSelection(new Set())}
                                 type="button"
                               >
-                                Seçimleri temizle
+                                SeÃ§imleri temizle
                               </button>
-                              <InlineHint>Suvera kategori sayfasındaki &ldquo;Öne çıkanlar&rdquo; şeridi bu seçime göre yenilenir.</InlineHint>
+                              <InlineHint>Suvera kategori sayfasÄ±ndaki &ldquo;Ã–ne Ã§Ä±kanlar&rdquo; ÅŸeridi bu seÃ§ime gÃ¶re yenilenir.</InlineHint>
                             </div>
                             {featuredCategoryMutation.isError && <InlineError message={featuredCategoryMutation.error.message} />}
                           </>

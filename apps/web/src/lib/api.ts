@@ -317,6 +317,28 @@ export type StoreSettings = {
   ibanHolderName?: string;
   bankName?: string;
   paymentNote?: string;
+  shoppingNotes?: {
+    freeShipping?: {
+      enabled?: boolean;
+      description?: string;
+    };
+    returns?: {
+      enabled?: boolean;
+      title?: string;
+      description?: string;
+      days?: number;
+    };
+    payment?: {
+      enabled?: boolean;
+      title?: string;
+      description?: string;
+    };
+  };
+  publicShoppingNotes?: Array<{
+    key: string;
+    title: string;
+    description: string;
+  }>;
 };
 
 export type ApiTeamMember = {
@@ -707,6 +729,7 @@ export async function createProduct(payload: {
   };
   tags?: string;
   description?: string;
+  product_story?: string;
   emoji?: string;
 }) {
   return authenticatedRequest<ApiProduct>("/products", {
@@ -725,6 +748,7 @@ export async function createProduct(payload: {
       details: payload.details ?? {},
       tags: payload.tags ?? "",
       description: payload.description ?? "",
+      product_story: payload.product_story ?? "",
       emoji: payload.emoji ?? "",
     }),
   });
@@ -749,6 +773,7 @@ export async function updateProduct(id: string, payload: {
   };
   tags?: string;
   description?: string;
+  product_story?: string;
   emoji?: string;
 }) {
   return authenticatedRequest<ApiProduct>(`/products/${id}`, {
@@ -767,6 +792,7 @@ export async function updateProduct(id: string, payload: {
       details: payload.details ?? {},
       tags: payload.tags ?? "",
       description: payload.description ?? "",
+      product_story: payload.product_story ?? "",
       emoji: payload.emoji ?? "",
     }),
   });

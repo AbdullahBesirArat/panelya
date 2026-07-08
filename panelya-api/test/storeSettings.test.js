@@ -3,8 +3,10 @@ const test = require('node:test');
 const {
   cleanStoreSettings,
   normalizeIban,
+  normalizeShoppingNotes,
   normalizeWhatsAppPhone,
   paymentInstructionsFromSettings,
+  publicShoppingNotesFromSettings,
 } = require('../services/storeSettings');
 const { normalizeCheckoutOptions } = require('../services/checkoutPayload');
 
@@ -78,4 +80,76 @@ test('checkout payload istemciden gelen sahte IBAN bilgisini tasimaz', () => {
   assert.equal(options.paymentMethod, 'iban');
   assert.equal(Object.hasOwn(options, 'iban'), false);
   assert.equal(Object.hasOwn(options, 'paymentInstructions'), false);
+});
+
+test('store settings shopping notes normalize edilir ve ucretsiz kargo esigi mevcut ayardan gelir', () => {
+  const settings = cleanStoreSettings({
+    freeShippingThreshold: 750,
+    shoppingNotes: {
+      freeShipping: {
+        enabled: true,
+        description: '{amount} TL uzeri siparislerde ucretsiz teslimat.',
+      },
+      returns: {
+        enabled: true,
+        title: 'Degisim Destegi',
+        description: '14 gun icinde destek alabilirsiniz.',
+        days: 14,
+      },
+      payment: {
+        enabled: true,
+        title: 'Odeme',
+      },
+    },
+  });
+
+  assert.equal(settings.shoppingNotes.freeShipping.description, '{amount} TL uzeri siparislerde ucretsiz teslimat.');
+  assert.deepEqual(settings.publicShoppingNotes.find((note) => note.key === 'freeShipping'), {
+    key: 'freeShipping',
+    title: 'Ucretsiz Kargo',
+    description: '750 TL uzeri siparislerde ucretsiz teslimat.',
+  });
+});
+
+test('manual provider ve IBAN aktifken iyzico metni gosterilmez, havale/EFT metni uretilir', () => {
+  const notes = publicShoppingNotesFromSettings(cleanStoreSettings({
+    paymentProvider: 'manual',
+    paymentEnabled: true,
+    iban: 'TR12 0000 0000 0000 0000 0000 00',
+    shoppingNotes: {
+      payment: { enabled: true },
+    },
+  }));
+
+  const payment = notes.find((note) => note.key === 'payment');
+  assert.equal(payment.description, 'Havale/EFT ile guvenli odeme.');
+  assert.equal(/iyzico/i.test(payment.description), false);
+});
+
+test('kart ve IBAN aktifse guvenli odeme metni iki yontemi de soyler', () => {
+  const notes = publicShoppingNotesFromSettings(cleanStoreSettings({
+    paymentProvider: 'iyzico',
+    paymentEnabled: true,
+    iban: 'TR12 0000 0000 0000 0000 0000 00',
+  }));
+
+  assert.equal(
+    notes.find((note) => note.key === 'payment').description,
+    'Kart ve havale secenekleriyle guvenli odeme.'
+  );
+});
+
+test('iade politikasi kapaliysa public alisveris notlarinda gosterilmez', () => {
+  const shoppingNotes = normalizeShoppingNotes({
+    shoppingNotes: {
+      returns: { enabled: false },
+    },
+  });
+  const notes = publicShoppingNotesFromSettings({
+    shoppingNotes,
+    freeShippingThreshold: 0,
+    paymentEnabled: false,
+  });
+
+  assert.equal(notes.some((note) => note.key === 'returns'), false);
 });
