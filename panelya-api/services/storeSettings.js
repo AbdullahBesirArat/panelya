@@ -147,6 +147,19 @@ function publicShoppingNotesFromSettings(settings = {}) {
   return notes;
 }
 
+function publicStoreSettings(settings = {}) {
+  const source = settings && typeof settings === 'object' ? settings : {};
+  const shoppingNotes = normalizeShoppingNotes(source);
+  return {
+    ...source,
+    shoppingNotes,
+    publicShoppingNotes: publicShoppingNotesFromSettings({
+      ...source,
+      shoppingNotes,
+    }),
+  };
+}
+
 function paymentInstructionsFromSettings(settings = {}) {
   const iban = normalizeIban(settings.iban || '');
   if (!iban) return null;
@@ -206,5 +219,6 @@ module.exports = {
   normalizeWhatsAppPhone,
   paymentInstructionsFromSettings,
   publicShoppingNotesFromSettings,
+  publicStoreSettings,
   normalizeShoppingNotes,
 };

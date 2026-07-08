@@ -8,7 +8,7 @@ const { sendInviteEmail } = require('../services/email');
 const { assertPlanCapacity } = require('../services/planLimits');
 const { getOrganizationSummary, invalidateOrganizationSummary, setOrganizationSummary } = require('../services/summaryCache');
 const { requestedOrganizationSlug, resolveOrganization, slugify } = require('../services/tenant');
-const { cleanStoreSettings } = require('../services/storeSettings');
+const { cleanStoreSettings, publicStoreSettings } = require('../services/storeSettings');
 
 const router = express.Router();
 const VALID_ORGANIZATION_PLANS = ['starter', 'growth', 'business', 'enterprise'];
@@ -54,7 +54,10 @@ router.get('/current', async (req, res, next) => {
     );
 
     if (!result.rows[0]) return res.status(404).json({ error: 'Organizasyon bulunamadi' });
-    res.json(result.rows[0]);
+    res.json({
+      ...result.rows[0],
+      store_settings: publicStoreSettings(result.rows[0].store_settings || {}),
+    });
   } catch (err) {
     next(err);
   }
