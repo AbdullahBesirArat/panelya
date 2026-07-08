@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { fetchMe, logoutSession, switchOrganizationSession } from "@/lib/api";
+import { fetchMe, getApiErrorStatus, keepSessionAlive, logoutSession, switchOrganizationSession } from "@/lib/api";
 import { displayBrandName, PLATFORM_NAME } from "@/lib/branding";
 import { navigationItems } from "@/lib/demo-data";
 import { useSessionStore } from "@/store/session";
@@ -23,6 +23,9 @@ export function AppShell({
   const accessToken = useSessionStore((state) => state.accessToken);
   const storedActorType = useSessionStore((state) => state.actorType);
   const storedAdmin = useSessionStore((state) => state.admin);
+  const storedUser = useSessionStore((state) => state.user);
+  const storedOrganizations = useSessionStore((state) => state.organizations);
+  const refreshToken = useSessionStore((state) => state.refreshToken);
   const hydrated = useSessionStore((state) => state.hydrated);
   const organizationSlug = useSessionStore((state) => state.organizationSlug);
   const syncProfile = useSessionStore((state) => state.syncProfile);
@@ -33,7 +36,7 @@ export function AppShell({
   const [switching, setSwitching] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
 
-  const { data, isError, isLoading } = useQuery({
+  const { data, error, isError, isLoading } = useQuery({
     queryKey: ["me", accessToken, organizationSlug],
     queryFn: fetchMe,
     enabled: hydrated && Boolean(accessToken),
@@ -42,11 +45,13 @@ export function AppShell({
   });
   const profile = data?.actorType === "app" ? data : null;
   const adminProfile = data?.actorType === "admin" ? data.admin : null;
-  const displayUser = profile?.user ?? null;
-  const displayOrganization = profile?.currentOrganization ?? null;
-  const displayOrganizations = profile?.organizations ?? [];
+  const storedOrganization = storedOrganizations.find((item) => item.slug === organizationSlug) ?? storedOrganizations[0] ?? null;
+  const displayUser = profile?.user ?? storedUser ?? null;
+  const displayOrganization = profile?.currentOrganization ?? storedOrganization;
+  const displayOrganizations = profile?.organizations ?? storedOrganizations;
   const activeOrganizationSlug = displayOrganization?.slug || organizationSlug;
   const isAdminSession = data?.actorType === "admin" || storedActorType === "admin";
+  const authErrorStatus = getApiErrorStatus(error);
   const visibleNavigation = navigationItems.filter((item) => {
     if (item.key === "superadmin") return isAdminSession && (adminProfile?.role || storedAdmin?.role) === "super_admin";
     return !isAdminSession;
@@ -67,7 +72,6 @@ export function AppShell({
   useEffect(() => {
     if (data?.actorType === "app" && data.user && data.currentOrganization && data.organizations) {
       syncProfile({
-        accessToken: accessToken || "",
         user: data.user,
         currentOrganization: {
           ...data.currentOrganization,
@@ -76,14 +80,39 @@ export function AppShell({
         organizations: data.organizations,
       });
     }
-  }, [data, syncProfile, accessToken]);
+  }, [data, syncProfile]);
 
   useEffect(() => {
-    if (isError && hydrated) {
+    if (isError && hydrated && (authErrorStatus === 401 || authErrorStatus === 403)) {
+      pushToast({
+        title: "Oturum sÃ¼resi doldu",
+        description: "Girdileriniz bu tarayÄ±cÄ±da korunur. Devam etmek iÃ§in tekrar giriÅŸ yapÄ±n.",
+        tone: "error",
+      });
       clearSession();
-      router.replace("/login");
+      router.replace(`/login?next=${encodeURIComponent(`/${activeSection}`)}`);
     }
-  }, [isError, hydrated, clearSession, router]);
+  }, [activeSection, authErrorStatus, clearSession, hydrated, isError, pushToast, router]);
+
+  useEffect(() => {
+    if (!hydrated || !accessToken || !refreshToken || storedActorType !== "app") return;
+
+    let active = true;
+    const refreshIfActive = () => {
+      if (!active || document.hidden) return;
+      void keepSessionAlive();
+    };
+    const interval = window.setInterval(refreshIfActive, 8 * 60 * 1000);
+    window.addEventListener("focus", refreshIfActive);
+    document.addEventListener("visibilitychange", refreshIfActive);
+
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+      window.removeEventListener("focus", refreshIfActive);
+      document.removeEventListener("visibilitychange", refreshIfActive);
+    };
+  }, [accessToken, hydrated, refreshToken, storedActorType]);
 
   useEffect(() => {
     // Impersonation sirasinda app aktoru gecici olarak superadmin route'unda olabilir
@@ -145,7 +174,7 @@ export function AppShell({
     }
   }
 
-  const waitingForVerifiedSession = hydrated && Boolean(accessToken) && isLoading;
+  const waitingForVerifiedSession = hydrated && Boolean(accessToken) && isLoading && (!displayUser || !displayOrganization);
 
   if (
     hydrated

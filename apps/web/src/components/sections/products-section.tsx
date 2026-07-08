@@ -2,7 +2,7 @@
 
 import type { FormEvent } from "react";
 import Image from "next/image";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { MetricGrid } from "@/components/page-kit";
@@ -46,6 +46,15 @@ import {
   useSummaryQuery,
 } from "@/components/operations-shared";
 import { useToastStore } from "@/store/toast";
+import {
+  buildProductDraftKey,
+  clearProductFormDraft,
+  createEmptyProductForm,
+  isProductFormEmpty,
+  readProductFormDraft,
+  type ProductFormState,
+  writeProductFormDraft,
+} from "@/lib/product-form-draft";
 
 const productStatusOptions: ProductStatus[] = ["active", "draft", "out"];
 const productColorPresets = [
@@ -121,28 +130,6 @@ type CategoryForm = {
   imageUrl: string;
 };
 
-function createEmptyProductForm() {
-  return {
-    name: "",
-    categoryId: "",
-    price: "",
-    salePrice: "",
-    stock: "0",
-    status: "draft" as ProductStatus,
-    colorsText: "",
-    sizesText: "",
-    variantsText: "",
-    imagesText: "",
-    tags: "",
-    description: "",
-    productStory: "",
-    shortDescription: "",
-    story: "",
-    measurements: "",
-    deliveryNote: "",
-    emoji: "👗",
-  };
-}
 
 function createEmptyCategoryForm(): CategoryForm {
   return {
@@ -278,6 +265,7 @@ export function ProductsSection({
   const queryClient = useQueryClient();
   const pushToast = useToastStore((state) => state.pushToast);
   const summaryQuery = useSummaryQuery(organizationSlug);
+  const productDraftKey = useMemo(() => buildProductDraftKey(organizationSlug), [organizationSlug]);
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<ProductStatus | "">("");
   const [categoryId, setCategoryId] = useState("");
@@ -286,7 +274,9 @@ export function ProductsSection({
   const [featuredCategoryId, setFeaturedCategoryId] = useState<string | null>(null);
   const [featuredSelection, setFeaturedSelection] = useState<Set<string>>(() => new Set());
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
-  const [productForm, setProductForm] = useState(createEmptyProductForm);
+  const [productForm, setProductForm] = useState<ProductFormState>(() => (
+    readProductFormDraft(productDraftKey) ?? createEmptyProductForm()
+  ));
   const [productFormError, setProductFormError] = useState("");
   const [newProductTag, setNewProductTag] = useState("");
   const [imageColor, setImageColor] = useState("");
@@ -297,6 +287,21 @@ export function ProductsSection({
   const [customColorName, setCustomColorName] = useState("");
   const [customColorHex, setCustomColorHex] = useState("#d8c3a5");
   const debouncedSearch = useDebouncedValue(search);
+
+  useEffect(() => {
+    queueMicrotask(() => {
+      setEditingProductId(null);
+      setProductForm(readProductFormDraft(productDraftKey) ?? createEmptyProductForm());
+      setProductFormError("");
+      setNewProductTag("");
+      setImageColor("");
+    });
+  }, [productDraftKey]);
+
+  useEffect(() => {
+    if (editingProductId) return;
+    writeProductFormDraft(productDraftKey, productForm);
+  }, [editingProductId, productDraftKey, productForm]);
 
   const categoriesQuery = useQuery({
     queryKey: ["categories", organizationSlug],
@@ -391,6 +396,7 @@ export function ProductsSection({
   const productMutation = useMutation({
     mutationFn: createProduct,
     onSuccess: async () => {
+      clearProductFormDraft(productDraftKey);
       resetProductForm();
       pushToast({
         title: "Ürün oluşturuldu",
@@ -558,6 +564,7 @@ export function ProductsSection({
   }
 
   function resetProductForm() {
+    clearProductFormDraft(productDraftKey);
     setEditingProductId(null);
     setProductForm(createEmptyProductForm());
     setProductFormError("");
@@ -1023,7 +1030,16 @@ export function ProductsSection({
                     >
                       Vazgec
                     </button>
-                  ) : null}
+                  ) : (
+                    <button
+                      className="focus-ring rounded-lg border border-line px-3 py-1.5 text-xs font-semibold text-zinc-600"
+                      disabled={isProductFormEmpty(productForm)}
+                      onClick={resetProductForm}
+                      type="button"
+                    >
+                      Formu temizle
+                    </button>
+                  )}
                 </div>
                 <input
                   className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"

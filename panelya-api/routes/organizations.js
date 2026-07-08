@@ -8,6 +8,7 @@ const { sendInviteEmail } = require('../services/email');
 const { assertPlanCapacity } = require('../services/planLimits');
 const { getOrganizationSummary, invalidateOrganizationSummary, setOrganizationSummary } = require('../services/summaryCache');
 const { requestedOrganizationSlug, resolveOrganization, slugify } = require('../services/tenant');
+const { cleanStoreSettings } = require('../services/storeSettings');
 
 const router = express.Router();
 const VALID_ORGANIZATION_PLANS = ['starter', 'growth', 'business', 'enterprise'];
@@ -38,27 +39,6 @@ function publicInvite(invite) {
     created_at: invite.created_at,
     invited_by_name: invite.invited_by_name || null,
     invited_by_email: invite.invited_by_email || null,
-  };
-}
-
-function cleanStoreSettings(value) {
-  const settings = value && typeof value === 'object' ? value : {};
-  const paymentProvider = ['manual', 'iyzico'].includes(settings.paymentProvider)
-    ? settings.paymentProvider
-    : 'manual';
-  const shippingFee = Number(settings.shippingFee);
-  const freeShippingThreshold = Number(settings.freeShippingThreshold);
-
-  return {
-    contactEmail: cleanEmail(settings.contactEmail || ''),
-    supportPhone: String(settings.supportPhone || '').trim().slice(0, 40),
-    shippingFee: Number.isFinite(shippingFee) && shippingFee >= 0 ? shippingFee : 0,
-    freeShippingThreshold: Number.isFinite(freeShippingThreshold) && freeShippingThreshold >= 0
-      ? freeShippingThreshold
-      : 0,
-    paymentProvider,
-    paymentEnabled: settings.paymentEnabled !== false,
-    orderEmailEnabled: settings.orderEmailEnabled !== false,
   };
 }
 

@@ -42,6 +42,20 @@ export type MeResponse = {
   role?: string;
 };
 
+export class ApiError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
+export function getApiErrorStatus(error: unknown) {
+  return error instanceof ApiError ? error.status : null;
+}
+
 export type ApiCategory = {
   id: string;
   name: string;
@@ -297,6 +311,12 @@ export type StoreSettings = {
   paymentProvider?: "manual" | "iyzico";
   paymentEnabled?: boolean;
   orderEmailEnabled?: boolean;
+  whatsappPhone?: string;
+  whatsappUrl?: string;
+  iban?: string;
+  ibanHolderName?: string;
+  bankName?: string;
+  paymentNote?: string;
 };
 
 export type ApiTeamMember = {
@@ -393,25 +413,25 @@ async function readError(response: Response) {
   const serverMessage = typeof body.error === "string" ? body.error : "";
 
   if (status === 401) {
-    throw new Error("Oturumunuz gecersiz veya suresi dolmus.");
+    throw new ApiError("Oturumunuz gecersiz veya suresi dolmus.", status);
   }
   if (status === 403) {
-    throw new Error("Bu işlem için yetkiniz yok.");
+    throw new ApiError("Bu işlem için yetkiniz yok.", status);
   }
   if (status === 404) {
-    throw new Error("Istenen kayit bulunamadi.");
+    throw new ApiError("Istenen kayit bulunamadi.", status);
   }
   if (status === 409) {
-    throw new Error("Bu işlem mevcut verilerle çakıştı.");
+    throw new ApiError("Bu işlem mevcut verilerle çakıştı.", status);
   }
   if (status === 429) {
-    throw new Error("Cok fazla istek gonderildi. Lutfen biraz sonra tekrar deneyin.");
+    throw new ApiError("Cok fazla istek gonderildi. Lutfen biraz sonra tekrar deneyin.", status);
   }
   if (status >= 500) {
-    throw new Error("Sunucuda bir hata olustu. Lutfen tekrar deneyin.");
+    throw new ApiError("Sunucuda bir hata olustu. Lutfen tekrar deneyin.", status);
   }
 
-  throw new Error(serverMessage || "Islem tamamlanamadi. Girdilerinizi kontrol edip tekrar deneyin.");
+  throw new ApiError(serverMessage || "Islem tamamlanamadi. Girdilerinizi kontrol edip tekrar deneyin.", status);
 }
 
 function buildQuery(params: Record<string, string | number | undefined | null>) {
@@ -444,7 +464,7 @@ async function publicRequest<T>(path: string, options: RequestInit = {}): Promis
 
 let refreshSessionPromise: Promise<boolean> | null = null;
 
-async function tryRefreshSession() {
+async function tryRefreshSession({ clearOnFailure = true } = {}) {
   if (refreshSessionPromise) {
     return refreshSessionPromise;
   }
@@ -464,7 +484,9 @@ async function tryRefreshSession() {
       useSessionStore.getState().applySession(refreshed);
       return true;
     } catch {
-      useSessionStore.getState().clearSession();
+      if (clearOnFailure) {
+        useSessionStore.getState().clearSession();
+      }
       return false;
     } finally {
       refreshSessionPromise = null;
@@ -472,6 +494,10 @@ async function tryRefreshSession() {
   })();
 
   return refreshSessionPromise;
+}
+
+export async function keepSessionAlive() {
+  return tryRefreshSession({ clearOnFailure: false });
 }
 
 async function authenticatedRequest<T>(path: string, options: RequestInit = {}, canRetry = true): Promise<T> {

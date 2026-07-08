@@ -14,6 +14,7 @@ const { nextOrderCode } = require('../services/orderCodes');
 const { insertOrderItems } = require('../services/orderItems');
 const { enqueuePaymentCallbackEvent, processPaymentCallbackEvent } = require('../services/paymentCallbackEvents');
 const { normalizeCheckoutOptions } = require('../services/checkoutPayload');
+const { paymentInstructionsFromSettings } = require('../services/storeSettings');
 const { assertPlanCapacity } = require('../services/planLimits');
 const { upsertCustomer } = require('../services/customers');
 
@@ -207,6 +208,9 @@ router.post('/initialize', paymentInitLimiter, async (req, res, next) => {
       order: orderResult.rows[0],
       orderCode,
       pricing,
+      paymentInstructions: offlinePayment
+        ? paymentInstructionsFromSettings(organization.store_settings || {})
+        : null,
       paymentPageUrl: payment.paymentPageUrl,
       failureUrl: payment.failureUrl || failureUrl(req, orderCode),
     });

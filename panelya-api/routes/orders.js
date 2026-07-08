@@ -11,6 +11,7 @@ const { resolveOrganization } = require('../services/tenant');
 const { nextOrderCode } = require('../services/orderCodes');
 const { insertOrderItems } = require('../services/orderItems');
 const { normalizeCheckoutOptions } = require('../services/checkoutPayload');
+const { paymentInstructionsFromSettings } = require('../services/storeSettings');
 const { assertPlanCapacity } = require('../services/planLimits');
 const { fetchOrderCustomer, upsertCustomer } = require('../services/customers');
 const { sendOrderStatusEmail, sendNewOrderSellerNotification } = require('../services/email');
@@ -56,6 +57,7 @@ function publicOrderView(row) {
       address: row.address,
     },
     items: Array.isArray(row.items) ? row.items : [],
+    payment_instructions: row.payment_instructions || null,
   };
 }
 
@@ -288,7 +290,13 @@ async function lookupOrder(req, res, next) {
     );
 
     if (!result.rows[0]) return res.status(404).json({ error: 'Siparis bulunamadi' });
-    res.json(publicOrderView(result.rows[0]));
+    const row = result.rows[0];
+    res.json(publicOrderView({
+      ...row,
+      payment_instructions: row.payment_method === 'iban'
+        ? paymentInstructionsFromSettings(organization.store_settings || {})
+        : null,
+    }));
   } catch (err) {
     next(err);
   }
@@ -371,7 +379,12 @@ router.post('/', createOrderLimiter, async (req, res, next) => {
       }
     });
 
-    res.status(201).json(createdOrder);
+    res.status(201).json({
+      ...createdOrder,
+      payment_instructions: checkoutOptions.paymentMethod === 'iban'
+        ? paymentInstructionsFromSettings(organization.store_settings || {})
+        : null,
+    });
   } catch (err) {
     await client.query('rollback');
     next(err);

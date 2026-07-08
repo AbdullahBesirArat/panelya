@@ -143,6 +143,11 @@ export function SettingsSection({
         paymentProvider: form.get("paymentProvider") === "iyzico" ? "iyzico" : "manual",
         paymentEnabled: form.get("paymentEnabled") === "on",
         orderEmailEnabled: form.get("orderEmailEnabled") === "on",
+        whatsappPhone: String(form.get("whatsappPhone") || "").trim(),
+        iban: String(form.get("iban") || "").trim(),
+        ibanHolderName: String(form.get("ibanHolderName") || "").trim(),
+        bankName: String(form.get("bankName") || "").trim(),
+        paymentNote: String(form.get("paymentNote") || "").trim(),
       },
     });
   }
@@ -290,6 +295,70 @@ export function SettingsSection({
                 />
                 Siparis e-postalari aktif
               </label>
+            </div>
+            <div className="rounded-lg border border-line bg-zinc-50 p-4">
+              <div className="mb-4">
+                <p className="text-sm font-semibold text-ink">İletişim ve Ödeme Bilgileri</p>
+                <p className="mt-1 text-xs text-zinc-500">
+                  Müşteriler vitrin WhatsApp butonundan bu numarayla iletişime geçer; IBAN bilgisi havale/EFT ödeme adımında gösterilir.
+                </p>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="grid gap-2">
+                  <FieldLabel htmlFor="settingsWhatsappPhone">WhatsApp numarası</FieldLabel>
+                  <input
+                    className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
+                    defaultValue={storeSettings.whatsappPhone || ""}
+                    disabled={!canManageSettings || settingsMutation.isPending}
+                    id="settingsWhatsappPhone"
+                    name="whatsappPhone"
+                    placeholder="05xx xxx xx xx"
+                  />
+                  <InlineHint>Müşteriler sitedeki WhatsApp butonundan bu numarayla iletişime geçer.</InlineHint>
+                </div>
+                <div className="grid gap-2">
+                  <FieldLabel htmlFor="settingsIban">IBAN</FieldLabel>
+                  <input
+                    className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
+                    defaultValue={storeSettings.iban || ""}
+                    disabled={!canManageSettings || settingsMutation.isPending}
+                    id="settingsIban"
+                    name="iban"
+                    placeholder="TR00 0000 0000 0000 0000 0000 00"
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <FieldLabel htmlFor="settingsIbanHolderName">Hesap sahibi</FieldLabel>
+                  <input
+                    className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
+                    defaultValue={storeSettings.ibanHolderName || ""}
+                    disabled={!canManageSettings || settingsMutation.isPending}
+                    id="settingsIbanHolderName"
+                    name="ibanHolderName"
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <FieldLabel htmlFor="settingsBankName">Banka adı</FieldLabel>
+                  <input
+                    className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
+                    defaultValue={storeSettings.bankName || ""}
+                    disabled={!canManageSettings || settingsMutation.isPending}
+                    id="settingsBankName"
+                    name="bankName"
+                  />
+                </div>
+                <div className="grid gap-2 sm:col-span-2">
+                  <FieldLabel htmlFor="settingsPaymentNote">Ödeme açıklaması / not</FieldLabel>
+                  <textarea
+                    className="focus-ring min-h-24 rounded-lg border border-line bg-white px-3 py-3 text-sm"
+                    defaultValue={storeSettings.paymentNote || ""}
+                    disabled={!canManageSettings || settingsMutation.isPending}
+                    id="settingsPaymentNote"
+                    name="paymentNote"
+                    placeholder="Havale sonrası sipariş numaranızı açıklamaya yazınız."
+                  />
+                </div>
+              </div>
             </div>
             {settingsMutation.isError ? <InlineError message={settingsMutation.error.message} /> : null}
             <div className="flex flex-wrap gap-2">

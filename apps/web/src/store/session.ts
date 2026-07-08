@@ -65,7 +65,7 @@ type SessionState = {
   adminRestore: { accessToken: string; admin: SessionAdmin } | null;
   applySession: (payload: SessionPayload) => void;
   applyAdminSession: (payload: AdminSessionPayload) => void;
-  syncProfile: (payload: Omit<SessionPayload, "refreshToken">) => void;
+  syncProfile: (payload: Omit<SessionPayload, "refreshToken" | "accessToken"> & { accessToken?: string }) => void;
   updateUserEmail: (email: string) => void;
   startImpersonation: (payload: ImpersonationPayload) => void;
   stopImpersonation: () => { restored: boolean };
@@ -106,7 +106,7 @@ export const useSessionStore = create<SessionState>()(
       }),
       syncProfile: (payload) => set((state) => ({
         actorType: "app",
-        accessToken: payload.accessToken,
+        accessToken: payload.accessToken || state.accessToken,
         refreshToken: state.refreshToken,
         user: payload.user,
         admin: null,
