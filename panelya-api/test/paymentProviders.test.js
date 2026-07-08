@@ -1,5 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 
 const { initializePayment, providerName, retrievePayment } = require('../services/paymentProviders');
 
@@ -116,4 +118,11 @@ test('iyzico provider eksik env ile initialize edilirse mevcut hata korunur', as
       (err) => err.status === 500 && /Iyzico API bilgileri eksik/.test(err.message)
     );
   });
+});
+
+test('payment initialize yalniz iban/havale seciminde offline manual order olusturur', () => {
+  const routeSource = fs.readFileSync(path.join(__dirname, '..', 'routes', 'payment.js'), 'utf8');
+  assert.match(routeSource, /const offlinePayment = checkoutOptions\.paymentMethod === 'iban'/);
+  assert.match(routeSource, /const provider = offlinePayment\s*\?\s*'manual'\s*:\s*providerName\(\)/);
+  assert.match(routeSource, /const payment = offlinePayment\s*\?\s*\{ token: null, paymentPageUrl: null, failureUrl: null \}\s*:\s*await initializePayment/s);
 });

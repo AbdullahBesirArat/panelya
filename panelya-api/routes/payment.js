@@ -142,7 +142,8 @@ router.post('/initialize', paymentInitLimiter, async (req, res, next) => {
     // seceneklerini belirle. Kargo istemciden asla alinmaz.
     const subtotal = cartTotal(items);
     const checkoutOptions = normalizeCheckoutOptions(req.body, organization.store_settings || {}, subtotal);
-    const provider = checkoutOptions.paymentMethod === 'iban'
+    const offlinePayment = checkoutOptions.paymentMethod === 'iban';
+    const provider = offlinePayment
       ? 'manual'
       : providerName();
 
@@ -175,7 +176,7 @@ router.post('/initialize', paymentInitLimiter, async (req, res, next) => {
 
     await reserveStock(client, items, { organizationId: organization.id });
 
-    const payment = provider === 'manual'
+    const payment = offlinePayment
       ? { token: null, paymentPageUrl: null, failureUrl: null }
       : await initializePayment({
         req,
