@@ -91,16 +91,6 @@ const productSizePresets = [
   "3XL",
   ...Array.from({ length: 27 }, (_, index) => String(34 + index)),
 ];
-const productFallbackIconOptions = [
-  { label: "Elbise", value: "ğŸ‘—" },
-  { label: "Dış giyim", value: "ğŸ§¥" },
-  { label: "Tesettür", value: "ğŸ§•" },
-  { label: "Çanta", value: "👜" },
-  { label: "Ayakkabı", value: "ğŸ‘ " },
-  { label: "Aksesuar", value: "â—‡" },
-  { label: "Suvera", value: "SU" },
-  { label: "Klasik", value: "✦" },
-];
 type ProductPayload = {
   name: string;
   categoryId?: string;
@@ -121,7 +111,6 @@ type ProductPayload = {
   tags: string;
   description: string;
   product_story: string;
-  emoji: string;
 };
 
 type CategoryForm = {
@@ -234,10 +223,6 @@ function joinVariantLines(variants: ProductVariant[] | null | undefined) {
   return variants
     .map((variant) => [variant.color || "", variant.size || "", String(variant.stock ?? 0), variant.sku || ""].join(" | "))
     .join("\n");
-}
-
-function sumVariantStock(variants: ProductVariant[]) {
-  return variants.reduce((sum, variant) => sum + Math.max(0, Number(variant.stock || 0)), 0);
 }
 
 function uniqueVariantSizes(variants: ProductVariant[]) {
@@ -546,7 +531,6 @@ export function ProductsSection({
     products.flatMap((product) => splitCsvLines(product.tags || "")),
   )).sort((a, b) => a.localeCompare(b, "tr"));
   const selectedVariants = parseVariantLines(productForm.variantsText);
-  const selectedVariantStock = sumVariantStock(selectedVariants);
   const imageEntries = splitImageLines(productForm.imagesText).map(parseImageLine).filter((entry) => entry.url);
 
   function resetCategoryForm() {
@@ -614,14 +598,12 @@ export function ProductsSection({
   function removeProductColor(color: string) {
     setProductForm((current) => {
       const variants = parseVariantLines(current.variantsText).filter((variant) => !sameEntry(variant.color, color));
-      const stock = variants.length ? String(sumVariantStock(variants)) : current.stock;
 
       return {
         ...current,
         colorsText: splitCsvLines(current.colorsText).filter((item) => !sameEntry(item, color)).join("\n"),
         sizesText: uniqueVariantSizes(variants).join("\n"),
         variantsText: joinVariantLines(variants),
-        stock,
       };
     });
     if (sameEntry(imageColor, color)) setImageColor("");
@@ -652,7 +634,6 @@ export function ProductsSection({
         ...current,
         sizesText: uniqueVariantSizes(nextVariants).join("\n"),
         variantsText: joinVariantLines(nextVariants),
-        stock: String(sumVariantStock(nextVariants)),
       };
     });
   }
@@ -669,7 +650,6 @@ export function ProductsSection({
       return {
         ...current,
         variantsText: joinVariantLines(nextVariants),
-        stock: String(sumVariantStock(nextVariants)),
       };
     });
   }
@@ -684,7 +664,6 @@ export function ProductsSection({
         ...current,
         sizesText: uniqueVariantSizes(nextVariants).join("\n"),
         variantsText: joinVariantLines(nextVariants),
-        stock: nextVariants.length ? String(sumVariantStock(nextVariants)) : current.stock,
       };
     });
   }
@@ -723,7 +702,6 @@ export function ProductsSection({
       categoryId: product.category_id || "",
       price: String(product.price),
       salePrice: product.sale_price ? String(product.sale_price) : "",
-      stock: String(product.stock),
       status: product.status,
       colorsText: joinLines(product.colors),
       sizesText: joinLines(product.sizes),
@@ -736,7 +714,6 @@ export function ProductsSection({
       story: String(product.details?.story || ""),
       measurements: String(product.details?.measurements || ""),
       deliveryNote: String(product.details?.delivery_note || ""),
-      emoji: product.emoji || "ğŸ‘—",
     });
     setImageColor(product.colors[0] || "");
   }
@@ -765,9 +742,7 @@ export function ProductsSection({
     const price = parseMoneyInput(productForm.price);
     const salePrice = productForm.salePrice.trim() === "" ? null : parseMoneyInput(productForm.salePrice);
     const variants = parseVariantLines(productForm.variantsText);
-    const stock = variants.length
-      ? variants.reduce((sum, variant) => sum + Number(variant.stock || 0), 0)
-      : Number(productForm.stock);
+    const stock = variants.reduce((sum, variant) => sum + Number(variant.stock || 0), 0);
 
     if (!productForm.name.trim()) {
       setProductFormError("Ürün adı zorunlu.");
@@ -809,7 +784,6 @@ export function ProductsSection({
       tags: productForm.tags.trim(),
       description: productForm.description.trim(),
       product_story: productForm.productStory.trim(),
-      emoji: productForm.emoji.trim(),
     };
 
     if (editingProductId) {
@@ -1008,7 +982,7 @@ export function ProductsSection({
               <div className="grid gap-3 sm:grid-cols-3">
                 <div className="rounded-lg border border-line bg-zinc-50 px-3 py-3">
                   <p className="text-xs font-semibold uppercase text-zinc-500">1. Temel bilgi</p>
-                  <p className="mt-1 text-sm font-semibold text-ink">Ad, fiyat ve stok</p>
+                  <p className="mt-1 text-sm font-semibold text-ink">Ad, fiyat ve varyantlar</p>
                 </div>
                 <div className="rounded-lg border border-line bg-zinc-50 px-3 py-3">
                   <p className="text-xs font-semibold uppercase text-zinc-500">2. Görsel</p>
@@ -1049,31 +1023,6 @@ export function ProductsSection({
                   value={productForm.name}
                 />
                 <div className="grid gap-4">
-                  <div className="space-y-2">
-                    <FieldLabel htmlFor="product-fallback-icon">Fotoğraf yoksa görünecek simge</FieldLabel>
-                    <div className="grid grid-cols-2 gap-2 lg:grid-cols-4" id="product-fallback-icon">
-                      {productFallbackIconOptions.map((option) => {
-                        const selected = productForm.emoji === option.value;
-                        return (
-                          <button
-                            aria-pressed={selected}
-                            className={[
-                              "focus-ring flex min-h-14 items-center gap-2 rounded-lg border px-3 py-2 text-left text-xs transition",
-                              selected ? "border-mint bg-mint/10 text-mint" : "border-line bg-white text-zinc-600 hover:border-zinc-300",
-                            ].join(" ")}
-                            key={option.value}
-                            onClick={() => setProductForm((current) => ({ ...current, emoji: option.value }))}
-                            title={option.label}
-                            type="button"
-                          >
-                            <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-zinc-50 text-lg leading-none">{option.value}</span>
-                            <span className="min-w-0 font-semibold leading-tight">{option.label}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                    <InlineHint>Ürün fotoğrafı yoksa vitrinde bu simge görünür; fotoğraf varsa kullanılmaz.</InlineHint>
-                  </div>
                   <div className="space-y-2">
                     <FieldLabel htmlFor="product-new-tag">Etiketler</FieldLabel>
                     {selectedProductTags.length ? (
@@ -1162,7 +1111,7 @@ export function ProductsSection({
                     ))}
                   </select>
                 </div>
-                <div className="grid gap-3 sm:grid-cols-3">
+                <div className="grid gap-3 sm:grid-cols-2">
                   <input
                     className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
                     inputMode="decimal"
@@ -1176,14 +1125,6 @@ export function ProductsSection({
                     onChange={(event) => setProductForm((current) => ({ ...current, salePrice: event.target.value }))}
                     placeholder="İndirimli fiyat"
                     value={productForm.salePrice}
-                  />
-                  <input
-                    className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm disabled:bg-zinc-100 disabled:text-zinc-500"
-                    disabled={selectedVariants.length > 0}
-                    inputMode="numeric"
-                    onChange={(event) => setProductForm((current) => ({ ...current, stock: event.target.value }))}
-                    placeholder={selectedVariants.length > 0 ? "Varyant stogu" : "Genel stok"}
-                    value={selectedVariants.length > 0 ? String(selectedVariantStock) : productForm.stock}
                   />
                 </div>
                 <details className="group rounded-lg border border-line bg-zinc-50">

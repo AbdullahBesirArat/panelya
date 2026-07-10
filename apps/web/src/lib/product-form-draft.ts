@@ -1,6 +1,6 @@
 import type { ProductStatus } from "@/lib/api";
 
-const PRODUCT_DRAFT_VERSION = 1;
+const PRODUCT_DRAFT_VERSION = 2;
 const PRODUCT_STATUS_OPTIONS: ProductStatus[] = ["active", "draft", "out"];
 
 export function createEmptyProductForm() {
@@ -9,8 +9,7 @@ export function createEmptyProductForm() {
     categoryId: "",
     price: "",
     salePrice: "",
-    stock: "0",
-    status: "draft" as ProductStatus,
+    status: "active" as ProductStatus,
     colorsText: "",
     sizesText: "",
     variantsText: "",
@@ -22,7 +21,6 @@ export function createEmptyProductForm() {
     story: "",
     measurements: "",
     deliveryNote: "",
-    emoji: "ğŸ‘—",
   };
 }
 
@@ -53,10 +51,11 @@ export function readProductFormDraft(key: string, storage = browserStorage()): P
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<ProductFormState>;
     const empty = createEmptyProductForm();
+    const allowedKeys = new Set(Object.keys(empty));
     return {
       ...empty,
       ...Object.fromEntries(
-        Object.entries(parsed).filter(([, value]) => typeof value === "string"),
+        Object.entries(parsed).filter(([key, value]) => allowedKeys.has(key) && typeof value === "string"),
       ),
       status: PRODUCT_STATUS_OPTIONS.includes(parsed.status as ProductStatus) ? parsed.status as ProductStatus : empty.status,
     };

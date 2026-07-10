@@ -61,7 +61,7 @@ function safePaging(limit, offset, defaultLimit = 50) {
   };
 }
 
-function productParams(body) {
+function productParams(body, options = {}) {
   const price = Number(body.price);
   const salePrice = body.sale_price == null || body.sale_price === '' ? null : Number(body.sale_price);
   const variants = normalizeVariants(body.variants);
@@ -91,7 +91,9 @@ function productParams(body) {
     String(body.tags || '').slice(0, 500),
     String(body.description || '').slice(0, 5000),
     String(body.product_story || '').slice(0, 5000),
-    String(body.emoji || '').slice(0, 16),
+    options.preserveMissingEmoji && !Object.prototype.hasOwnProperty.call(body, 'emoji')
+      ? null
+      : String(body.emoji || '').slice(0, 16),
     Boolean(body.featured_in_category),
   ];
 }
@@ -659,7 +661,7 @@ router.put('/:id', requireAuth, requireRole(['super_admin', 'owner', 'admin']), 
   try {
     const organization = await resolveOrganization(req, client);
     const variants = normalizeVariants(req.body.variants);
-    const params = productParams(req.body);
+    const params = productParams(req.body, { preserveMissingEmoji: true });
 
     await client.query('begin');
     await assertCategoryScope(client, organization.id, params[1]);
@@ -671,7 +673,7 @@ router.put('/:id', requireAuth, requireRole(['super_admin', 'owner', 'admin']), 
     const result = await client.query(
       `update products set
         name=$1, category_id=$2, price=$3, sale_price=$4, stock=$5, status=$6,
-        colors=$7, sizes=$8, images=$9, details=$10, tags=$11, description=$12, product_story=$13, emoji=$14,
+        colors=$7, sizes=$8, images=$9, details=$10, tags=$11, description=$12, product_story=$13, emoji=coalesce($14, emoji),
         featured_in_category=$15,
         updated_at=now()
        where id=$16 and organization_id=$17

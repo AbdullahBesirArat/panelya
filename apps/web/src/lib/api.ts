@@ -730,7 +730,6 @@ export async function createProduct(payload: {
   tags?: string;
   description?: string;
   product_story?: string;
-  emoji?: string;
 }) {
   return authenticatedRequest<ApiProduct>("/products", {
     method: "POST",
@@ -749,7 +748,6 @@ export async function createProduct(payload: {
       tags: payload.tags ?? "",
       description: payload.description ?? "",
       product_story: payload.product_story ?? "",
-      emoji: payload.emoji ?? "",
     }),
   });
 }
@@ -774,7 +772,6 @@ export async function updateProduct(id: string, payload: {
   tags?: string;
   description?: string;
   product_story?: string;
-  emoji?: string;
 }) {
   return authenticatedRequest<ApiProduct>(`/products/${id}`, {
     method: "PUT",
@@ -793,7 +790,6 @@ export async function updateProduct(id: string, payload: {
       tags: payload.tags ?? "",
       description: payload.description ?? "",
       product_story: payload.product_story ?? "",
-      emoji: payload.emoji ?? "",
     }),
   });
 }
