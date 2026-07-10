@@ -17,6 +17,7 @@ export function createEmptyProductForm() {
     tags: "",
     description: "",
     productStory: "",
+    fabricInfo: "",
     shortDescription: "",
     story: "",
     measurements: "",

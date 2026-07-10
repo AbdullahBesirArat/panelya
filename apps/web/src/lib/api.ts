@@ -726,6 +726,7 @@ export async function createProduct(payload: {
     story?: string;
     measurements?: string;
     delivery_note?: string;
+    fabric_info?: string;
   };
   tags?: string;
   description?: string;
@@ -768,6 +769,7 @@ export async function updateProduct(id: string, payload: {
     story?: string;
     measurements?: string;
     delivery_note?: string;
+    fabric_info?: string;
   };
   tags?: string;
   description?: string;
@@ -1181,6 +1183,17 @@ export async function fetchOrganizationColors() {
 
 export async function addOrganizationColor(payload: { name: string; hex: string }) {
   return authenticatedRequest<ApiCustomColor>("/organizations/colors", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function fetchOrganizationSizes() {
+  return authenticatedRequest<string[]>("/organizations/sizes");
+}
+
+export async function addOrganizationSize(payload: { size: string }) {
+  return authenticatedRequest<{ size: string }>("/organizations/sizes", {
     method: "POST",
     body: JSON.stringify(payload),
   });

@@ -807,6 +807,71 @@ router.post('/colors', requireAuth, requireRole(['owner', 'admin', 'super_admin'
   }
 });
 
+// Magaza seviyesi ozel bedenler (custom sizes). Ozel renklerle ayni desen:
+// store_settings.custom_sizes JSON dizisinde tutulur, tenant-scope'ludur,
+// migration gerektirmez.
+router.get('/sizes', requireAuth, requireRole(['owner', 'admin', 'member', 'viewer', 'super_admin']), async (req, res, next) => {
+  try {
+    const organization = await resolveOrganization(req);
+    const result = await db.query(
+      'select store_settings from organizations where id = $1 limit 1',
+      [organization.id]
+    );
+    const settings = result.rows[0]?.store_settings || {};
+    res.json(Array.isArray(settings.custom_sizes) ? settings.custom_sizes : []);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/sizes', requireAuth, requireRole(['owner', 'admin', 'super_admin']), async (req, res, next) => {
+  try {
+    const organization = await resolveOrganization(req);
+    const size = String(req.body.size || '').replace(/\s+/g, ' ').trim().slice(0, 24);
+
+    if (!size) {
+      return res.status(400).json({ error: 'Beden degeri zorunlu' });
+    }
+
+    const existing = await db.query(
+      'select store_settings from organizations where id = $1 limit 1',
+      [organization.id]
+    );
+    const settings = existing.rows[0]?.store_settings || {};
+    const customSizes = Array.isArray(settings.custom_sizes)
+      ? settings.custom_sizes.filter((item) => typeof item === 'string')
+      : [];
+
+    if (customSizes.length >= 100) {
+      return res.status(400).json({ error: 'En fazla 100 ozel beden eklenebilir' });
+    }
+
+    // Case-insensitive duplicate kontrolu.
+    const alreadyExists = customSizes.some((item) => item.toLocaleLowerCase('tr') === size.toLocaleLowerCase('tr'));
+    if (alreadyExists) {
+      return res.status(200).json({ size });
+    }
+
+    const newSettings = { ...settings, custom_sizes: [...customSizes, size] };
+
+    await db.query(
+      'update organizations set store_settings = $1::jsonb, updated_at = now() where id = $2',
+      [JSON.stringify(newSettings), organization.id]
+    );
+
+    invalidateOrganizationSummary(organization.id);
+    await auditLog(req, {
+      action: 'ADD_CUSTOM_SIZE',
+      resourceType: 'organization',
+      resourceId: organization.id,
+      newValue: { size },
+    });
+    res.status(201).json({ size });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.patch('/current/email', requireAuth, requireRole(['owner', 'admin', 'super_admin']), async (req, res, next) => {
   try {
     const organization = await resolveOrganization(req);

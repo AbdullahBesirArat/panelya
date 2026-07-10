@@ -54,6 +54,20 @@ test('store settings public WhatsApp ve IBAN alanlarini temiz sekilde saklar', (
   assert.deepEqual(settings.custom_colors, [{ name: 'Ekru', hex: '#eee7d8' }]);
 });
 
+test('store settings ozel bedenleri (custom_sizes) normalize ederek saklar', () => {
+  const settings = cleanStoreSettings({
+    custom_sizes: ['  4XL ', '1-2 Yaş', '', 42, 'A'.repeat(40)],
+  });
+
+  // Bosluk temizlenir, bos/gecersiz atlanir, 24 karakterle sinirlanir.
+  assert.deepEqual(settings.custom_sizes, ['4XL', '1-2 Yaş', 'A'.repeat(24)]);
+});
+
+test('custom_sizes verilmezse alan uretilmez', () => {
+  const settings = cleanStoreSettings({ whatsappPhone: '', iban: '' });
+  assert.equal(Object.prototype.hasOwnProperty.call(settings, 'custom_sizes'), false);
+});
+
 test('IBAN odeme talimati yalniz server-side settings bilgisinden uretilir', () => {
   const instructions = paymentInstructionsFromSettings({
     iban: 'TR12 0000 0000 0000 0000 0000 00',

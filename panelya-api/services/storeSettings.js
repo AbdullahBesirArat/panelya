@@ -210,6 +210,13 @@ function cleanStoreSettings(value = {}) {
     next.custom_colors = settings.custom_colors;
   }
 
+  if (Array.isArray(settings.custom_sizes)) {
+    next.custom_sizes = settings.custom_sizes
+      .filter((item) => typeof item === 'string')
+      .map((item) => item.replace(/\s+/g, ' ').trim().slice(0, 24))
+      .filter(Boolean);
+  }
+
   return next;
 }
 

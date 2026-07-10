@@ -28,6 +28,23 @@ test("quick product draft key is scoped per organization", () => {
   assert.match(buildProductDraftKey("suvera"), /:suvera$/);
 });
 
+test("new quick product form starts with empty fabric info", () => {
+  assert.equal(createEmptyProductForm().fabricInfo, "");
+});
+
+test("fabric info survives draft round-trip (turkce karakterler korunur)", () => {
+  const storage = createMemoryStorage();
+  const key = buildProductDraftKey("suvera");
+  const fabric = "%100 keten, dökümlü, iç göstermez, şifon astarlı, yazlık";
+  writeProductFormDraft(key, { ...createEmptyProductForm(), name: "Keten", fabricInfo: fabric }, storage);
+
+  assert.equal(readProductFormDraft(key, storage)?.fabricInfo, fabric);
+});
+
+test("empty product form (with fabric field) is still detected as empty for reset", () => {
+  assert.equal(isProductFormEmpty(createEmptyProductForm()), true);
+});
+
 test("empty quick product form is not persisted", () => {
   const storage = createMemoryStorage();
   const key = buildProductDraftKey("suvera");

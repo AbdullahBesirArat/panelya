@@ -9,6 +9,7 @@ import { MetricGrid } from "@/components/page-kit";
 import {
   API_BASE,
   addOrganizationColor,
+  addOrganizationSize,
   bulkUpdateProducts,
   createCategory,
   createProduct,
@@ -16,6 +17,7 @@ import {
   deleteProduct,
   fetchCategories,
   fetchOrganizationColors,
+  fetchOrganizationSizes,
   fetchProducts,
   setCategoryFeaturedProducts,
   updateCategory,
@@ -46,6 +48,7 @@ import {
   useSummaryQuery,
 } from "@/components/operations-shared";
 import { useToastStore } from "@/store/toast";
+import { mergeSizeOptions, normalizeCustomSize } from "@/lib/product-sizes";
 import {
   buildProductDraftKey,
   clearProductFormDraft,
@@ -107,6 +110,7 @@ type ProductPayload = {
     story: string;
     measurements: string;
     delivery_note: string;
+    fabric_info: string;
   };
   tags: string;
   description: string;
@@ -271,6 +275,9 @@ export function ProductsSection({
   const [showCustomColorForm, setShowCustomColorForm] = useState(false);
   const [customColorName, setCustomColorName] = useState("");
   const [customColorHex, setCustomColorHex] = useState("#d8c3a5");
+  // Ozel beden: hangi rengin ekleme formu acik + input degeri.
+  const [customSizeColor, setCustomSizeColor] = useState<string | null>(null);
+  const [customSizeInput, setCustomSizeInput] = useState("");
   const debouncedSearch = useDebouncedValue(search);
 
   useEffect(() => {
@@ -336,6 +343,23 @@ export function ProductsSection({
       setCustomColorHex("#d8c3a5");
       setShowCustomColorForm(false);
       pushToast({ title: "Özel renk eklendi", description: newColor.name, tone: "success" });
+    },
+  });
+
+  const customSizesQuery = useQuery({
+    queryKey: ["customSizes", organizationSlug],
+    queryFn: fetchOrganizationSizes,
+    staleTime: 60_000,
+  });
+
+  const customSizeMutation = useMutation({
+    mutationFn: addOrganizationSize,
+    onSuccess: (result: { size: string }) => {
+      void queryClient.invalidateQueries({ queryKey: ["customSizes", organizationSlug] });
+      pushToast({ title: "Özel beden eklendi", description: result.size, tone: "success" });
+    },
+    onError: () => {
+      pushToast({ title: "Özel beden önerilere kaydedilemedi", tone: "error" });
     },
   });
 
@@ -531,6 +555,8 @@ export function ProductsSection({
     products.flatMap((product) => splitCsvLines(product.tags || "")),
   )).sort((a, b) => a.localeCompare(b, "tr"));
   const selectedVariants = parseVariantLines(productForm.variantsText);
+  // Varsayilan preset bedenler + magaza seviyesindeki ozel bedenler (duplicate yok).
+  const sizeOptions = mergeSizeOptions(productSizePresets, customSizesQuery.data);
   const imageEntries = splitImageLines(productForm.imagesText).map(parseImageLine).filter((entry) => entry.url);
 
   function resetCategoryForm() {
@@ -638,6 +664,30 @@ export function ProductsSection({
     });
   }
 
+  // Ozel beden ekleme: normalize + validate, secili renge ekler (stok kutusu
+  // acilir) ve varsayilan/mevcut oneri degilse magaza onerilerine kaydeder.
+  function submitCustomSize(color: string) {
+    const size = normalizeCustomSize(customSizeInput);
+    if (!size) {
+      pushToast({ title: "Beden değeri boş olamaz", tone: "error" });
+      return;
+    }
+
+    const inPresets = productSizePresets.some((preset) => sameEntry(preset, size));
+    const inCustom = (customSizesQuery.data ?? []).some((item) => sameEntry(item, size));
+
+    // Renk icin bedeni sec + stok kutusunu ac (addVariantSize duplicate'i onler).
+    addVariantSize(color, size);
+
+    // Yalnizca gercekten yeni bir ozel beden ise magaza onerilerine ekle.
+    if (!inPresets && !inCustom) {
+      customSizeMutation.mutate({ size });
+    }
+
+    setCustomSizeInput("");
+    setCustomSizeColor(null);
+  }
+
   function updateVariantStock(color: string, size: string, value: string) {
     const stock = Math.max(0, Math.floor(Number(value) || 0));
     setProductForm((current) => {
@@ -710,6 +760,7 @@ export function ProductsSection({
       tags: product.tags || "",
       description: product.description || "",
       productStory: product.product_story || String(product.details?.story || ""),
+      fabricInfo: String(product.details?.fabric_info || ""),
       shortDescription: String(product.details?.short_description || ""),
       story: String(product.details?.story || ""),
       measurements: String(product.details?.measurements || ""),
@@ -780,6 +831,7 @@ export function ProductsSection({
         story: "",
         measurements: productForm.measurements.trim(),
         delivery_note: productForm.deliveryNote.trim(),
+        fabric_info: productForm.fabricInfo.trim().slice(0, 1000),
       },
       tags: productForm.tags.trim(),
       description: productForm.description.trim(),
@@ -1263,12 +1315,13 @@ export function ProductsSection({
                               <div className="mt-3 space-y-2">
                                 <p className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-500">Beden seç</p>
                                 <div className="flex flex-wrap gap-2">
-                                  {productSizePresets.map((size) => {
+                                  {sizeOptions.map((size) => {
                                     const isSelected = colorVariants.some((variant) => sameEntry(variant.size, size));
+                                    const isCustom = !productSizePresets.some((preset) => sameEntry(preset, size));
 
                                     return (
                                       <button
-                                        className={`focus-ring min-h-9 rounded-lg border px-3 text-xs font-semibold ${
+                                        className={`focus-ring inline-flex min-h-9 items-center gap-1 rounded-lg border px-3 text-xs font-semibold ${
                                           isSelected
                                             ? "border-mint bg-white text-mint"
                                             : "border-line bg-white text-zinc-700 hover:bg-zinc-50"
@@ -1278,10 +1331,63 @@ export function ProductsSection({
                                         type="button"
                                       >
                                         {size}
+                                        {isCustom ? (
+                                          <span className="rounded bg-zinc-100 px-1 text-[9px] font-semibold uppercase tracking-wide text-zinc-500">
+                                            Özel
+                                          </span>
+                                        ) : null}
                                       </button>
                                     );
                                   })}
                                 </div>
+                                {customSizeColor === color ? (
+                                  <div className="mt-2 flex flex-wrap items-end gap-2 rounded-lg border border-line bg-white p-2">
+                                    <input
+                                      aria-label={`${colorName} özel beden`}
+                                      className="focus-ring h-9 w-40 rounded-md border border-line bg-white px-2 text-sm"
+                                      maxLength={24}
+                                      onChange={(event) => setCustomSizeInput(event.target.value)}
+                                      onKeyDown={(event) => {
+                                        if (event.key === "Enter") {
+                                          event.preventDefault();
+                                          submitCustomSize(color);
+                                        }
+                                      }}
+                                      placeholder="Örn: 62, 4XL, 1-2 Yaş"
+                                      value={customSizeInput}
+                                    />
+                                    <Button
+                                      disabled={!customSizeInput.trim() || customSizeMutation.isPending}
+                                      onClick={() => submitCustomSize(color)}
+                                      type="button"
+                                      variant="mint"
+                                    >
+                                      Ekle
+                                    </Button>
+                                    <Button
+                                      onClick={() => {
+                                        setCustomSizeColor(null);
+                                        setCustomSizeInput("");
+                                      }}
+                                      type="button"
+                                      variant="outline"
+                                    >
+                                      Vazgeç
+                                    </Button>
+                                  </div>
+                                ) : (
+                                  <button
+                                    className="focus-ring mt-2 flex h-9 items-center gap-1.5 rounded-lg border border-dashed border-zinc-300 bg-white px-3 text-xs font-semibold text-zinc-500 hover:border-zinc-400 hover:text-zinc-700"
+                                    disabled={!canManageCatalog}
+                                    onClick={() => {
+                                      setCustomSizeColor(color);
+                                      setCustomSizeInput("");
+                                    }}
+                                    type="button"
+                                  >
+                                    + Özel Beden Ekle
+                                  </button>
+                                )}
                               </div>
                               <div className="mt-3 space-y-2">
                                 <p className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-500">Stok sayısı</p>
@@ -1430,6 +1536,18 @@ export function ProductsSection({
                         value={productForm.productStory}
                       />
                       <InlineHint>Bu metin Suvera ürün detayında &ldquo;Ürünün Duruşu&rdquo; olarak gösterilir.</InlineHint>
+                    </div>
+                    <div className="space-y-2">
+                      <FieldLabel htmlFor="product-fabric-info">Kumaş Bilgisi</FieldLabel>
+                      <textarea
+                        className="focus-ring min-h-32 rounded-lg border border-line bg-white px-3 py-3 text-sm"
+                        id="product-fabric-info"
+                        maxLength={1000}
+                        onChange={(event) => setProductForm((current) => ({ ...current, fabricInfo: event.target.value }))}
+                        placeholder="Örn: %100 pamuk, nefes alan tensel kumaş, iç göstermez, dökümlü yapı"
+                        value={productForm.fabricInfo}
+                      />
+                      <InlineHint>Ürünün kumaş türü, dokusu, kalınlığı, iç gösterme durumu ve mevsim kullanımını yazın.</InlineHint>
                     </div>
                     <div className="grid gap-3 sm:grid-cols-2">
                       <div className="space-y-2">
