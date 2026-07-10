@@ -94,6 +94,17 @@ const productSizePresets = [
   "3XL",
   ...Array.from({ length: 27 }, (_, index) => String(34 + index)),
 ];
+
+type ProductsTab = "products" | "create" | "categories" | "colors" | "sizes";
+
+const productTabs: Array<{ key: ProductsTab; label: string; description: string }> = [
+  { key: "products", label: "Ürünler", description: "Katalog listesi ve filtreler" },
+  { key: "create", label: "Ürün Oluştur", description: "Yeni ürün / düzenleme formu" },
+  { key: "categories", label: "Kategoriler", description: "Kategori yönetimi" },
+  { key: "colors", label: "Renkler", description: "Özel renk önerileri" },
+  { key: "sizes", label: "Bedenler", description: "Özel beden önerileri" },
+];
+
 type ProductPayload = {
   name: string;
   categoryId?: string;
@@ -278,6 +289,11 @@ export function ProductsSection({
   // Ozel beden: hangi rengin ekleme formu acik + input degeri.
   const [customSizeColor, setCustomSizeColor] = useState<string | null>(null);
   const [customSizeInput, setCustomSizeInput] = useState("");
+  // Sekmeli yapi + merkezi renk/beden yonetim sekmesi input state.
+  const [activeProductsTab, setActiveProductsTab] = useState<ProductsTab>("products");
+  const [manageColorName, setManageColorName] = useState("");
+  const [manageColorHex, setManageColorHex] = useState("#d8c3a5");
+  const [manageSizeInput, setManageSizeInput] = useState("");
   const debouncedSearch = useDebouncedValue(search);
 
   useEffect(() => {
@@ -362,6 +378,51 @@ export function ProductsSection({
       pushToast({ title: "Özel beden önerilere kaydedilemedi", tone: "error" });
     },
   });
+
+  // Merkezi yonetim (Renkler/Bedenler sekmesi): urun formuna dokunmadan yalnizca
+  // magaza onerilerine ekler.
+  const manageColorMutation = useMutation({
+    mutationFn: addOrganizationColor,
+    onSuccess: (newColor: ApiCustomColor) => {
+      void queryClient.invalidateQueries({ queryKey: ["customColors", organizationSlug] });
+      setManageColorName("");
+      setManageColorHex("#d8c3a5");
+      pushToast({ title: "Özel renk eklendi", description: newColor.name, tone: "success" });
+    },
+    onError: () => pushToast({ title: "Özel renk eklenemedi", tone: "error" }),
+  });
+
+  const manageSizeMutation = useMutation({
+    mutationFn: addOrganizationSize,
+    onSuccess: (result: { size: string }) => {
+      void queryClient.invalidateQueries({ queryKey: ["customSizes", organizationSlug] });
+      setManageSizeInput("");
+      pushToast({ title: "Özel beden eklendi", description: result.size, tone: "success" });
+    },
+    onError: () => pushToast({ title: "Özel beden eklenemedi", tone: "error" }),
+  });
+
+  function submitManageSize() {
+    const size = normalizeCustomSize(manageSizeInput);
+    if (!size) {
+      pushToast({ title: "Beden değeri boş olamaz", tone: "error" });
+      return;
+    }
+    const inPresets = productSizePresets.some((preset) => sameEntry(preset, size));
+    const inCustom = (customSizesQuery.data ?? []).some((item) => sameEntry(item, size));
+    if (inPresets || inCustom) {
+      pushToast({ title: "Bu beden zaten mevcut", description: size, tone: "info" });
+      setManageSizeInput("");
+      return;
+    }
+    manageSizeMutation.mutate({ size });
+  }
+
+  function openProductEditor(product: ApiProduct) {
+    startEditingProduct(product);
+    setActiveProductsTab("create");
+    pushToast({ title: "Ürün düzenleme formu açıldı", tone: "info" });
+  }
 
   const canManageCatalog = currentRole === "owner" || currentRole === "admin";
   const canDeleteCatalog = currentRole === "owner";
@@ -856,7 +917,32 @@ export function ProductsSection({
           { label: "Kategori", value: formatCount(summary.metrics.category_count), tone: "leaf" },
         ]}
       />
-      <div className="grid gap-5 xl:grid-cols-[1.2fr_0.8fr]">
+      <div className="rounded-2xl border border-line bg-white p-2 shadow-sm">
+        <div className="grid gap-2 md:grid-cols-5">
+          {productTabs.map((tab) => {
+            const active = activeProductsTab === tab.key;
+            return (
+              <button
+                className={[
+                  "focus-ring rounded-xl px-4 py-3 text-left transition",
+                  active ? "bg-ink text-white shadow-sm" : "bg-zinc-50 text-zinc-600 hover:bg-zinc-100",
+                ].join(" ")}
+                key={tab.key}
+                onClick={() => setActiveProductsTab(tab.key)}
+                type="button"
+              >
+                <span className="block text-sm font-semibold">{tab.label}</span>
+                <span className={["mt-1 block text-xs", active ? "text-white/70" : "text-zinc-500"].join(" ")}>
+                  {tab.description}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {activeProductsTab === "products" ? (
+      <div className="grid gap-5 xl:grid-cols-[1.4fr_0.6fr]">
         <Panel
           title="Ürünler"
           description="Türkiye mağaza vitrini için katalog kayıtları"
@@ -1001,7 +1087,7 @@ export function ProductsSection({
                     {canManageCatalog ? (
                       <button
                         className="focus-ring inline-flex h-9 items-center rounded-lg border border-line px-3 text-xs font-semibold text-ink"
-                        onClick={() => startEditingProduct(product)}
+                        onClick={() => openProductEditor(product)}
                         type="button"
                       >
                         Düzenle
@@ -1024,8 +1110,14 @@ export function ProductsSection({
             )}
           />
         </Panel>
+        <ActivityPanel
+          title="Katalog hareketleri"
+          items={pickActivity(summary, ["product", "category"], categories)}
+        />
+      </div>
+      ) : null}
 
-        <div className="space-y-5">
+      {activeProductsTab === "create" ? (
           <Panel
             title={editingProductId ? "Ürünü düzenle" : "Hızlı ürün oluştur"}
             description={editingProductId ? "Sadece değiştirmek istediğin alanları güncelle." : "Ürün adı, fiyat, stok ve görsellerle ürünü birkaç adımda yayına hazırla."}
@@ -1519,7 +1611,7 @@ export function ProductsSection({
                     <div className="space-y-2">
                       <FieldLabel htmlFor="product-description">Ana açıklama (ürünün genel metni ve SEO içeriği)</FieldLabel>
                       <textarea
-                        className="focus-ring min-h-32 rounded-lg border border-line bg-white px-3 py-3 text-sm"
+                        className="focus-ring w-full min-h-[110px] rounded-lg border border-line bg-white px-3 py-3 text-sm"
                         id="product-description"
                         onChange={(event) => setProductForm((current) => ({ ...current, description: event.target.value }))}
                         placeholder="Genel ürün açıklaması. Ölçü metni ve SEO için kaynak olarak da kullanılabilir."
@@ -1529,7 +1621,7 @@ export function ProductsSection({
                     <div className="space-y-2">
                       <FieldLabel htmlFor="product-product-story">Ürünün Duruşu</FieldLabel>
                       <textarea
-                        className="focus-ring min-h-32 rounded-lg border border-line bg-white px-3 py-3 text-sm"
+                        className="focus-ring w-full min-h-[110px] rounded-lg border border-line bg-white px-3 py-3 text-sm"
                         id="product-product-story"
                         onChange={(event) => setProductForm((current) => ({ ...current, productStory: event.target.value }))}
                         placeholder="Ürünün kumaş duruşu, kalıp hissi, kullanım tarzı ve kombin etkisini anlatın."
@@ -1540,7 +1632,7 @@ export function ProductsSection({
                     <div className="space-y-2">
                       <FieldLabel htmlFor="product-fabric-info">Kumaş Bilgisi</FieldLabel>
                       <textarea
-                        className="focus-ring min-h-32 rounded-lg border border-line bg-white px-3 py-3 text-sm"
+                        className="focus-ring w-full min-h-[110px] rounded-lg border border-line bg-white px-3 py-3 text-sm"
                         id="product-fabric-info"
                         maxLength={1000}
                         onChange={(event) => setProductForm((current) => ({ ...current, fabricInfo: event.target.value }))}
@@ -1553,7 +1645,7 @@ export function ProductsSection({
                       <div className="space-y-2">
                         <FieldLabel htmlFor="product-measurements">Ölçü bilgileri (detay sayfasındaki ölçü tablosu)</FieldLabel>
                         <textarea
-                          className="focus-ring min-h-32 rounded-lg border border-line bg-white px-3 py-3 text-sm"
+                          className="focus-ring w-full min-h-[100px] rounded-lg border border-line bg-white px-3 py-3 text-sm"
                           id="product-measurements"
                           onChange={(event) => setProductForm((current) => ({ ...current, measurements: event.target.value }))}
                           placeholder={"Her satıra bir ölçü satırı yazın\nBoy: 138 cm\nGöğüs: 110 cm"}
@@ -1563,7 +1655,7 @@ export function ProductsSection({
                       <div className="space-y-2">
                         <FieldLabel htmlFor="product-delivery-note">Teslimat notu (kargo, iade ve hazırlık bilgisi)</FieldLabel>
                         <textarea
-                          className="focus-ring min-h-32 rounded-lg border border-line bg-white px-3 py-3 text-sm"
+                          className="focus-ring w-full min-h-[100px] rounded-lg border border-line bg-white px-3 py-3 text-sm"
                           id="product-delivery-note"
                           onChange={(event) => setProductForm((current) => ({ ...current, deliveryNote: event.target.value }))}
                           placeholder="Kargo süresi, iade veya teslimat bilgilendirmeleri."
@@ -1592,8 +1684,10 @@ export function ProductsSection({
               </form>
             </div>
           </Panel>
+      ) : null}
 
-          <Panel title="Kategori ayarları" description="Kategori ekleme nadiren kullanılan bir ayar olarak burada tutulur.">
+      {activeProductsTab === "categories" ? (
+          <Panel title="Kategori ayarları" description="Kategori ekle, düzenle ve öne çıkan ürünleri buradan yönet.">
             <details className="group rounded-lg border border-line bg-zinc-50">
               <summary className="focus-ring flex cursor-pointer list-none items-center justify-between gap-3 rounded-lg px-4 py-3 text-sm font-semibold text-ink">
                 <span>{editingCategoryId ? "Kategoriyi düzenle" : "Kategori ekle veya düzenle"}</span>
@@ -1825,13 +1919,92 @@ export function ProductsSection({
               })}
             </div>
           </Panel>
+      ) : null}
 
-          <ActivityPanel
-            title="Katalog hareketleri"
-            items={pickActivity(summary, ["product", "category"], categories)}
-          />
-        </div>
-      </div>
+      {activeProductsTab === "colors" ? (
+        <Panel title="Renkler" description="Ürün formunda önerilen özel renkleri buradan yönet.">
+          <div className="space-y-5">
+            <div className="space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-500">Varsayılan renkler</p>
+              <div className="flex flex-wrap gap-2">
+                {productColorPresets.map((color) => (
+                  <span className="inline-flex items-center gap-2 rounded-lg border border-line bg-zinc-50 px-3 py-1.5 text-xs font-semibold text-zinc-600" key={color.value}>
+                    <span className="h-4 w-4 rounded-full border border-line" style={{ background: color.value }} />
+                    {color.name}
+                  </span>
+                ))}
+              </div>
+            </div>
+            <div className="space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-500">Özel renkler ({(customColorsQuery.data ?? []).length})</p>
+              {(customColorsQuery.data ?? []).length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                  {(customColorsQuery.data ?? []).map((color) => (
+                    <span className="inline-flex items-center gap-2 rounded-lg border border-mint/40 bg-mint/5 px-3 py-1.5 text-xs font-semibold text-ink" key={color.value}>
+                      <span className="h-4 w-4 rounded-full border border-line" style={{ background: color.hex }} />
+                      {color.name}
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <InlineHint>Henüz özel renk eklenmedi. Eklediğiniz renkler ürün formunda önerilerde görünür.</InlineHint>
+              )}
+            </div>
+            <div className="flex flex-wrap items-end gap-2 rounded-lg border border-line bg-zinc-50 p-3">
+              <div className="grid gap-1">
+                <label className="text-xs font-semibold text-zinc-600">Renk adı</label>
+                <input className="focus-ring h-9 w-40 rounded-md border border-line bg-white px-2 text-sm" onChange={(e) => setManageColorName(e.target.value)} placeholder="ör: Bakır" value={manageColorName} />
+              </div>
+              <div className="grid gap-1">
+                <label className="text-xs font-semibold text-zinc-600">Renk</label>
+                <div className="flex items-center gap-2">
+                  <input className="h-9 w-12 cursor-pointer rounded border border-line" onChange={(e) => setManageColorHex(e.target.value)} type="color" value={manageColorHex} />
+                  <input className="focus-ring h-9 w-24 rounded-md border border-line bg-white px-2 font-mono text-xs" onChange={(e) => setManageColorHex(e.target.value)} placeholder="#d8c3a5" value={manageColorHex} />
+                </div>
+              </div>
+              <Button disabled={!manageColorName.trim() || !canManageCatalog || manageColorMutation.isPending} onClick={() => manageColorMutation.mutate({ name: manageColorName.trim(), hex: manageColorHex })} type="button" variant="mint">
+                {manageColorMutation.isPending ? "Ekleniyor" : "Ekle"}
+              </Button>
+            </div>
+          </div>
+        </Panel>
+      ) : null}
+
+      {activeProductsTab === "sizes" ? (
+        <Panel title="Bedenler" description="Ürün formunda önerilen özel bedenleri buradan yönet.">
+          <div className="space-y-5">
+            <div className="space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-500">Varsayılan bedenler</p>
+              <div className="flex flex-wrap gap-2">
+                {productSizePresets.map((size) => (
+                  <span className="rounded-lg border border-line bg-zinc-50 px-3 py-1.5 text-xs font-semibold text-zinc-600" key={size}>{size}</span>
+                ))}
+              </div>
+            </div>
+            <div className="space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-500">Özel bedenler ({(customSizesQuery.data ?? []).length})</p>
+              {(customSizesQuery.data ?? []).length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                  {(customSizesQuery.data ?? []).map((size) => (
+                    <span className="rounded-lg border border-mint/40 bg-mint/5 px-3 py-1.5 text-xs font-semibold text-ink" key={size}>{size}</span>
+                  ))}
+                </div>
+              ) : (
+                <InlineHint>Henüz özel beden eklenmedi. Eklediğiniz bedenler ürün formunda önerilerde görünür.</InlineHint>
+              )}
+            </div>
+            <div className="flex flex-wrap items-end gap-2 rounded-lg border border-line bg-zinc-50 p-3">
+              <div className="grid gap-1">
+                <label className="text-xs font-semibold text-zinc-600">Özel beden</label>
+                <input className="focus-ring h-9 w-44 rounded-md border border-line bg-white px-2 text-sm" maxLength={24} onChange={(e) => setManageSizeInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); submitManageSize(); } }} placeholder="Örn: 62, 4XL, 1-2 Yaş" value={manageSizeInput} />
+              </div>
+              <Button disabled={!manageSizeInput.trim() || !canManageCatalog || manageSizeMutation.isPending} onClick={submitManageSize} type="button" variant="mint">
+                {manageSizeMutation.isPending ? "Ekleniyor" : "Ekle"}
+              </Button>
+            </div>
+          </div>
+        </Panel>
+      ) : null}
 
     </>
   );
