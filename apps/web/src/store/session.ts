@@ -23,8 +23,10 @@ export type SessionAdmin = {
   role: "super_admin" | "admin" | "viewer";
 };
 
+// Auth tokens are intentionally absent: they live in HttpOnly cookies handled by
+// the same-origin BFF (/api/bff) and must never be readable from JavaScript.
 type SessionPayload = {
-  accessToken: string;
+  accessToken?: string;
   refreshToken?: string;
   user: SessionUser;
   currentOrganization: SessionOrganization;
@@ -33,7 +35,7 @@ type SessionPayload = {
 
 type AdminSessionPayload = {
   actorType: "admin";
-  accessToken: string;
+  accessToken?: string;
   admin: SessionAdmin;
   role: "super_admin" | "admin" | "viewer";
 };
@@ -46,23 +48,22 @@ export type ImpersonationState = {
 };
 
 type ImpersonationPayload = {
-  accessToken: string;
   organization: { id: string; name: string; slug: string };
   expiresAt: string;
 };
 
 type SessionState = {
   actorType: "app" | "admin" | null;
-  accessToken: string | null;
-  refreshToken: string | null;
+  authenticated: boolean;
   user: SessionUser | null;
   admin: SessionAdmin | null;
   organizations: SessionOrganization[];
   organizationSlug: string;
   hydrated: boolean;
-  // Impersonation (super_admin -> magaza paneli)
+  // Impersonation (super_admin -> magaza paneli); the actual token swap happens
+  // server-side in the BFF via an HttpOnly restore cookie.
   impersonation: ImpersonationState | null;
-  adminRestore: { accessToken: string; admin: SessionAdmin } | null;
+  adminRestore: { admin: SessionAdmin } | null;
   applySession: (payload: SessionPayload) => void;
   applyAdminSession: (payload: AdminSessionPayload) => void;
   syncProfile: (payload: Omit<SessionPayload, "refreshToken" | "accessToken"> & { accessToken?: string }) => void;
@@ -77,8 +78,7 @@ export const useSessionStore = create<SessionState>()(
   persist(
     (set) => ({
       actorType: null,
-      accessToken: null,
-      refreshToken: null,
+      authenticated: false,
       user: null,
       admin: null,
       organizations: [],
@@ -88,8 +88,7 @@ export const useSessionStore = create<SessionState>()(
       adminRestore: null,
       applySession: (payload) => set({
         actorType: "app",
-        accessToken: payload.accessToken,
-        refreshToken: payload.refreshToken ?? null,
+        authenticated: true,
         user: payload.user,
         admin: null,
         organizations: payload.organizations,
@@ -97,34 +96,31 @@ export const useSessionStore = create<SessionState>()(
       }),
       applyAdminSession: (payload) => set({
         actorType: "admin",
-        accessToken: payload.accessToken,
-        refreshToken: null,
+        authenticated: true,
         user: null,
         admin: payload.admin,
         organizations: [],
         organizationSlug: "",
       }),
-      syncProfile: (payload) => set((state) => ({
+      syncProfile: (payload) => set({
         actorType: "app",
-        accessToken: payload.accessToken || state.accessToken,
-        refreshToken: state.refreshToken,
+        authenticated: true,
         user: payload.user,
         admin: null,
         organizations: payload.organizations,
         organizationSlug: payload.currentOrganization.slug,
-      })),
+      }),
       updateUserEmail: (email) => set((state) => ({
         user: state.user ? { ...state.user, email } : state.user,
       })),
-      // Super_admin oturumunu sakla, app-audience impersonation token'ina gec.
-      // fetchMe (/auth/me) bu token ile magaza sahibinin profilini doldurur.
+      // Super_admin oturumunu isaretle, app-audience impersonation'a gec.
+      // fetchMe (/auth/me) impersonation cookie'si ile magaza sahibinin profilini doldurur.
       startImpersonation: (payload) => set((state) => ({
-        adminRestore: state.actorType === "admin" && state.accessToken && state.admin
-          ? { accessToken: state.accessToken, admin: state.admin }
+        adminRestore: state.actorType === "admin" && state.admin
+          ? { admin: state.admin }
           : state.adminRestore,
         actorType: "app",
-        accessToken: payload.accessToken,
-        refreshToken: null,
+        authenticated: true,
         user: { id: "", email: "", name: "Platform Yoneticisi" },
         admin: null,
         organizations: [{
@@ -147,13 +143,12 @@ export const useSessionStore = create<SessionState>()(
         let restored = false;
         set((state) => {
           if (!state.adminRestore) {
-            return { impersonation: null };
+            return { impersonation: null, authenticated: false };
           }
           restored = true;
           return {
             actorType: "admin",
-            accessToken: state.adminRestore.accessToken,
-            refreshToken: null,
+            authenticated: true,
             user: null,
             admin: state.adminRestore.admin,
             organizations: [],
@@ -166,8 +161,7 @@ export const useSessionStore = create<SessionState>()(
       },
       clearSession: () => set({
         actorType: null,
-        accessToken: null,
-        refreshToken: null,
+        authenticated: false,
         user: null,
         admin: null,
         organizations: [],
@@ -180,10 +174,10 @@ export const useSessionStore = create<SessionState>()(
     {
       name: "panelya-web-session",
       storage: createJSONStorage(() => localStorage),
+      // Only non-sensitive UI/session profile is persisted. No auth tokens ever.
       partialize: (state) => ({
         actorType: state.actorType,
-        accessToken: state.accessToken,
-        refreshToken: state.refreshToken,
+        authenticated: state.authenticated,
         user: state.user,
         admin: state.admin,
         organizations: state.organizations,

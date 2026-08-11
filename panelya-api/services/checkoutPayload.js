@@ -31,10 +31,13 @@ function normalizeCheckoutOptions(body = {}, settings = {}, subtotal = 0) {
     throw Object.assign(new Error('Kartli odeme su anda aktif degil'), { status: 400 });
   }
 
+  // A24.5: gift wrap is deliberately NOT read from the payload. The selection and its
+  // fee are resolved from the locked server cart at checkout, so a client-supplied
+  // gift_wrap flag is ignored (older clients may still send it; it simply has no
+  // effect) rather than being trusted.
   return {
     paymentMethod,
     note: String(body.note || '').trim().slice(0, 2000),
-    giftWrap: body.gift_wrap === true || body.giftWrap === true,
     shippingFee,
   };
 }

@@ -51,25 +51,41 @@ function callbackUrl(req) {
   return configured || `${apiBaseUrl(req)}/api/payment/callback`;
 }
 
-function buildBasketItems(order, items) {
-  const basketItems = items.map((item, index) => ({
-    id: String(item.product_id || `ITEM-${index + 1}`),
-    name: item.name,
-    category1: 'Panelya',
-    itemType: Iyzipay.BASKET_ITEM_TYPE.PHYSICAL,
-    price: toMoney(Number(item.unit_price || 0) * Number(item.quantity || 1)),
-  }));
+function buildBasketItems(order, items, pricing = null) {
+  const allocatedByLine = new Map();
+  for (const allocation of pricing?.allocations || []) {
+    const key = `${Number(allocation.product_id)}:${Number(allocation.variant_id || 0)}`;
+    allocatedByLine.set(key, Number(allocatedByLine.get(key) || 0) + Number(allocation.discount || 0));
+  }
+  const basketItems = items.map((item, index) => {
+    const key = `${Number(item.product_id)}:${Number(item.variant_id || 0)}`;
+    const gross = Number(item.unit_price || 0) * Number(item.quantity || 1);
+    const net = Math.max(0, gross - Number(allocatedByLine.get(key) || 0));
+    return {
+      id: String(item.variant_id || item.product_id || `ITEM-${index + 1}`),
+      name: item.name,
+      category1: 'Panelya',
+      itemType: Iyzipay.BASKET_ITEM_TYPE.PHYSICAL,
+      price: toMoney(net),
+    };
+  }).filter((item) => Number(item.price) > 0);
 
-  const itemsTotal = basketItems.reduce((sum, item) => sum + Number(item.price), 0);
-  const diff = Number(order.total) - itemsTotal;
-  if (diff > 0.009) {
+  const shipping = Number(pricing?.shippingFee ?? 0);
+  if (shipping > 0.009) {
     basketItems.push({
       id: 'SHIPPING',
       name: 'Kargo',
       category1: 'Teslimat',
       itemType: Iyzipay.BASKET_ITEM_TYPE.PHYSICAL,
-      price: toMoney(diff),
+      price: toMoney(shipping),
     });
+  }
+
+  const basketTotal = basketItems.reduce((sum, item) => sum + Number(item.price), 0);
+  const remainder = Math.round((Number(order.total) - basketTotal) * 100) / 100;
+  if (basketItems.length && Math.abs(remainder) >= 0.01) {
+    const last = basketItems[basketItems.length - 1];
+    last.price = toMoney(Math.max(0, Number(last.price) + remainder));
   }
 
   return basketItems;
@@ -98,7 +114,7 @@ async function initializeMock({ req, order }) {
   };
 }
 
-async function initializeIyzico({ req, order, customer, items }) {
+async function initializeIyzico({ req, order, customer, items, pricing }) {
   const iyzipay = iyzicoClient();
   const person = splitName(customer.name);
   const address = customer.address || 'Adres bilgisi girilmedi';
@@ -141,7 +157,7 @@ async function initializeIyzico({ req, order, customer, items }) {
       address,
       zipCode: customer.zipCode || '34000',
     },
-    basketItems: buildBasketItems(order, items),
+    basketItems: buildBasketItems(order, items, pricing),
   };
 
   return new Promise((resolve, reject) => {
@@ -238,6 +254,7 @@ async function retrievePayment(context) {
 }
 
 module.exports = {
+  buildBasketItems,
   initializePayment,
   retrievePayment,
   providerName,

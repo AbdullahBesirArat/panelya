@@ -1,0 +1,13 @@
+drop trigger if exists trg_return_events_append_only on return_events;
+drop function if exists panelya_block_return_event_mutation();
+drop table if exists return_events;
+drop table if exists refund_allocations;
+drop table if exists refunds;
+drop table if exists return_media;
+drop table if exists return_items;
+drop table if exists return_requests;
+alter table customer_accounts drop constraint if exists customer_accounts_org_id_key;
+alter table order_items drop constraint if exists order_items_org_id_key;
+alter table upload_assets drop constraint if exists upload_assets_org_id_key;
+alter table orders drop column if exists refunded_total;
+alter table orders drop column if exists tax_total;

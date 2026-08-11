@@ -55,6 +55,7 @@ export function AnalyticsSection({ organizationSlug }: { organizationSlug: strin
       </div>
       <Panel title="Performans dağılımı" description="Sipariş durum dağılımı">
         <DataGrid
+          caption="Performans dağılımı"
           columns={["Durum", "Adet", "Pay", "Not"]}
           emptyMessage="Durum dağılımı oluşmadı."
           rows={summary.orderStatusBreakdown}

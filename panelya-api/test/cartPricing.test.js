@@ -27,6 +27,13 @@ test('priceCartItems only prices active organization products', async () => {
     async query(text, params) {
       assert.match(text, /organization_id = \$2/);
       assert.deepEqual(params, [[1, 2], 'org-1']);
+      if (text.includes('from product_variants')) {
+        assert.match(text, /is_default/);
+        return { rows: [
+          { id: 11, product_id: 1, color: '', size: '', sku: null, stock: 5, status: 'active' },
+          { id: 12, product_id: 2, color: '', size: '', sku: null, stock: 5, status: 'active' },
+        ] };
+      }
       return {
         rows: [
           { id: 1, name: 'Urun A', price: '100', sale_price: '90', status: 'active' },
@@ -42,8 +49,8 @@ test('priceCartItems only prices active organization products', async () => {
   ], { organizationId: 'org-1' });
 
   assert.deepEqual(items, [
-    { product_id: 1, variant_id: null, name: 'Urun A', selected_color: '', selected_size: '', sku: '', quantity: 2, unit_price: 90 },
-    { product_id: 2, variant_id: null, name: 'Urun B', selected_color: '', selected_size: '', sku: '', quantity: 1, unit_price: 50 },
+    { product_id: 1, variant_id: 11, name: 'Urun A', selected_color: '', selected_size: '', sku: null, quantity: 2, unit_price: 90 },
+    { product_id: 2, variant_id: 12, name: 'Urun B', selected_color: '', selected_size: '', sku: null, quantity: 1, unit_price: 50 },
   ]);
   assert.equal(cartTotal(items), 230);
 });
@@ -100,6 +107,22 @@ test('5) pasif varyant yeni siparise eklenemez (variant sorgusu is_active ile fi
   assert.match(variantQueryText, /is_active/);
 });
 
+test('stok bittikten sonra checkout acik stok mesaji dondurur', async () => {
+  const client = {
+    async query(text) {
+      if (text.includes('from products')) {
+        return { rows: [{ id: 1, name: 'Son Urun', price: '100', sale_price: null, status: 'out' }] };
+      }
+      return { rows: [{ id: 9, product_id: 1, color: 'Siyah', size: 'M', stock: 0, status: 'out' }] };
+    },
+  };
+
+  await assert.rejects(
+    priceCartItems(client, [{ product_id: 1, variant_id: 9, quantity: 1 }], { organizationId: 'org-1' }),
+    (error) => error.status === 409 && /stokta yok/.test(error.message)
+  );
+});
+
 test('campaignDiscount yuzde ve sabit indirimi subtotal ile sinirlar', () => {
   assert.equal(campaignDiscount({ type: 'percentage', value: 10 }, 250), 25);
   assert.equal(campaignDiscount({ type: 'percentage', value: 150 }, 250), 250);
@@ -141,16 +164,15 @@ test('calculateCartPricing server-side kampanya indirimi ve kargoyu canonical to
   };
 
   const pricing = await calculateCartPricing(client, [
-    { unit_price: 100, quantity: 2 },
-    { unit_price: 50, quantity: 1 },
+    { product_id: 1, variant_id: 11, unit_price: 100, quantity: 2 },
+    { product_id: 2, variant_id: 12, unit_price: 50, quantity: 1 },
   ], { organizationId: 'org-1', shippingFee: 29.9 });
 
-  assert.deepEqual(pricing, {
-    subtotal: 250,
-    discount: 25,
-    discountedSubtotal: 225,
-    shippingFee: 29.9,
-    total: 254.9,
-    campaign: { id: 7, name: 'Launch', type: 'percentage', value: '10' },
-  });
+  assert.equal(pricing.subtotal, 250);
+  assert.equal(pricing.discount, 25);
+  assert.equal(pricing.discountedSubtotal, 225);
+  assert.equal(pricing.shippingFee, 29.9);
+  assert.equal(pricing.total, 254.9);
+  assert.deepEqual(pricing.campaign, { id: 7, name: 'Launch', type: 'percentage', value: '10' });
+  assert.equal(pricing.allocations.reduce((sum, row) => sum + row.discount, 0), 25);
 });

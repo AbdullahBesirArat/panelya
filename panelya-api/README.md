@@ -8,13 +8,15 @@ Panelya Operations API is the backend for the multi-tenant operations dashboard.
 - PostgreSQL
 - JWT access tokens and refresh token rotation
 - Organization-scoped reads and writes
-- Multer + Sharp for image upload support
+- Multer + Sharp media pipeline with thumbnail/card/detail object-storage variants
 - iyzipay Checkout Form SDK integration path
 - Swagger UI under `/api/docs`
 
 ## Local Setup
 
-Create a local `panelya` database and a `panelya_user` user. The API reads `DATABASE_URL` from `.env`.
+Create a local `panelya` database. Local development may use `DATABASE_URL`; production uses distinct `RUNTIME_DATABASE_URL`, `MIGRATION_DATABASE_URL`, and `SYSTEM_DATABASE_URL` roles.
+
+Local media defaults to the ignored `.data/object-storage` adapter. Production must configure the provider-neutral adapter with `OBJECT_STORAGE_PROVIDER=s3` plus an S3-compatible bucket, endpoint, and credentials. New uploads are never written to PostgreSQL binary data or the legacy uploads directory. Run `npm run media:backfill -- --execute` only after taking a backup; it verifies every object before switching legacy read references. `npm run media:cleanup -- --execute` removes unreferenced assets after the grace period and retains retry/dead-letter state.
 
 Install dependencies from the repository root:
 
@@ -41,6 +43,7 @@ psql -U postgres -d postgres -c "alter database panelya owner to panelya_user;"
 Run schema, migrations and demo seed:
 
 ```bash
+npm run db:roles # one-time role provisioning when using split DB roles
 npm run db:setup
 npm run db:migrate
 npm run demo:seed

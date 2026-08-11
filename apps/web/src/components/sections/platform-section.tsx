@@ -13,8 +13,12 @@ import {
   formatDateTime,
 } from "@/components/operations-shared";
 import { MetricGrid } from "@/components/page-kit";
+import { useStepUp } from "@/components/security/step-up-provider";
 import { Badge } from "@/components/ui/badge";
 import { displayBrandName } from "@/lib/branding";
+import { SubscriptionPlatformPanel } from "@/components/sections/subscription-platform-panel";
+import { DomainsPlatformPanel } from "@/components/sections/domains-platform-panel";
+import { queryKeys } from "@/lib/query-keys";
 import { useSessionStore } from "@/store/session";
 import { useToastStore } from "@/store/toast";
 import {
@@ -129,7 +133,7 @@ function Field({ label, children, hint }: { label: string; children: React.React
     <label className="block space-y-1">
       <span className="text-sm font-semibold text-zinc-700">{label}</span>
       {children}
-      {hint ? <span className="block text-xs text-zinc-500">{hint}</span> : null}
+      {hint ? <span className="block text-xs text-zinc-600">{hint}</span> : null}
     </label>
   );
 }
@@ -189,9 +193,9 @@ export function PlatformSection() {
         <StoreDetailView storeId={selectedStoreId} onBack={() => setView("stores")} />
       )}
       {view === "store-detail" && !selectedStoreId && <SectionError message="Mağaza seçilmedi." />}
-      {view === "domains" && <DomainsView />}
+      {view === "domains" && (<div className="space-y-5"><DomainsView /><DomainsPlatformPanel /></div>)}
       {view === "users" && <UsersOverviewView onOpenStore={openStore} />}
-      {view === "plans" && <PlansView />}
+      {view === "plans" && (<div className="space-y-5"><PlansView /><SubscriptionPlatformPanel /></div>)}
       {view === "activity" && <ActivityView />}
       {view === "health" && <HealthView />}
       {view === "settings" && <PlatformSettingsView />}
@@ -202,8 +206,8 @@ export function PlatformSection() {
 // ---------------------------------------------------------------- Overview
 
 function OverviewView({ onOpenStore, onNewStore }: { onOpenStore: (id: string) => void; onNewStore: () => void }) {
-  const query = useQuery({ queryKey: ["platform-overview"], queryFn: fetchPlatformOverview, staleTime: 20_000 });
-  const storesQuery = useQuery({ queryKey: ["platform-stores", "overview"], queryFn: () => fetchPlatformStores({ limit: 200 }), staleTime: 20_000 });
+  const query = useQuery({ queryKey: queryKeys.platform.overview, queryFn: fetchPlatformOverview, staleTime: 20_000 });
+  const storesQuery = useQuery({ queryKey: queryKeys.platform.stores.overview, queryFn: () => fetchPlatformStores({ limit: 200 }), staleTime: 20_000 });
 
   if (query.isLoading) return <SectionLoading />;
   if (query.isError || !query.data) return <SectionError message="Platform verisi yüklenemedi." onRetry={() => void query.refetch()} />;
@@ -238,7 +242,7 @@ function OverviewView({ onOpenStore, onNewStore }: { onOpenStore: (id: string) =
         <Panel title="Eksik ayarı olan mağazalar" description="Canlıya çıkmadan tamamlanmalı"
           actions={<PrimaryButton onClick={onNewStore}>+ Yeni Mağaza</PrimaryButton>}>
           {query.data.incompleteStores.length === 0 ? (
-            <p className="text-sm text-zinc-500">Tüm mağazaların temel ayarları tamam.</p>
+            <p className="text-sm text-zinc-600">Tüm mağazaların temel ayarları tamam.</p>
           ) : (
             <div className="space-y-2">
               {query.data.incompleteStores.map((s) => (
@@ -253,13 +257,13 @@ function OverviewView({ onOpenStore, onNewStore }: { onOpenStore: (id: string) =
 
         <Panel title="Son aktiviteler" description="Platform geneli hareketler">
           <div className="space-y-2">
-            {query.data.recentActivity.length === 0 ? <p className="text-sm text-zinc-500">Henüz hareket yok.</p> :
+            {query.data.recentActivity.length === 0 ? <p className="text-sm text-zinc-600">Henüz hareket yok.</p> :
               query.data.recentActivity.slice(0, 10).map((a, i) => (
                 <div className="rounded-lg border border-line px-4 py-2 text-sm" key={i}>
                   <span className="font-semibold">{a.action}</span>{" "}
-                  <span className="text-zinc-500">{a.entity_type}</span>
-                  {a.organization_name ? <span className="text-zinc-500"> · {displayBrandName(a.organization_name)}</span> : null}
-                  <span className="block text-xs text-zinc-400">{formatDateTime(a.created_at)}</span>
+                  <span className="text-zinc-600">{a.entity_type}</span>
+                  {a.organization_name ? <span className="text-zinc-600"> · {displayBrandName(a.organization_name)}</span> : null}
+                  <span className="block text-xs text-zinc-600">{formatDateTime(a.created_at)}</span>
                 </div>
               ))}
           </div>
@@ -301,7 +305,7 @@ function StoresView({ onOpenStore, onNewStore }: { onOpenStore: (id: string) => 
   const [flag, setFlag] = useState<"" | "noProducts" | "noOrders" | "incompleteSettings">("");
 
   const query = useQuery({
-    queryKey: ["platform-stores", { q, status, plan, domain, flag }],
+    queryKey: queryKeys.platform.stores.list({ q, status, plan, domain, flag }),
     queryFn: () => fetchPlatformStores({
       q, status, plan, domain,
       noProducts: flag === "noProducts",
@@ -345,8 +349,9 @@ function StoresView({ onOpenStore, onNewStore }: { onOpenStore: (id: string) => 
         <SectionError message="Mağazalar yüklenemedi." onRetry={() => void query.refetch()} />
       ) : (
         <>
-          <p className="mb-3 text-sm text-zinc-500">{formatCount(query.data?.total || 0)} mağaza</p>
+          <p className="mb-3 text-sm text-zinc-600">{formatCount(query.data?.total || 0)} mağaza</p>
           <DataGrid
+            caption="Mağazalar"
             columns={["Mağaza", "Sahip", "Plan / Durum", "Ürün", "Sipariş", "Müşteri", "Storage", "İşlem"]}
             emptyMessage="Bu filtreye uygun mağaza yok."
             rows={query.data?.stores || []}
@@ -354,12 +359,12 @@ function StoresView({ onOpenStore, onNewStore }: { onOpenStore: (id: string) => 
               <tr key={s.id}>
                 <DataCell>
                   <p className="font-semibold text-ink">{displayBrandName(s.name)}</p>
-                  <p className="font-mono text-xs text-zinc-500">{s.slug}</p>
-                  <p className="text-xs text-zinc-400">{s.domain || "domain yok"}</p>
+                  <p className="font-mono text-xs text-zinc-600">{s.slug}</p>
+                  <p className="text-xs text-zinc-600">{s.domain || "domain yok"}</p>
                 </DataCell>
                 <DataCell>
                   <p className="text-sm">{s.owner.name || "-"}</p>
-                  <p className="text-xs text-zinc-500">{s.owner.email || "-"}</p>
+                  <p className="text-xs text-zinc-600">{s.owner.email || "-"}</p>
                 </DataCell>
                 <DataCell>
                   <Badge tone="mint">{PLAN_LABELS[s.plan] || s.plan}</Badge>
@@ -367,16 +372,16 @@ function StoresView({ onOpenStore, onNewStore }: { onOpenStore: (id: string) => 
                 </DataCell>
                 <DataCell>
                   <p className="text-sm font-semibold">{formatCount(s.counts.products)}</p>
-                  <p className="text-xs text-zinc-500">{formatCount(s.counts.activeProducts)} aktif</p>
+                  <p className="text-xs text-zinc-600">{formatCount(s.counts.activeProducts)} aktif</p>
                 </DataCell>
                 <DataCell>
                   <p className="text-sm font-semibold">{formatCount(s.counts.orders)}</p>
-                  <p className="text-xs text-zinc-500">{formatCount(s.counts.orders30d)} / 30g</p>
+                  <p className="text-xs text-zinc-600">{formatCount(s.counts.orders30d)} / 30g</p>
                 </DataCell>
                 <DataCell>{formatCount(s.counts.customers)}</DataCell>
                 <DataCell>
                   <p className="text-sm">{formatBytes(s.storageBytes)}</p>
-                  <p className="text-xs text-zinc-500">%{s.settingsCompleteness.completionRatio} kurulum</p>
+                  <p className="text-xs text-zinc-600">%{s.settingsCompleteness.completionRatio} kurulum</p>
                 </DataCell>
                 <DataCell>
                   <GhostButton onClick={() => onOpenStore(s.id)}>Detay</GhostButton>
@@ -403,7 +408,7 @@ type WizardData = {
   paymentProvider: string; shippingCompany: string; shippingModel: string; returnPolicy: string; distanceContract: string; privacy: string; kvkk: string;
 };
 
-const EMPTY_WIZARD: WizardData = {
+export const EMPTY_WIZARD: WizardData = {
   name: "", slug: "", description: "", storeType: "", plan: "growth",
   ownerMode: "new", ownerName: "", ownerEmail: "", ownerPhone: "", ownerPassword: "",
   brandLogo: "", brandFavicon: "", brandBanner: "", primaryColor: "", secondaryColor: "", font: "",
@@ -412,11 +417,22 @@ const EMPTY_WIZARD: WizardData = {
   paymentProvider: "", shippingCompany: "", shippingModel: "", returnPolicy: "", distanceContract: "", privacy: "", kvkk: "",
 };
 
+// The draft is a convenience for a multi-step form, so it may hold anything the wizard
+// collects EXCEPT the owner's password. A credential in Web Storage outlives the tab, is
+// readable by any script that gets to run on this origin, and would still be sitting there
+// long after the store was created. It stays in React state for the life of the form only.
+export function draftWithoutSecrets(data: WizardData): Omit<WizardData, "ownerPassword"> {
+  const safe: Partial<WizardData> = { ...data };
+  delete safe.ownerPassword;
+  return safe as Omit<WizardData, "ownerPassword">;
+}
+
 function loadDraft(): WizardData {
   if (typeof window === "undefined") return EMPTY_WIZARD;
   try {
     const raw = window.localStorage.getItem(DRAFT_KEY);
-    return raw ? { ...EMPTY_WIZARD, ...JSON.parse(raw) } : EMPTY_WIZARD;
+    // ownerPassword is forced empty even if an older build persisted one.
+    return raw ? { ...EMPTY_WIZARD, ...JSON.parse(raw), ownerPassword: "" } : EMPTY_WIZARD;
   } catch { return EMPTY_WIZARD; }
 }
 
@@ -430,7 +446,9 @@ function NewStoreWizard({ onCreated, onCancel }: { onCreated: (id: string) => vo
   function update(patch: Partial<WizardData>) {
     setData((prev) => {
       const next = { ...prev, ...patch };
-      if (typeof window !== "undefined") window.localStorage.setItem(DRAFT_KEY, JSON.stringify(next));
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(DRAFT_KEY, JSON.stringify(draftWithoutSecrets(next)));
+      }
       return next;
     });
   }
@@ -464,8 +482,8 @@ function NewStoreWizard({ onCreated, onCancel }: { onCreated: (id: string) => vo
     },
     onSuccess: (result) => {
       if (typeof window !== "undefined") window.localStorage.removeItem(DRAFT_KEY);
-      void queryClient.invalidateQueries({ queryKey: ["platform-stores"] });
-      void queryClient.invalidateQueries({ queryKey: ["platform-overview"] });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.platform.stores.all });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.platform.overview });
       pushToast({ title: "Mağaza oluşturuldu", description: displayBrandName(result.store.name), tone: "success" });
       if (result.temporaryPassword) {
         setTempPassword(result.temporaryPassword);
@@ -592,7 +610,7 @@ type DetailTab = typeof DETAIL_TABS[number];
 
 function StoreDetailView({ storeId, onBack }: { storeId: string; onBack: () => void }) {
   const [tab, setTab] = useState<DetailTab>("Genel");
-  const query = useQuery({ queryKey: ["platform-store", storeId], queryFn: () => fetchPlatformStore(storeId), staleTime: 10_000 });
+  const query = useQuery({ queryKey: queryKeys.platform.stores.detail(storeId), queryFn: () => fetchPlatformStore(storeId), staleTime: 10_000 });
 
   if (query.isLoading) return <SectionLoading />;
   if (query.isError || !query.data) return <SectionError message="Mağaza yüklenemedi." onRetry={() => void query.refetch()} />;
@@ -611,8 +629,8 @@ function StoreDetailView({ storeId, onBack }: { storeId: string; onBack: () => v
         <div className="flex flex-wrap items-center gap-3">
           <StoreStatusBadge status={store.status} />
           <Badge tone="mint">{PLAN_LABELS[store.plan] || store.plan}</Badge>
-          <span className="text-sm text-zinc-500">Kurulum %{store.settingsCompleteness.completionRatio}</span>
-          <span className="text-sm text-zinc-500">Oluşturma: {formatDateTime(store.createdAt)}</span>
+          <span className="text-sm text-zinc-600">Kurulum %{store.settingsCompleteness.completionRatio}</span>
+          <span className="text-sm text-zinc-600">Oluşturma: {formatDateTime(store.createdAt)}</span>
         </div>
       </Panel>
 
@@ -635,6 +653,7 @@ function StoreDetailView({ storeId, onBack }: { storeId: string; onBack: () => v
 
 function StoreActions({ store }: { store: PlatformStore }) {
   const queryClient = useQueryClient();
+  const { runWithStepUp } = useStepUp();
   const pushToast = useToastStore((s) => s.pushToast);
   const router = useRouter();
   const startImpersonation = useSessionStore((s) => s.startImpersonation);
@@ -642,17 +661,17 @@ function StoreActions({ store }: { store: PlatformStore }) {
   const statusMutation = useMutation({
     mutationFn: (status: PlatformStoreStatus) => updatePlatformStoreStatus(store.id, status),
     onSuccess: (_d, status) => {
-      void queryClient.invalidateQueries({ queryKey: ["platform-store", store.id] });
-      void queryClient.invalidateQueries({ queryKey: ["platform-stores"] });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.platform.stores.detail(store.id) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.platform.stores.all });
       pushToast({ title: "Durum güncellendi", description: STORE_STATUS_LABELS[status], tone: "success" });
     },
     onError: (err) => pushToast({ title: "Durum değiştirilemedi", description: err instanceof Error ? err.message : "", tone: "error" }),
   });
 
   const impersonateMutation = useMutation({
-    mutationFn: () => impersonateStore(store.id, "Platform yönetiminden mağaza paneline geçiş"),
+    mutationFn: () => runWithStepUp(() => impersonateStore(store.id, "Platform yönetiminden mağaza paneline geçiş")),
     onSuccess: (res) => {
-      startImpersonation({ accessToken: res.accessToken, organization: res.organization, expiresAt: res.expiresAt });
+      startImpersonation({ organization: res.organization, expiresAt: res.expiresAt });
       pushToast({ title: "Mağaza paneline geçildi", description: displayBrandName(res.organization.name), tone: "info" });
       router.replace("/dashboard");
     },
@@ -702,7 +721,7 @@ function DetailGeneral({ store }: { store: PlatformStore }) {
 function Row({ k, v }: { k: string; v: string }) {
   return (
     <div className="flex justify-between gap-4 border-b border-line py-1.5 last:border-0">
-      <dt className="text-zinc-500">{k}</dt>
+      <dt className="text-zinc-600">{k}</dt>
       <dd className="text-right font-medium text-ink">{v}</dd>
     </div>
   );
@@ -711,7 +730,7 @@ function Row({ k, v }: { k: string; v: string }) {
 function DetailUsers({ storeId }: { storeId: string }) {
   const queryClient = useQueryClient();
   const pushToast = useToastStore((s) => s.pushToast);
-  const query = useQuery({ queryKey: ["platform-store-users", storeId], queryFn: () => fetchPlatformStoreUsers(storeId) });
+  const query = useQuery({ queryKey: queryKeys.platform.stores.usersFor(storeId), queryFn: () => fetchPlatformStoreUsers(storeId) });
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [role, setRole] = useState("organization_staff");
@@ -722,7 +741,7 @@ function DetailUsers({ storeId }: { storeId: string }) {
     onSuccess: (res) => {
       setEmail(""); setName("");
       if (res.temporaryPassword) setTempPw(res.temporaryPassword);
-      void queryClient.invalidateQueries({ queryKey: ["platform-store-users", storeId] });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.platform.stores.usersFor(storeId) });
       pushToast({ title: "Kullanıcı eklendi", tone: "success" });
     },
     onError: (err) => pushToast({ title: "Eklenemedi", description: err instanceof Error ? err.message : "", tone: "error" }),
@@ -732,12 +751,13 @@ function DetailUsers({ storeId }: { storeId: string }) {
     <Panel title="Mağaza sahibi ve kullanıcılar">
       {query.isLoading ? <SectionLoading /> : (
         <DataGrid
+          caption="Mağaza sahibi ve kullanıcılar"
           columns={["Kullanıcı", "Platform rolü", "Membership", "Son giriş"]}
           emptyMessage="Kullanıcı yok."
           rows={query.data?.users || []}
           renderRow={(u) => (
             <tr key={u.membership_id}>
-              <DataCell><p className="font-semibold">{displayBrandName(u.name) || u.email}</p><p className="text-xs text-zinc-500">{u.email}</p></DataCell>
+              <DataCell><p className="font-semibold">{displayBrandName(u.name) || u.email}</p><p className="text-xs text-zinc-600">{u.email}</p></DataCell>
               <DataCell><Badge tone="mint">{u.platformRole}</Badge></DataCell>
               <DataCell>{u.role}</DataCell>
               <DataCell>{formatDateTime(u.last_login_at)}</DataCell>
@@ -760,7 +780,7 @@ function DetailUsers({ storeId }: { storeId: string }) {
 }
 
 function DetailStorage({ storeId }: { storeId: string }) {
-  const query = useQuery({ queryKey: ["platform-store-storage", storeId], queryFn: () => fetchPlatformStoreStorage(storeId) });
+  const query = useQuery({ queryKey: queryKeys.platform.stores.storage(storeId), queryFn: () => fetchPlatformStoreStorage(storeId) });
   if (query.isLoading) return <SectionLoading />;
   if (query.isError || !query.data) return <SectionError message="Storage verisi yüklenemedi." />;
   const s = query.data;
@@ -784,7 +804,7 @@ function DetailStorage({ storeId }: { storeId: string }) {
           </dl>
         </Panel>
         <Panel title="En büyük dosyalar">
-          {s.largestFiles.length === 0 ? <p className="text-sm text-zinc-500">Yüklenmiş dosya yok.</p> : (
+          {s.largestFiles.length === 0 ? <p className="text-sm text-zinc-600">Yüklenmiş dosya yok.</p> : (
             <div className="space-y-2">
               {s.largestFiles.map((f) => (
                 <div className="flex items-center justify-between rounded-lg border border-line px-3 py-2 text-sm" key={f.filename}>
@@ -807,7 +827,7 @@ function DetailDomain({ store }: { store: PlatformStore }) {
   const [storefrontUrl, setStorefrontUrl] = useState(store.storefrontUrl || "");
   const mutation = useMutation({
     mutationFn: () => updatePlatformStoreDomain(store.id, { domain, storefrontUrl, domainStatus: domain ? "pending" : "none" }),
-    onSuccess: () => { void queryClient.invalidateQueries({ queryKey: ["platform-store", store.id] }); pushToast({ title: "Domain güncellendi", tone: "success" }); },
+    onSuccess: () => { void queryClient.invalidateQueries({ queryKey: queryKeys.platform.stores.detail(store.id) }); pushToast({ title: "Domain güncellendi", tone: "success" }); },
     onError: (err) => pushToast({ title: "Güncellenemedi", description: err instanceof Error ? err.message : "", tone: "error" }),
   });
   return (
@@ -827,14 +847,15 @@ function DetailDomain({ store }: { store: PlatformStore }) {
 
 function DetailPlan({ store }: { store: PlatformStore }) {
   const queryClient = useQueryClient();
+  const { runWithStepUp } = useStepUp();
   const pushToast = useToastStore((s) => s.pushToast);
-  const metricsQuery = useQuery({ queryKey: ["platform-store-metrics", store.id], queryFn: () => fetchPlatformStoreMetrics(store.id) });
+  const metricsQuery = useQuery({ queryKey: queryKeys.platform.stores.metrics(store.id), queryFn: () => fetchPlatformStoreMetrics(store.id) });
   const [plan, setPlan] = useState(store.plan);
   const mutation = useMutation({
-    mutationFn: () => updatePlatformStorePlan(store.id, plan),
+    mutationFn: () => runWithStepUp(() => updatePlatformStorePlan(store.id, plan)),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["platform-store", store.id] });
-      void queryClient.invalidateQueries({ queryKey: ["platform-store-metrics", store.id] });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.platform.stores.detail(store.id) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.platform.stores.metrics(store.id) });
       pushToast({ title: "Plan güncellendi", description: PLAN_LABELS[plan] || plan, tone: "success" });
     },
     onError: (err) => pushToast({ title: "Plan değiştirilemedi", description: err instanceof Error ? err.message : "", tone: "error" }),
@@ -851,7 +872,7 @@ function DetailPlan({ store }: { store: PlatformStore }) {
         </div>
       </Panel>
       <Panel title="Kullanım / limit">
-        {!usage ? <p className="text-sm text-zinc-500">Limit bilgisi yok.</p> : (
+        {!usage ? <p className="text-sm text-zinc-600">Limit bilgisi yok.</p> : (
           <dl className="space-y-2 text-sm">
             <Row k="Ürün" v={`${usage.usage.products} / ${usage.limits.maxProducts}`} />
             <Row k="Aylık sipariş" v={`${usage.usage.ordersMonth} / ${usage.limits.maxOrdersMonth}`} />
@@ -865,11 +886,12 @@ function DetailPlan({ store }: { store: PlatformStore }) {
 }
 
 function DetailActivity({ storeId }: { storeId: string }) {
-  const query = useQuery({ queryKey: ["platform-activity", storeId], queryFn: () => fetchPlatformActivityLogs({ organizationId: storeId, limit: 50 }) });
+  const query = useQuery({ queryKey: queryKeys.platform.activity(storeId), queryFn: () => fetchPlatformActivityLogs({ organizationId: storeId, limit: 50 }) });
   if (query.isLoading) return <SectionLoading />;
   return (
     <Panel title="Aktivite kayıtları">
-      <DataGrid columns={["İşlem", "Varlık", "Kullanıcı", "Tarih"]} emptyMessage="Kayıt yok." rows={query.data?.logs || []}
+      <DataGrid
+        caption="Aktivite kayıtları" columns={["İşlem", "Varlık", "Kullanıcı", "Tarih"]} emptyMessage="Kayıt yok." rows={query.data?.logs || []}
         renderRow={(l) => (
           <tr key={l.id}>
             <DataCell><span className="font-semibold">{l.action}</span></DataCell>
@@ -896,7 +918,7 @@ function DetailTechnical({ store }: { store: PlatformStore }) {
         {checks.map((c) => (
           <div className="flex items-center justify-between rounded-lg border border-line px-4 py-2 text-sm" key={c.k}>
             <span className="font-semibold">{c.k}</span>
-            <span className="flex items-center gap-2"><span className="text-zinc-500">{c.v}</span><Badge tone={c.ok ? "leaf" : "coral"}>{c.ok ? "✓" : "uyarı"}</Badge></span>
+            <span className="flex items-center gap-2"><span className="text-zinc-600">{c.v}</span><Badge tone={c.ok ? "leaf" : "coral"}>{c.ok ? "✓" : "uyarı"}</Badge></span>
           </div>
         ))}
         {store.settingsCompleteness.missing.length > 0 ? (
@@ -910,16 +932,17 @@ function DetailTechnical({ store }: { store: PlatformStore }) {
 // ---------------------------------------------------------------- Domains
 
 function DomainsView() {
-  const query = useQuery({ queryKey: ["platform-domains"], queryFn: fetchPlatformDomains, staleTime: 20_000 });
+  const query = useQuery({ queryKey: queryKeys.platform.domains, queryFn: fetchPlatformDomains, staleTime: 20_000 });
   if (query.isLoading) return <SectionLoading />;
   if (query.isError) return <SectionError message="Domainler yüklenemedi." onRetry={() => void query.refetch()} />;
   return (
     <Panel title="Domainler" description="Tüm mağazaların domain ve storefront durumu">
-      <DataGrid columns={["Mağaza", "Domain", "Storefront", "Bağlantı", "SSL", "Doğrulama"]} emptyMessage="Mağaza yok."
+      <DataGrid
+        caption="Domainler" columns={["Mağaza", "Domain", "Storefront", "Bağlantı", "SSL", "Doğrulama"]} emptyMessage="Mağaza yok."
         rows={query.data?.domains || []}
         renderRow={(d) => (
           <tr key={d.organizationId}>
-            <DataCell><p className="font-semibold">{displayBrandName(d.name)}</p><p className="font-mono text-xs text-zinc-500">{d.slug}</p></DataCell>
+            <DataCell><p className="font-semibold">{displayBrandName(d.name)}</p><p className="font-mono text-xs text-zinc-600">{d.slug}</p></DataCell>
             <DataCell>{d.domain || "-"}{d.subdomain ? ` / ${d.subdomain}` : ""}</DataCell>
             <DataCell>{d.storefrontUrl || "-"}</DataCell>
             <DataCell><Badge tone={d.connected ? "leaf" : "neutral"}>{d.connected ? d.domainStatus : "yok"}</Badge></DataCell>
@@ -934,15 +957,16 @@ function DomainsView() {
 // ---------------------------------------------------------------- Users overview
 
 function UsersOverviewView({ onOpenStore }: { onOpenStore: (id: string) => void }) {
-  const query = useQuery({ queryKey: ["platform-stores", "users"], queryFn: () => fetchPlatformStores({ limit: 200 }), staleTime: 20_000 });
+  const query = useQuery({ queryKey: queryKeys.platform.stores.users, queryFn: () => fetchPlatformStores({ limit: 200 }), staleTime: 20_000 });
   if (query.isLoading) return <SectionLoading />;
   return (
     <Panel title="Kullanıcılar" description="Mağaza sahipleri ve erişimleri (detay için mağazaya gidin)">
-      <DataGrid columns={["Mağaza", "Sahip", "E-posta", "Durum", "İşlem"]} emptyMessage="Mağaza yok."
+      <DataGrid
+        caption="Kullanıcılar" columns={["Mağaza", "Sahip", "E-posta", "Durum", "İşlem"]} emptyMessage="Mağaza yok."
         rows={query.data?.stores || []}
         renderRow={(s) => (
           <tr key={s.id}>
-            <DataCell><p className="font-semibold">{displayBrandName(s.name)}</p><p className="font-mono text-xs text-zinc-500">{s.slug}</p></DataCell>
+            <DataCell><p className="font-semibold">{displayBrandName(s.name)}</p><p className="font-mono text-xs text-zinc-600">{s.slug}</p></DataCell>
             <DataCell>{s.owner.name || "-"}</DataCell>
             <DataCell>{s.owner.email || "-"}</DataCell>
             <DataCell><StoreStatusBadge status={s.status} /></DataCell>
@@ -956,12 +980,13 @@ function UsersOverviewView({ onOpenStore }: { onOpenStore: (id: string) => void 
 // ---------------------------------------------------------------- Plans
 
 function PlansView() {
-  const query = useQuery({ queryKey: ["platform-plans"], queryFn: fetchPlatformPlans, staleTime: 60_000 });
+  const query = useQuery({ queryKey: queryKeys.platform.plans, queryFn: fetchPlatformPlans, staleTime: 60_000 });
   if (query.isLoading) return <SectionLoading />;
   if (query.isError) return <SectionError message="Planlar yüklenemedi." onRetry={() => void query.refetch()} />;
   return (
     <Panel title="Planlar / Abonelikler" description="Plan limitleri">
-      <DataGrid columns={["Plan", "Ürün", "Aylık sipariş", "Kullanıcı", "Storage (MB)", "Koleksiyon", "Blog"]} emptyMessage="Plan yok."
+      <DataGrid
+        caption="Planlar / Abonelikler" columns={["Plan", "Ürün", "Aylık sipariş", "Kullanıcı", "Storage (MB)", "Koleksiyon", "Blog"]} emptyMessage="Plan yok."
         rows={query.data?.plans || []}
         renderRow={(p) => (
           <tr key={p.plan_name}>
@@ -981,11 +1006,12 @@ function PlansView() {
 // ---------------------------------------------------------------- Activity
 
 function ActivityView() {
-  const query = useQuery({ queryKey: ["platform-activity", "all"], queryFn: () => fetchPlatformActivityLogs({ limit: 100 }), staleTime: 10_000 });
+  const query = useQuery({ queryKey: queryKeys.platform.allActivity, queryFn: () => fetchPlatformActivityLogs({ limit: 100 }), staleTime: 10_000 });
   if (query.isLoading) return <SectionLoading />;
   return (
     <Panel title="Aktivite Kayıtları" description="Platform geneli son hareketler">
-      <DataGrid columns={["İşlem", "Mağaza", "Varlık", "Kullanıcı", "Tarih"]} emptyMessage="Kayıt yok." rows={query.data?.logs || []}
+      <DataGrid
+        caption="Aktivite Kayıtları" columns={["İşlem", "Mağaza", "Varlık", "Kullanıcı", "Tarih"]} emptyMessage="Kayıt yok." rows={query.data?.logs || []}
         renderRow={(l) => (
           <tr key={l.id}>
             <DataCell><span className="font-semibold">{l.action}</span></DataCell>
@@ -1002,7 +1028,7 @@ function ActivityView() {
 // ---------------------------------------------------------------- Health
 
 function HealthView() {
-  const query = useQuery({ queryKey: ["platform-health"], queryFn: fetchPlatformHealth, staleTime: 10_000, refetchInterval: 30_000 });
+  const query = useQuery({ queryKey: queryKeys.platform.health, queryFn: fetchPlatformHealth, staleTime: 10_000, refetchInterval: 30_000 });
   if (query.isLoading) return <SectionLoading />;
   if (query.isError || !query.data) return <SectionError message="Sağlık verisi yüklenemedi." onRetry={() => void query.refetch()} />;
   const h = query.data;
@@ -1042,7 +1068,7 @@ function HealthView() {
 function PlatformSettingsView() {
   const queryClient = useQueryClient();
   const pushToast = useToastStore((s) => s.pushToast);
-  const query = useQuery({ queryKey: ["platform-settings"], queryFn: fetchPlatformSettings });
+  const query = useQuery({ queryKey: queryKeys.platform.settings, queryFn: fetchPlatformSettings });
   const settings = (query.data?.settings || {}) as { defaultPlan?: string; supportEmail?: string; allowSelfSignup?: boolean; maintenanceMode?: boolean };
   const [defaultPlan, setDefaultPlan] = useState<string | null>(null);
   const [supportEmail, setSupportEmail] = useState<string | null>(null);
@@ -1056,7 +1082,7 @@ function PlatformSettingsView() {
 
   const mutation = useMutation({
     mutationFn: () => updatePlatformSettings({ defaultPlan: planValue, supportEmail: emailValue, allowSelfSignup: signupValue, maintenanceMode: maintValue }),
-    onSuccess: () => { void queryClient.invalidateQueries({ queryKey: ["platform-settings"] }); pushToast({ title: "Ayarlar kaydedildi", tone: "success" }); },
+    onSuccess: () => { void queryClient.invalidateQueries({ queryKey: queryKeys.platform.settings }); pushToast({ title: "Ayarlar kaydedildi", tone: "success" }); },
     onError: (err) => pushToast({ title: "Kaydedilemedi", description: err instanceof Error ? err.message : "", tone: "error" }),
   });
 

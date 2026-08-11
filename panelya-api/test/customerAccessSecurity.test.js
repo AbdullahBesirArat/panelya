@@ -133,9 +133,13 @@ test('customers/account: authenticated customer only sees own order history', as
   assert.deepEqual(view.orders, [{ id: 1, order_code: 'SVR-1' }]);
   const customerQuery = client.find(/from customers/);
   assert.deepEqual(customerQuery.params, ['cust-a', 'org-a']);
+  // History is scoped to the tenant and to orders owned by this customer via their CRM id
+  // OR an explicit account claim (A25) — always the server-resolved ids, never client input.
   const ordersQuery = client.find(/from orders o/);
-  assert.match(ordersQuery.text, /o\.organization_id = \$1 and o\.customer_id = \$2/);
-  assert.deepEqual(ordersQuery.params, ['org-a', 'cust-a']);
+  assert.match(ordersQuery.text, /o\.organization_id = \$1/);
+  assert.match(ordersQuery.text, /o\.customer_id = \$2/);
+  assert.match(ordersQuery.text, /o\.customer_account_id = \$3/);
+  assert.deepEqual(ordersQuery.params, ['org-a', 'cust-a', 'acc-a']);
 });
 
 test('customers/account: email + tek orderCode tam gecmis sorgusuna yetki olmaz', async () => {
@@ -179,11 +183,16 @@ test('customers/account: client customerId/accountId baska gecmisi sectiremez', 
   const customerQuery = client.find(/from customers/);
   const ordersQuery = client.find(/from orders o/);
   assert.deepEqual(customerQuery.params, ['cust-a', 'org-a']);
-  assert.deepEqual(ordersQuery.params, ['org-a', 'cust-a']);
+  // The server account's own ids are used; client-supplied customerId/accountId are ignored.
+  assert.deepEqual(ordersQuery.params, ['org-a', 'cust-a', 'acc-a']);
+  assert.ok(!ordersQuery.params.includes('cust-b'));
+  assert.ok(!ordersQuery.params.includes('acc-b'));
 });
 
-test('customers/account: customer baglantisi yoksa tenant verisi ve siparis sizdirmez', async () => {
-  const client = createFakeClient();
+test('customers/account: customer baglantisi yoksa CRM sizdirmaz, siparis yalniz hesaba baglanir', async () => {
+  const client = createFakeClient([
+    { match: (text) => /from orders o/.test(text), result: { rows: [] } },
+  ]);
 
   const view = await customers.customerAccountView(client, {
     organization: { id: 'org-a' },
@@ -192,5 +201,10 @@ test('customers/account: customer baglantisi yoksa tenant verisi ve siparis sizd
 
   assert.equal(view.customer, null);
   assert.deepEqual(view.orders, []);
-  assert.equal(client.queries.length, 0);
+  // No customer_id -> no CRM lookup at all. Orders are still fetched but strictly scoped
+  // to this account's own claimed orders (org + customer_account_id), so nothing leaks.
+  assert.equal(client.count(/from customers/), 0);
+  const ordersQuery = client.find(/from orders o/);
+  assert.deepEqual(ordersQuery.params, ['org-a', null, 'acc-a']);
+  assert.match(ordersQuery.text, /o\.customer_account_id = \$3/);
 });

@@ -22,14 +22,14 @@ async function main() {
   const organization = await resolveOrganization(req, db);
   console.log(JSON.stringify({ organization }, null, 2));
 
-  const products = await db.query(
+  const products = await db.withTenantContext(organization.id, (client) => client.query(
     `select id, name, status, stock
-     from products
-     where organization_id = $1
-     order by created_at desc
-     limit 10`,
+       from products
+      where organization_id = $1
+      order by created_at desc
+      limit 10`,
     [organization.id]
-  );
+  ));
 
   console.log(JSON.stringify({ products: products.rows }, null, 2));
 }

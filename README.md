@@ -34,12 +34,11 @@ panelya/
 |-- apps/web/             # Next.js operations dashboard
 |-- panelya-api/          # Express API, auth, payments, migrations and services
 |-- docs/                 # Verification, deployment and Suvera integration notes
-|-- suvera-storefront/    # Legacy/reference storefront copy, not the root-tracked Suvera source
 |-- docker-compose.yml    # Local PostgreSQL/API/web support
 `-- package.json          # Root workspace scripts
 ```
 
-The root-tracked Suvera source lives outside this nested repository at `../suvera`.
+The canonical Suvera storefront is the parent repository root (`..`), not a copy inside this submodule.
 
 ## Installation
 
@@ -50,6 +49,7 @@ npm install
 Prepare the database:
 
 ```bash
+npm run db:roles # one-time, with provisioning-only admin credentials
 npm run db:setup
 npm run db:migrate
 npm run demo:seed
@@ -65,13 +65,16 @@ Use example files only. Never commit real `.env` files.
 
 Important API variables include:
 
-- `DATABASE_URL`
+- `RUNTIME_DATABASE_URL` / `DATABASE_URL` (non-owner runtime role)
+- `MIGRATION_DATABASE_URL` (schema owner, migration commands only)
+- `SYSTEM_DATABASE_URL` (explicit background/platform RLS-bypass role)
 - `JWT_SECRET_APP`
 - `JWT_SECRET_ADMIN`
 - `CORS_ORIGIN`
 - `PUBLIC_API_URL`
 - `PUBLIC_SITE_URL`
 - `PAYMENT_PROVIDER`
+- `OBJECT_STORAGE_PROVIDER=s3` and the matching bucket/endpoint credentials
 - `PAYMENT_CALLBACK_SECRET`
 - `IYZICO_API_KEY`
 - `IYZICO_SECRET_KEY`

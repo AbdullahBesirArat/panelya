@@ -44,6 +44,10 @@ export function isProductFormEmpty(form: ProductFormState) {
   return (Object.keys(empty) as Array<keyof ProductFormState>).every((key) => form[key] === empty[key]);
 }
 
+export function shouldWarnUnsavedProductChanges(form: ProductFormState, isSaving = false) {
+  return !isSaving && !isProductFormEmpty(form);
+}
+
 export function readProductFormDraft(key: string, storage = browserStorage()): ProductFormState | null {
   if (!storage) return null;
 

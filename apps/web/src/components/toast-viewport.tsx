@@ -37,8 +37,11 @@ export function ToastViewport() {
     <div className="pointer-events-none fixed inset-x-4 top-4 z-50 flex flex-col gap-3 sm:left-auto sm:right-4 sm:w-full sm:max-w-sm">
       {items.map((item) => (
         <section
+          aria-atomic="true"
+          aria-live={item.tone === "error" ? "assertive" : "polite"}
           className={`pointer-events-auto rounded-lg border px-4 py-3 shadow-panel transition-all ${toneClass[item.tone]}`}
           key={item.id}
+          role={item.tone === "error" ? "alert" : "status"}
         >
           <div className="flex items-start gap-3">
             <span className={`inline-flex min-h-8 items-center rounded-md px-2.5 text-xs font-semibold ${badgeClass[item.tone]}`}>
@@ -46,10 +49,10 @@ export function ToastViewport() {
             </span>
             <div className="min-w-0 flex-1">
               <p className="text-sm font-semibold">{item.title}</p>
-              {item.description ? <p className="mt-1 text-sm text-zinc-500">{item.description}</p> : null}
+              {item.description ? <p className="mt-1 text-sm text-zinc-600">{item.description}</p> : null}
             </div>
             <button
-              className="focus-ring rounded-md px-2 py-1 text-xs font-semibold text-zinc-500"
+              className="focus-ring rounded-md px-2 py-1 text-xs font-semibold text-zinc-600"
               onClick={() => dismissToast(item.id)}
               type="button"
             >

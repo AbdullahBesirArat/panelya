@@ -35,6 +35,29 @@ function requestedPublicAccessToken(req) {
   ).trim();
 }
 
+// A27 Host -> tenant. Loaded lazily to avoid a require cycle (customDomains needs
+// planLimits, which needs planVersions). Returns null for any host that is not a live
+// tenant domain, so the caller falls back to the existing slug/token model.
+async function resolveOrganizationByHost(req, client) {
+  const { requestHostname } = require('./hostResolution');
+  const { isPlatformHostname } = require('./domainNames');
+  const hostname = requestHostname(req);
+  if (!hostname || isPlatformHostname(hostname)) return null;
+  // This lookup necessarily runs BEFORE any tenant context exists — deciding which tenant
+  // a Host belongs to is the whole point — and custom_domains is FORCE RLS, so a
+  // tenant-scoped client would filter every row away. The system pool is the correct tool
+  // here, and the query is still tightly bounded: one exact hostname, active only.
+  const result = await db.systemQuery(
+    `select o.id, o.name, o.slug, o.plan, o.status, o.store_settings, o.public_access_token
+       from custom_domains d
+       join organizations o on o.id = d.organization_id
+      where d.hostname = $1 and d.status = 'active' and o.status <> 'suspended'
+      limit 1`,
+    [hostname]
+  );
+  return result.rows[0] || null;
+}
+
 async function resolveOrganization(req, client = db, options = {}) {
   const { allowPublic = false } = options;
   if (allowPublic && !req.auth) {
@@ -46,6 +69,28 @@ async function resolveOrganization(req, client = db, options = {}) {
       || req.body?.organizationSlug
       || ''
     );
+
+    // A27: a VERIFIED + ACTIVE custom domain is an additional public entry point. It is
+    // consulted before the token path so a storefront served from the tenant's own domain
+    // works, but it never widens access: the Host must belong to an active domain row, and
+    // if the request ALSO carries a slug or token they have to agree with it. A mismatch
+    // is refused rather than resolved to either side, so a valid token for tenant B cannot
+    // be replayed against tenant A's host (or the reverse).
+    const hostOrganization = await resolveOrganizationByHost(req, client);
+    if (hostOrganization) {
+      if (slug && slug !== hostOrganization.slug) {
+        throw Object.assign(new Error('Alan adi ve magaza uyusmuyor'), {
+          status: 400, code: 'HOST_TENANT_MISMATCH',
+        });
+      }
+      if (publicAccessToken && publicAccessToken !== hostOrganization.public_access_token) {
+        throw Object.assign(new Error('Alan adi ve erisim anahtari uyusmuyor'), {
+          status: 403, code: 'HOST_TOKEN_MISMATCH',
+        });
+      }
+      if (client === db) await db.activateTenantContext(hostOrganization.id);
+      return hostOrganization;
+    }
 
     if (!publicAccessToken) {
       throw Object.assign(new Error('Public access token zorunlu'), { status: 401 });
@@ -70,7 +115,11 @@ async function resolveOrganization(req, client = db, options = {}) {
       throw Object.assign(new Error('Organizasyon bulunamadi'), { status: 404 });
     }
 
-    return result.rows[0];
+    const organization = result.rows[0];
+    if (client === db) {
+      await db.activateTenantContext(organization.id);
+    }
+    return organization;
   }
 
   const slug = requestedOrganizationSlug(req);
@@ -86,10 +135,15 @@ async function resolveOrganization(req, client = db, options = {}) {
     throw Object.assign(new Error('Organizasyon bulunamadi'), { status: 404 });
   }
 
-  return result.rows[0];
+  const organization = result.rows[0];
+  if (client === db) {
+    await db.activateTenantContext(organization.id);
+  }
+  return organization;
 }
 
 module.exports = {
+  resolveOrganizationByHost,
   requestedOrganizationSlug,
   requestedPublicAccessToken,
   resolveOrganization,

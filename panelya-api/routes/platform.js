@@ -3,6 +3,7 @@ const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const db = require('../db');
 const { requireSuperAdmin } = require('../middleware/auth');
+const { requireStepUp } = require('../middleware/authSession');
 const { rateLimit } = require('../middleware/security');
 const { auditLog } = require('../services/audit');
 const { slugify } = require('../services/tenant');
@@ -243,7 +244,7 @@ router.get('/stores', async (req, res, next) => {
 // POST /api/platform/stores  (org + owner + membership + subscription + settings)
 // ====================================================================
 router.post('/stores', platformWriteLimiter, async (req, res, next) => {
-  const client = await db.pool.connect();
+  const client = await db.getSystemPool().connect();
   try {
     const { errors, value } = validateCreateStoreInput(req.body);
     if (errors.length) return res.status(400).json({ error: errors[0], errors });
@@ -322,6 +323,12 @@ router.post('/stores', platformWriteLimiter, async (req, res, next) => {
       [organization.id, value.plan]
     );
 
+    // A28: every store starts with a published theme, so the storefront always has a
+    // resolvable appearance and the editor always has something to base a draft on.
+    await require('../modules/themes/service').ensurePublishedTheme(client, {
+      organizationId: organization.id,
+    });
+
     await auditLog(req, {
       action: 'PLATFORM_CREATE_STORE',
       resourceType: 'organization',
@@ -365,7 +372,7 @@ router.get('/stores/:organizationId', async (req, res, next) => {
 // PATCH /api/platform/stores/:organizationId  (temel bilgiler + ayarlar)
 // ====================================================================
 router.patch('/stores/:organizationId', platformWriteLimiter, async (req, res, next) => {
-  const client = await db.pool.connect();
+  const client = await db.getSystemPool().connect();
   try {
     const organizationId = ensureUuid(req.params.organizationId);
     await client.query('begin');
@@ -417,7 +424,7 @@ router.patch('/stores/:organizationId', platformWriteLimiter, async (req, res, n
 // PATCH /api/platform/stores/:organizationId/status
 // ====================================================================
 router.patch('/stores/:organizationId/status', platformWriteLimiter, async (req, res, next) => {
-  const client = await db.pool.connect();
+  const client = await db.getSystemPool().connect();
   try {
     const organizationId = ensureUuid(req.params.organizationId);
     const nextStatus = String(req.body.status || '').trim();
@@ -546,7 +553,7 @@ router.get('/stores/:organizationId/users', async (req, res, next) => {
 });
 
 router.post('/stores/:organizationId/users', platformWriteLimiter, async (req, res, next) => {
-  const client = await db.pool.connect();
+  const client = await db.getSystemPool().connect();
   try {
     const organizationId = ensureUuid(req.params.organizationId);
     const email = String(req.body.email || '').trim().toLowerCase().slice(0, 200);
@@ -596,11 +603,18 @@ router.post('/stores/:organizationId/users', platformWriteLimiter, async (req, r
 // ====================================================================
 // POST /api/platform/stores/:organizationId/impersonate
 // ====================================================================
-router.post('/stores/:organizationId/impersonate', platformWriteLimiter, async (req, res, next) => {
-  const client = await db.pool.connect();
+// A30: taking over a tenant account is the single most sensitive thing the console can
+// do, so it requires a RECENT re-authentication and not merely a login from this morning.
+router.post('/stores/:organizationId/impersonate', platformWriteLimiter, requireStepUp('impersonation'), async (req, res, next) => {
+  const client = await db.getSystemPool().connect();
   try {
     const organizationId = ensureUuid(req.params.organizationId);
     const reason = String(req.body.reason || '').trim().slice(0, 300);
+    if (reason.length < 5) {
+      return res.status(400).json({
+        error: 'Gerekce zorunlu (en az 5 karakter)', code: 'REASON_REQUIRED',
+      });
+    }
 
     await client.query('begin');
     const store = await loadStoreOr404(client, organizationId);
@@ -684,7 +698,7 @@ router.get('/domains', async (req, res, next) => {
 // PATCH /api/platform/stores/:organizationId/domain
 // ====================================================================
 router.patch('/stores/:organizationId/domain', platformWriteLimiter, async (req, res, next) => {
-  const client = await db.pool.connect();
+  const client = await db.getSystemPool().connect();
   try {
     const organizationId = ensureUuid(req.params.organizationId);
     await client.query('begin');
@@ -735,8 +749,8 @@ router.get('/plans', async (req, res, next) => {
   }
 });
 
-router.patch('/stores/:organizationId/plan', platformWriteLimiter, async (req, res, next) => {
-  const client = await db.pool.connect();
+router.patch('/stores/:organizationId/plan', platformWriteLimiter, requireStepUp('billing'), async (req, res, next) => {
+  const client = await db.getSystemPool().connect();
   try {
     const organizationId = ensureUuid(req.params.organizationId);
     const plan = req.body.plan;

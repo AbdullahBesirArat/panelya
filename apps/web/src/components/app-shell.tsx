@@ -5,11 +5,13 @@ import { useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { fetchMe, getApiErrorStatus, keepSessionAlive, logoutSession, switchOrganizationSession } from "@/lib/api";
+import { fetchMe, getApiErrorStatus, keepSessionAlive, logoutSession, stopImpersonationSession, switchOrganizationSession } from "@/lib/api";
 import { displayBrandName, PLATFORM_NAME } from "@/lib/branding";
 import { navigationItems } from "@/lib/demo-data";
 import { useSessionStore } from "@/store/session";
 import { useToastStore } from "@/store/toast";
+import { queryKeys } from "@/lib/query-keys";
+import { fetchSecuritySummary } from "@/lib/api/security";
 
 export function AppShell({
   activeSection,
@@ -20,12 +22,11 @@ export function AppShell({
 }) {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const accessToken = useSessionStore((state) => state.accessToken);
+  const authenticated = useSessionStore((state) => state.authenticated);
   const storedActorType = useSessionStore((state) => state.actorType);
   const storedAdmin = useSessionStore((state) => state.admin);
   const storedUser = useSessionStore((state) => state.user);
   const storedOrganizations = useSessionStore((state) => state.organizations);
-  const refreshToken = useSessionStore((state) => state.refreshToken);
   const hydrated = useSessionStore((state) => state.hydrated);
   const organizationSlug = useSessionStore((state) => state.organizationSlug);
   const syncProfile = useSessionStore((state) => state.syncProfile);
@@ -37,9 +38,9 @@ export function AppShell({
   const [loggingOut, setLoggingOut] = useState(false);
 
   const { data, error, isError, isLoading } = useQuery({
-    queryKey: ["me", accessToken, organizationSlug],
+    queryKey: queryKeys.session.detail(storedActorType, organizationSlug, impersonation?.organizationId ?? null),
     queryFn: fetchMe,
-    enabled: hydrated && Boolean(accessToken),
+    enabled: hydrated && authenticated,
     retry: false,
     staleTime: 60_000,
   });
@@ -51,23 +52,46 @@ export function AppShell({
   const displayOrganizations = profile?.organizations ?? storedOrganizations;
   const activeOrganizationSlug = displayOrganization?.slug || organizationSlug;
   const isAdminSession = data?.actorType === "admin" || storedActorType === "admin";
+  const securitySubjectId = data?.actorType === "admin"
+    ? data.admin?.id ?? storedAdmin?.id ?? null
+    : data?.user?.id ?? storedUser?.id ?? null;
+  const securitySummaryQuery = useQuery({
+    queryKey: queryKeys.security.summary(
+      storedActorType,
+      securitySubjectId,
+      activeOrganizationSlug || null,
+    ),
+    queryFn: fetchSecuritySummary,
+    enabled: hydrated && authenticated && Boolean(securitySubjectId) && !impersonation,
+    retry: false,
+    staleTime: 30_000,
+  });
   const authErrorStatus = getApiErrorStatus(error);
   const visibleNavigation = navigationItems.filter((item) => {
+    if (item.key === "security") return !impersonation;
     if (item.key === "superadmin") return isAdminSession && (adminProfile?.role || storedAdmin?.role) === "super_admin";
     return !isAdminSession;
   });
 
   useEffect(() => {
-    if (hydrated && !accessToken) {
+    if (hydrated && !authenticated) {
       router.replace("/login");
     }
-  }, [hydrated, accessToken, router]);
+  }, [hydrated, authenticated, router]);
 
   useEffect(() => {
-    if (hydrated && accessToken && storedActorType === "admin" && activeSection !== "superadmin") {
+    if (hydrated && authenticated && storedActorType === "admin" && !["superadmin", "security"].includes(activeSection)) {
       router.replace("/superadmin");
     }
-  }, [hydrated, accessToken, storedActorType, activeSection, router]);
+  }, [hydrated, authenticated, storedActorType, activeSection, router]);
+
+  useEffect(() => {
+    const assurance = securitySummaryQuery.data?.assurance;
+    if (!assurance || activeSection === "security" || impersonation) return;
+    if (assurance.enrollmentRequired || assurance.mfaChallengeRequired) {
+      router.replace("/security");
+    }
+  }, [activeSection, impersonation, router, securitySummaryQuery.data]);
 
   useEffect(() => {
     if (data?.actorType === "app" && data.user && data.currentOrganization && data.organizations) {
@@ -95,7 +119,9 @@ export function AppShell({
   }, [activeSection, authErrorStatus, clearSession, hydrated, isError, pushToast, router]);
 
   useEffect(() => {
-    if (!hydrated || !accessToken || !refreshToken || storedActorType !== "app") return;
+    // Impersonation uses a short-lived app token with no refresh cookie, so skip
+    // the keepalive there to avoid clearing the session on a failed refresh.
+    if (!hydrated || !authenticated || storedActorType !== "app" || impersonation) return;
 
     let active = true;
     const refreshIfActive = () => {
@@ -112,7 +138,7 @@ export function AppShell({
       window.removeEventListener("focus", refreshIfActive);
       document.removeEventListener("visibilitychange", refreshIfActive);
     };
-  }, [accessToken, hydrated, refreshToken, storedActorType]);
+  }, [authenticated, hydrated, storedActorType, impersonation]);
 
   useEffect(() => {
     // Impersonation sirasinda app aktoru gecici olarak superadmin route'unda olabilir
@@ -130,7 +156,7 @@ export function AppShell({
       setSwitching(true);
       const nextSession = await switchOrganizationSession(nextSlug);
       syncProfile(nextSession);
-      await queryClient.invalidateQueries({ queryKey: ["me"] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.session.all });
       pushToast({
         title: "Mağaza değişti",
         description: `Yeni mağaza: ${nextSession.currentOrganization.name}`,
@@ -147,7 +173,14 @@ export function AppShell({
     }
   }
 
-  function handleReturnFromImpersonation() {
+  async function handleReturnFromImpersonation() {
+    // Ask the BFF to swap the parked super-admin cookie back into place first,
+    // then reconcile the client-side session state.
+    try {
+      await stopImpersonationSession();
+    } catch {
+      // Even if the swap request fails, fall through to local cleanup below.
+    }
     const { restored } = stopImpersonation();
     queryClient.clear();
     pushToast({
@@ -174,28 +207,32 @@ export function AppShell({
     }
   }
 
-  const waitingForVerifiedSession = hydrated && Boolean(accessToken) && isLoading && (!displayUser || !displayOrganization);
+  const waitingForVerifiedSession = hydrated && Boolean(authenticated) && isLoading && (!displayUser || !displayOrganization);
 
   if (
     hydrated
-    && accessToken
+    && authenticated
     && isAdminSession
-    && activeSection === "superadmin"
+    && ["superadmin", "security"].includes(activeSection)
     && (adminProfile || storedAdmin)
   ) {
     const admin = adminProfile || storedAdmin;
 
     return (
       <div className="min-h-screen bg-paper text-ink">
+        <a className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-lg focus:bg-ink focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-white" href="#main">İçeriğe geç</a>
         <aside className="fixed inset-y-0 left-0 z-20 hidden w-64 border-r border-line bg-white px-5 py-6 lg:block">
           <Link className="focus-ring block rounded-lg" href="/superadmin">
             <p className="text-sm font-semibold uppercase text-mint">{PLATFORM_NAME}</p>
             <p className="mt-1 text-xl font-bold">Superadmin</p>
           </Link>
-          <nav className="mt-8 space-y-2">
+          <nav aria-label="Bölümler" className="mt-8 space-y-2">
             {visibleNavigation.map((item) => (
               <Link
-                className="focus-ring flex h-11 items-center rounded-lg bg-mint px-3 text-sm font-semibold text-white"
+                className={`focus-ring flex h-11 items-center rounded-lg px-3 text-sm font-semibold ${
+                  activeSection === item.key ? "bg-mint text-white" : "text-zinc-700 hover:bg-zinc-100"
+                }`}
+                aria-current={activeSection === item.key ? "page" : undefined}
                 href={`/${item.key}`}
                 key={item.key}
               >
@@ -209,9 +246,9 @@ export function AppShell({
           <header className="sticky top-0 z-10 border-b border-line bg-white/95 px-4 py-4 backdrop-blur sm:px-6">
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <div>
-                <p className="text-xs font-semibold uppercase text-zinc-500">Platform</p>
-                <p className="text-lg font-bold">Tum dukkanlar</p>
-                <p className="text-sm text-zinc-500">{admin?.username} ({roleLabel(admin?.role || "super_admin")})</p>
+                <p className="text-xs font-semibold uppercase text-zinc-600">Platform</p>
+                <p className="text-lg font-bold">{activeSection === "security" ? "Hesap güvenliği" : "Tüm dükkanlar"}</p>
+                <p className="text-sm text-zinc-600">{admin?.username} ({roleLabel(admin?.role || "super_admin")})</p>
               </div>
               <button
                 className="focus-ring inline-flex h-10 items-center justify-center rounded-lg border border-line bg-white px-4 text-sm font-semibold"
@@ -222,10 +259,13 @@ export function AppShell({
                 {loggingOut ? "Cikis yapiliyor" : "Cikis"}
               </button>
             </div>
-            <nav className="mt-4 flex gap-2 overflow-x-auto pb-1 lg:hidden">
+            <nav aria-label="Bölümler (mobil)" className="mt-4 flex gap-2 overflow-x-auto pb-1 lg:hidden">
               {visibleNavigation.map((item) => (
                 <Link
-                  className="focus-ring inline-flex h-10 shrink-0 items-center rounded-lg bg-mint px-3 text-sm font-semibold text-white"
+                  className={`focus-ring inline-flex h-10 shrink-0 items-center rounded-lg px-3 text-sm font-semibold ${
+                    activeSection === item.key ? "bg-mint text-white" : "border border-line bg-white text-zinc-700"
+                  }`}
+                  aria-current={activeSection === item.key ? "page" : undefined}
                   href={`/${item.key}`}
                   key={item.key}
                 >
@@ -235,7 +275,7 @@ export function AppShell({
             </nav>
           </header>
 
-          <main className="app-shell-safe-bottom px-4 py-6 sm:px-6 lg:px-8">
+          <main className="app-shell-safe-bottom px-4 py-6 sm:px-6 lg:px-8" id="main" tabIndex={-1}>
             <div className="mx-auto max-w-7xl space-y-5">
               {children}
             </div>
@@ -247,7 +287,7 @@ export function AppShell({
 
   if (
     !hydrated
-    || !accessToken
+    || !authenticated
     || waitingForVerifiedSession
     || !displayUser
     || !displayOrganization
@@ -266,12 +306,13 @@ export function AppShell({
 
   return (
     <div className="min-h-screen bg-paper text-ink">
+        <a className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-lg focus:bg-ink focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-white" href="#main">İçeriğe geç</a>
       <aside className="fixed inset-y-0 left-0 z-20 hidden w-64 border-r border-line bg-white px-5 py-6 lg:block">
         <Link className="focus-ring block rounded-lg" href="/dashboard">
           <p className="text-sm font-semibold uppercase text-mint">{PLATFORM_NAME}</p>
           <p className="mt-1 text-xl font-bold">Operasyon Merkezi</p>
         </Link>
-        <nav className="mt-8 space-y-2">
+        <nav aria-label="Bölümler" className="mt-8 space-y-2">
           {visibleNavigation.map((item) => {
             const active = activeSection === item.key;
             return (
@@ -279,6 +320,7 @@ export function AppShell({
                 className={`focus-ring flex h-11 items-center rounded-lg px-3 text-sm font-semibold ${
                   active ? "bg-mint text-white" : "text-zinc-700 hover:bg-zinc-100"
                 }`}
+                aria-current={active ? "page" : undefined}
                 href={`/${item.key}`}
                 key={item.key}
               >
@@ -307,13 +349,16 @@ export function AppShell({
         <header className="sticky top-0 z-10 border-b border-line bg-white/95 px-4 py-4 backdrop-blur sm:px-6">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
-              <p className="text-xs font-semibold uppercase text-zinc-500">Mağaza</p>
+              <p className="text-xs font-semibold uppercase text-zinc-600">Mağaza</p>
               <p className="text-lg font-bold">{displayBrandName(displayOrganization.name)}</p>
-              <p className="text-sm text-zinc-500">{displayBrandName(displayUser.name) || displayUser.email}</p>
+              <p className="text-sm text-zinc-600">{displayBrandName(displayUser.name) || displayUser.email}</p>
             </div>
             <div className="flex flex-col gap-2 sm:flex-row">
               {impersonation ? null : (
                 <select
+                  // A31: this switcher has no visible label, so it carried no accessible
+                  // name at all on every admin page (axe select-name, critical).
+                  aria-label="Etkin mağaza"
                   className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
                   disabled={switching}
                   onChange={(event) => void handleOrganizationChange(event.target.value)}
@@ -329,14 +374,14 @@ export function AppShell({
               <button
                 className="focus-ring inline-flex h-10 items-center justify-center rounded-lg border border-line bg-white px-4 text-sm font-semibold"
                 disabled={loggingOut}
-                onClick={() => impersonation ? handleReturnFromImpersonation() : void handleLogout()}
+                onClick={() => void (impersonation ? handleReturnFromImpersonation() : handleLogout())}
                 type="button"
               >
                 {impersonation ? "Çıkış" : loggingOut ? "Çıkış yapılıyor" : "Çıkış"}
               </button>
             </div>
           </div>
-          <nav className="mt-4 flex gap-2 overflow-x-auto pb-1 lg:hidden">
+          <nav aria-label="Bölümler (mobil)" className="mt-4 flex gap-2 overflow-x-auto pb-1 lg:hidden">
             {visibleNavigation.map((item) => {
               const active = activeSection === item.key;
               return (
@@ -344,6 +389,7 @@ export function AppShell({
                   className={`focus-ring inline-flex h-10 shrink-0 items-center rounded-lg px-3 text-sm font-semibold ${
                     active ? "bg-mint text-white" : "border border-line bg-white text-zinc-700"
                   }`}
+                  aria-current={active ? "page" : undefined}
                   href={`/${item.key}`}
                   key={item.key}
                 >
@@ -354,7 +400,7 @@ export function AppShell({
           </nav>
         </header>
 
-        <main className="app-shell-safe-bottom px-4 py-6 sm:px-6 lg:px-8">
+        <main className="app-shell-safe-bottom px-4 py-6 sm:px-6 lg:px-8" id="main" tabIndex={-1}>
           <div className="mx-auto max-w-7xl space-y-5">
             {children}
           </div>

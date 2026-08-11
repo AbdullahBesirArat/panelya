@@ -4,6 +4,7 @@ const { requireAuth, requireRole } = require('../middleware/auth');
 const { auditLog } = require('../services/audit');
 const { resolveOrganization, slugify } = require('../services/tenant');
 const { assertPlanCapacity } = require('../services/planLimits');
+const { syncMediaReferences } = require('../services/mediaAssets');
 
 const router = express.Router();
 const managerOnly = [requireAuth, requireRole(['super_admin', 'owner', 'admin'])];
@@ -104,6 +105,13 @@ router.post('/', ...managerOnly, async (req, res, next) => {
         payload.published_at,
       ]
     );
+    await syncMediaReferences(db, {
+      organizationId: organization.id,
+      resourceType: 'blog_post',
+      resourceId: result.rows[0].id,
+      values: payload.image_url,
+      altText: payload.title,
+    });
 
     await auditLog(req, {
       action: 'CREATE',
@@ -147,6 +155,13 @@ router.put('/:id', ...managerOnly, async (req, res, next) => {
       ]
     );
     if (!result.rows[0]) return res.status(404).json({ error: 'Blog yazisi bulunamadi' });
+    await syncMediaReferences(db, {
+      organizationId: organization.id,
+      resourceType: 'blog_post',
+      resourceId: req.params.id,
+      values: payload.image_url,
+      altText: payload.title,
+    });
 
     await auditLog(req, {
       action: 'UPDATE',
@@ -172,6 +187,12 @@ router.delete('/:id', requireAuth, requireRole(['super_admin', 'owner']), async 
       'delete from blog_posts where id = $1 and organization_id = $2',
       [req.params.id, organization.id]
     );
+    await syncMediaReferences(db, {
+      organizationId: organization.id,
+      resourceType: 'blog_post',
+      resourceId: req.params.id,
+      values: [],
+    });
     await auditLog(req, {
       action: 'DELETE',
       resourceType: 'blog_post',

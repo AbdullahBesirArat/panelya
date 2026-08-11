@@ -17,11 +17,12 @@ import {
 } from "@/components/operations-shared";
 import { fetchSuperAdminOverview, type SuperAdminOverview } from "@/lib/api";
 import { displayBrandName } from "@/lib/branding";
+import { queryKeys } from "@/lib/query-keys";
 
 export function SuperAdminSection() {
   const [search, setSearch] = useState("");
   const overviewQuery = useQuery({
-    queryKey: ["superadmin-overview"],
+    queryKey: queryKeys.platform.legacyOverview,
     queryFn: fetchSuperAdminOverview,
     staleTime: 20_000,
   });
@@ -73,6 +74,7 @@ export function SuperAdminSection() {
           )}
         >
           <DataGrid
+            caption="Dukkanlar"
             columns={["Dukkan", "Sahip", "Plan", "Siparis", "Ciro", "Durum", "Son siparis"]}
             emptyMessage="Bu aramaya uygun dukkan yok."
             rows={shops}
@@ -83,13 +85,13 @@ export function SuperAdminSection() {
         <Panel title="Son siparisler" description="Platform genelinde en yeni hareketler">
           <div className="space-y-3">
             {overview.recentOrders.length === 0 ? (
-              <p className="text-sm text-zinc-500">Henuz siparis yok.</p>
+              <p className="text-sm text-zinc-600">Henuz siparis yok.</p>
             ) : overview.recentOrders.map((order) => (
               <div className="rounded-lg border border-line px-4 py-3" key={order.id}>
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <p className="text-sm font-semibold">{order.order_code}</p>
-                    <p className="text-xs text-zinc-500">
+                    <p className="text-xs text-zinc-600">
                       {displayBrandName(order.organization_name)} / {order.customer_name || "Misafir"}
                     </p>
                   </div>
@@ -122,33 +124,33 @@ function ShopRow({ shop }: { shop: SuperAdminOverview["shops"][number] }) {
       <DataCell>
         <div className="space-y-1">
           <p className="font-semibold text-ink">{displayBrandName(shop.name)}</p>
-          <p className="font-mono text-xs text-zinc-500">{shop.slug}</p>
-          <p className="text-xs text-zinc-500">{formatDateTime(shop.created_at)}</p>
+          <p className="font-mono text-xs text-zinc-600">{shop.slug}</p>
+          <p className="text-xs text-zinc-600">{formatDateTime(shop.created_at)}</p>
         </div>
       </DataCell>
       <DataCell>
         <div className="space-y-1">
           <p>{shop.owners || "-"}</p>
-          <p className="text-xs text-zinc-500">{shop.owner_emails || "-"}</p>
+          <p className="text-xs text-zinc-600">{shop.owner_emails || "-"}</p>
         </div>
       </DataCell>
       <DataCell>
         <div className="space-y-1">
           <StatusPill tone="mint">{shop.plan}</StatusPill>
-          <p className="text-xs text-zinc-500">{formatCount(shop.product_count)} urun / {formatCount(shop.customer_count)} musteri</p>
+          <p className="text-xs text-zinc-600">{formatCount(shop.product_count)} urun / {formatCount(shop.customer_count)} musteri</p>
         </div>
       </DataCell>
       <DataCell>
         <div className="space-y-1 text-sm">
           <p className="font-semibold text-ink">{formatCount(shop.order_count)} toplam</p>
-          <p className="text-xs text-zinc-500">{formatCount(shop.today_orders)} bugun / {formatCount(shop.month_orders)} bu ay</p>
-          <p className="text-xs text-zinc-500">{formatCount(shop.pending_orders)} odeme bekliyor</p>
+          <p className="text-xs text-zinc-600">{formatCount(shop.today_orders)} bugun / {formatCount(shop.month_orders)} bu ay</p>
+          <p className="text-xs text-zinc-600">{formatCount(shop.pending_orders)} odeme bekliyor</p>
         </div>
       </DataCell>
       <DataCell>
         <div className="space-y-1">
           <p className="font-semibold text-ink">{formatCurrency(shop.gross_revenue)}</p>
-          <p className="text-xs text-zinc-500">Bu ay {formatCurrency(shop.month_revenue)}</p>
+          <p className="text-xs text-zinc-600">Bu ay {formatCurrency(shop.month_revenue)}</p>
         </div>
       </DataCell>
       <DataCell>
@@ -164,7 +166,7 @@ function ShopRow({ shop }: { shop: SuperAdminOverview["shops"][number] }) {
 function InfoBox({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-lg border border-line bg-zinc-50 px-4 py-3">
-      <p className="text-xs font-semibold uppercase text-zinc-500">{label}</p>
+      <p className="text-xs font-semibold uppercase text-zinc-600">{label}</p>
       <p className="mt-2 text-lg font-bold text-ink">{value}</p>
     </div>
   );

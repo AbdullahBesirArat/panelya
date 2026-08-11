@@ -136,7 +136,7 @@ async function debugPublicOrganization(client, organizationSlug) {
 async function main() {
   const args = parseArgs(process.argv.slice(2));
 
-  const client = await db.pool.connect();
+  const client = await db.getSystemPool().connect();
 
   try {
     if (args.list) {
@@ -204,5 +204,5 @@ main()
     process.exitCode = 1;
   })
   .finally(async () => {
-    await db.pool.end();
+    await db.getSystemPool().end();
   });

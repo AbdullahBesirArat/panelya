@@ -103,7 +103,7 @@ async function applyMigration(client, { file, rawSql, checksum, logger }) {
 // Bagimliliklar (pool, dosya okuma, logger, lockKey) enjekte edilebilir; boylece
 // gercek PostgreSQL olmadan fake pool/client ile test edilebilir.
 async function runMigrations({
-  pool = db.pool,
+  pool = db.getMigrationPool(),
   listMigrations = defaultListMigrations,
   readMigration = defaultReadMigration,
   logger = console,
@@ -150,11 +150,11 @@ async function runMigrations({
 }
 
 async function main() {
+  const pool = db.getMigrationPool();
   try {
-    await runMigrations();
+    await runMigrations({ pool });
   } finally {
-    // Pool ancak client release edildikten (runMigrations bittikten) sonra kapatilir.
-    await db.pool.end();
+    await pool.end();
   }
 }
 

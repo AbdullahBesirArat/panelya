@@ -48,7 +48,7 @@ export function MetricGrid({ metrics }: { metrics: Metric[] }) {
     <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
       {metrics.map((metric) => (
         <article className={`rounded-lg border-l-4 bg-white p-5 shadow-panel ${toneClass[metric.tone]}`} key={metric.label}>
-          <p className="text-sm font-semibold text-zinc-500">{metric.label}</p>
+          <p className="text-sm font-semibold text-zinc-600">{metric.label}</p>
           <p className="mt-3 text-3xl font-bold text-ink">{metric.value}</p>
         </article>
       ))}

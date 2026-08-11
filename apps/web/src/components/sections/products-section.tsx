@@ -7,42 +7,68 @@ import { Button } from "@/components/ui/button";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { MetricGrid } from "@/components/page-kit";
 import {
-  API_BASE,
-  addOrganizationColor,
-  addOrganizationSize,
   bulkUpdateProducts,
   createCategory,
   createProduct,
   deleteCategory,
   deleteProduct,
   fetchCategories,
-  fetchOrganizationColors,
-  fetchOrganizationSizes,
   fetchProducts,
   setCategoryFeaturedProducts,
   updateCategory,
   updateProduct,
-  type ApiCategory,
+  type ProductWriteInput,
+} from "@/lib/api/catalog";
+import { resolveApiAssetUrl, uploadProductImages } from "@/lib/api/media";
+import {
+  addOrganizationColor,
+  addOrganizationSize,
+  fetchOrganizationColors,
+  fetchOrganizationSizes,
   type ApiCustomColor,
-  type ApiProduct,
-  type ProductVariant,
-  type ProductStatus,
-  uploadProductImages,
-} from "@/lib/api";
+} from "@/lib/api/organizations";
+import type {
+  ApiCategory,
+  ApiProduct,
+  ProductStatus,
+  ProductVariant,
+} from "@/lib/api/types";
 import { useDebouncedValue } from "@/lib/use-debounced-value";
+import { useUrlFilterState } from "@/lib/use-url-filter-state";
+import { queryKeys } from "@/lib/query-keys";
+import {
+  ImageManager,
+  ProductFilters,
+  ProductForm,
+  ProductGeneralFields,
+  ProductStatusActions,
+  ProductTable,
+  VariantEditor,
+} from "@/features/products/components";
+import { ProductRelationsEditor } from "@/features/products/components/product-relations-editor";
+import { ProductSizeGuideEditor } from "@/features/products/components/product-size-guide-editor";
+import { parseProductForm } from "@/features/products/product-form-schema";
+import {
+  colorEntryHex,
+  colorEntryLabel,
+  joinLines,
+  joinVariantLines,
+  parseImageLine,
+  parseVariantLines,
+  sameEntry,
+  splitCsvLines,
+  splitImageLines,
+  uniqueVariantSizes,
+} from "@/features/products/product-form-utils";
 import {
   ActivityPanel,
-  DataCell,
-  DataGrid,
   FieldLabel,
   InlineError,
   InlineHint,
   Panel,
   SectionError,
   SectionLoading,
-  StatusPill,
   formatCount,
-  formatCurrency,
   pickActivity,
   productStatusLabels,
   useSummaryQuery,
@@ -55,6 +81,7 @@ import {
   createEmptyProductForm,
   isProductFormEmpty,
   readProductFormDraft,
+  shouldWarnUnsavedProductChanges,
   type ProductFormState,
   writeProductFormDraft,
 } from "@/lib/product-form-draft";
@@ -105,29 +132,6 @@ const productTabs: Array<{ key: ProductsTab; label: string; description: string 
   { key: "sizes", label: "Bedenler", description: "Özel beden önerileri" },
 ];
 
-type ProductPayload = {
-  name: string;
-  categoryId?: string;
-  price: number;
-  salePrice?: number | null;
-  stock: number;
-  status: ProductStatus;
-  colors: string[];
-  sizes: string[];
-  variants: ProductVariant[];
-  images: string[];
-  details: {
-    short_description: string;
-    story: string;
-    measurements: string;
-    delivery_note: string;
-    fabric_info: string;
-  };
-  tags: string;
-  description: string;
-  product_story: string;
-};
-
 type CategoryForm = {
   name: string;
   slug: string;
@@ -143,118 +147,6 @@ function createEmptyCategoryForm(): CategoryForm {
   };
 }
 
-function splitCsvLines(value: string) {
-  return value
-    .split(/[\n,]+/)
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
-function joinLines(values: string[] | null | undefined) {
-  return Array.isArray(values) ? values.filter(Boolean).join("\n") : "";
-}
-
-function splitImageLines(value: string) {
-  return value
-    .split(/\n+/)
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
-function parseMoneyInput(value: string) {
-  const cleaned = value
-    .trim()
-    .replace(/[â‚º\s]/g, "")
-    .replace(/[^0-9.,-]/g, "");
-
-  if (!cleaned) return NaN;
-
-  if (cleaned.includes(",")) {
-    return Number(cleaned.replace(/\./g, "").replace(",", "."));
-  }
-
-  if (/^\d{1,3}(\.\d{3})+$/.test(cleaned)) {
-    return Number(cleaned.replace(/\./g, ""));
-  }
-
-  return Number(cleaned);
-}
-
-function parseImageLine(line: string) {
-  const parts = line.split("|").map((part) => part.trim()).filter(Boolean);
-  if (parts.length >= 2) {
-    return {
-      color: parts[0],
-      url: parts[parts.length - 1],
-    };
-  }
-
-  return {
-    color: "",
-    url: line.trim(),
-  };
-}
-
-function colorEntryLabel(value: string) {
-  return value.replace(/#(?:[0-9a-f]{3}){1,2}\b/i, "").replace(/[()]/g, "").trim() || value;
-}
-
-function colorEntryHex(value: string) {
-  return value.match(/#(?:[0-9a-f]{3}){1,2}\b/i)?.[0] || "";
-}
-
-function sameEntry(left: string, right: string) {
-  return left.toLocaleLowerCase("tr-TR") === right.toLocaleLowerCase("tr-TR");
-}
-
-function parseVariantLines(value: string): ProductVariant[] {
-  const variants = value
-    .split(/\n+/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => {
-      const [color = "", size = "", stock = "0", sku = ""] = line.split("|").map((part) => part.trim());
-      return {
-        color,
-        size,
-        stock: Math.max(0, Math.floor(Number(stock) || 0)),
-        sku,
-        status: (Number(stock) > 0 ? "active" : "out") as ProductVariant["status"],
-      };
-    })
-    .filter((variant) => variant.color || variant.size);
-
-  const seen = new Set<string>();
-  return variants.filter((variant) => {
-    const key = `${variant.color.toLowerCase()}::${variant.size.toLowerCase()}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-}
-
-function joinVariantLines(variants: ProductVariant[] | null | undefined) {
-  if (!Array.isArray(variants)) return "";
-  return variants
-    .map((variant) => [variant.color || "", variant.size || "", String(variant.stock ?? 0), variant.sku || ""].join(" | "))
-    .join("\n");
-}
-
-function uniqueVariantSizes(variants: ProductVariant[]) {
-  return Array.from(new Set(variants.map((variant) => variant.size).filter(Boolean)));
-}
-
-function assetUrl(url: string | null | undefined) {
-  const value = String(url || "").trim();
-  if (!value) return "";
-  if (/^https?:\/\//i.test(value)) return value;
-  const assetBase = API_BASE.replace(/\/api\/?$/, "").replace(/\/$/, "");
-  if (value.startsWith("/uploads/")) return `${assetBase}${value}`;
-  if (value.startsWith("uploads/")) return `${assetBase}/${value}`;
-  if (value.startsWith("/")) return `${assetBase}${value}`;
-  return `${assetBase}/uploads/${value}`;
-}
-
 export function ProductsSection({
   organizationSlug,
   currentRole,
@@ -266,9 +158,9 @@ export function ProductsSection({
   const pushToast = useToastStore((state) => state.pushToast);
   const summaryQuery = useSummaryQuery(organizationSlug);
   const productDraftKey = useMemo(() => buildProductDraftKey(organizationSlug), [organizationSlug]);
-  const [search, setSearch] = useState("");
-  const [status, setStatus] = useState<ProductStatus | "">("");
-  const [categoryId, setCategoryId] = useState("");
+  const [search, setSearch] = useUrlFilterState<string>("q", "");
+  const [status, setStatus] = useUrlFilterState<ProductStatus | "">("status", "");
+  const [categoryId, setCategoryId] = useUrlFilterState<string>("categoryId", "");
   const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
   const [categoryForm, setCategoryForm] = useState(createEmptyCategoryForm);
   const [featuredCategoryId, setFeaturedCategoryId] = useState<string | null>(null);
@@ -278,6 +170,7 @@ export function ProductsSection({
     readProductFormDraft(productDraftKey) ?? createEmptyProductForm()
   ));
   const [productFormError, setProductFormError] = useState("");
+  const [productErrorField, setProductErrorField] = useState("");
   const [newProductTag, setNewProductTag] = useState("");
   const [imageColor, setImageColor] = useState("");
   const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
@@ -312,21 +205,21 @@ export function ProductsSection({
   }, [editingProductId, productDraftKey, productForm]);
 
   const categoriesQuery = useQuery({
-    queryKey: ["categories", organizationSlug],
+    queryKey: queryKeys.catalog.categories(organizationSlug),
     queryFn: fetchCategories,
     staleTime: 60_000,
   });
 
   const productsQuery = useQuery({
-    queryKey: ["products", organizationSlug, debouncedSearch, status, categoryId],
-    queryFn: () => fetchProducts({ q: debouncedSearch, status, categoryId, limit: 50 }),
+    queryKey: queryKeys.catalog.products.list(organizationSlug, debouncedSearch, status, categoryId),
+    queryFn: ({ signal }) => fetchProducts({ q: debouncedSearch, status, categoryId, limit: 50 }, signal),
     staleTime: 15_000,
     placeholderData: keepPreviousData,
   });
 
   const featuredCategoryProductsQuery = useQuery({
-    queryKey: ["category-products", organizationSlug, featuredCategoryId],
-    queryFn: () => fetchProducts({ categoryId: featuredCategoryId || "", limit: 200 }),
+    queryKey: queryKeys.catalog.products.byCategory(organizationSlug, featuredCategoryId),
+    queryFn: ({ signal }) => fetchProducts({ categoryId: featuredCategoryId || "", limit: 200 }, signal),
     enabled: Boolean(featuredCategoryId),
     staleTime: 15_000,
   });
@@ -345,7 +238,7 @@ export function ProductsSection({
   }
 
   const customColorsQuery = useQuery({
-    queryKey: ["customColors", organizationSlug],
+    queryKey: queryKeys.catalog.colors(organizationSlug),
     queryFn: fetchOrganizationColors,
     staleTime: 60_000,
   });
@@ -353,7 +246,7 @@ export function ProductsSection({
   const customColorMutation = useMutation({
     mutationFn: addOrganizationColor,
     onSuccess: (newColor: ApiCustomColor) => {
-      void queryClient.invalidateQueries({ queryKey: ["customColors", organizationSlug] });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.catalog.colors(organizationSlug) });
       addProductColor(newColor.name, newColor.hex);
       setCustomColorName("");
       setCustomColorHex("#d8c3a5");
@@ -363,7 +256,7 @@ export function ProductsSection({
   });
 
   const customSizesQuery = useQuery({
-    queryKey: ["customSizes", organizationSlug],
+    queryKey: queryKeys.catalog.sizes(organizationSlug),
     queryFn: fetchOrganizationSizes,
     staleTime: 60_000,
   });
@@ -371,7 +264,7 @@ export function ProductsSection({
   const customSizeMutation = useMutation({
     mutationFn: addOrganizationSize,
     onSuccess: (result: { size: string }) => {
-      void queryClient.invalidateQueries({ queryKey: ["customSizes", organizationSlug] });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.catalog.sizes(organizationSlug) });
       pushToast({ title: "Özel beden eklendi", description: result.size, tone: "success" });
     },
     onError: () => {
@@ -384,7 +277,7 @@ export function ProductsSection({
   const manageColorMutation = useMutation({
     mutationFn: addOrganizationColor,
     onSuccess: (newColor: ApiCustomColor) => {
-      void queryClient.invalidateQueries({ queryKey: ["customColors", organizationSlug] });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.catalog.colors(organizationSlug) });
       setManageColorName("");
       setManageColorHex("#d8c3a5");
       pushToast({ title: "Özel renk eklendi", description: newColor.name, tone: "success" });
@@ -395,7 +288,7 @@ export function ProductsSection({
   const manageSizeMutation = useMutation({
     mutationFn: addOrganizationSize,
     onSuccess: (result: { size: string }) => {
-      void queryClient.invalidateQueries({ queryKey: ["customSizes", organizationSlug] });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.catalog.sizes(organizationSlug) });
       setManageSizeInput("");
       pushToast({ title: "Özel beden eklendi", description: result.size, tone: "success" });
     },
@@ -437,8 +330,8 @@ export function ProductsSection({
         tone: "success",
       });
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["categories", organizationSlug] }),
-        queryClient.invalidateQueries({ queryKey: ["summary", organizationSlug] }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.catalog.categories(organizationSlug) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.summary.detail(organizationSlug) }),
       ]);
     },
   });
@@ -457,8 +350,8 @@ export function ProductsSection({
         tone: "success",
       });
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["categories", organizationSlug] }),
-        queryClient.invalidateQueries({ queryKey: ["summary", organizationSlug] }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.catalog.categories(organizationSlug) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.summary.detail(organizationSlug) }),
       ]);
     },
   });
@@ -474,8 +367,8 @@ export function ProductsSection({
         tone: "success",
       });
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["products", organizationSlug] }),
-        queryClient.invalidateQueries({ queryKey: ["summary", organizationSlug] }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.catalog.products.all(organizationSlug) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.summary.detail(organizationSlug) }),
       ]);
     },
   });
@@ -483,7 +376,7 @@ export function ProductsSection({
   const updateProductMutation = useMutation({
     mutationFn: ({ id, payload }: {
       id: string;
-      payload: ProductPayload;
+      payload: ProductWriteInput;
     }) => updateProduct(id, payload),
     onSuccess: async () => {
       resetProductForm();
@@ -493,11 +386,21 @@ export function ProductsSection({
         tone: "success",
       });
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["products", organizationSlug] }),
-        queryClient.invalidateQueries({ queryKey: ["summary", organizationSlug] }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.catalog.products.all(organizationSlug) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.summary.detail(organizationSlug) }),
       ]);
     },
   });
+
+  useEffect(() => {
+    function warnBeforeUnload(event: BeforeUnloadEvent) {
+      if (!shouldWarnUnsavedProductChanges(productForm, productMutation.isPending || updateProductMutation.isPending)) return;
+      event.preventDefault();
+      event.returnValue = "";
+    }
+    window.addEventListener("beforeunload", warnBeforeUnload);
+    return () => window.removeEventListener("beforeunload", warnBeforeUnload);
+  }, [productForm, productMutation.isPending, updateProductMutation.isPending]);
 
   const deleteProductMutation = useMutation({
     mutationFn: deleteProduct,
@@ -508,8 +411,8 @@ export function ProductsSection({
         tone: "info",
       });
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["products", organizationSlug] }),
-        queryClient.invalidateQueries({ queryKey: ["summary", organizationSlug] }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.catalog.products.all(organizationSlug) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.summary.detail(organizationSlug) }),
       ]);
     },
   });
@@ -524,8 +427,8 @@ export function ProductsSection({
         tone: "success",
       });
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["products", organizationSlug] }),
-        queryClient.invalidateQueries({ queryKey: ["summary", organizationSlug] }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.catalog.products.all(organizationSlug) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.summary.detail(organizationSlug) }),
       ]);
     },
   });
@@ -539,9 +442,9 @@ export function ProductsSection({
         tone: "info",
       });
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["categories", organizationSlug] }),
-        queryClient.invalidateQueries({ queryKey: ["products", organizationSlug] }),
-        queryClient.invalidateQueries({ queryKey: ["summary", organizationSlug] }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.catalog.categories(organizationSlug) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.catalog.products.all(organizationSlug) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.summary.detail(organizationSlug) }),
       ]);
     },
   });
@@ -556,8 +459,8 @@ export function ProductsSection({
         tone: "success",
       });
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["category-products", organizationSlug] }),
-        queryClient.invalidateQueries({ queryKey: ["products", organizationSlug] }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.catalog.products.byCategory(organizationSlug) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.catalog.products.all(organizationSlug) }),
       ]);
     },
   });
@@ -850,61 +753,24 @@ export function ProductsSection({
   function submitProduct(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setProductFormError("");
-
-    const price = parseMoneyInput(productForm.price);
-    const salePrice = productForm.salePrice.trim() === "" ? null : parseMoneyInput(productForm.salePrice);
-    const variants = parseVariantLines(productForm.variantsText);
-    const stock = variants.reduce((sum, variant) => sum + Number(variant.stock || 0), 0);
-
-    if (!productForm.name.trim()) {
-      setProductFormError("Ürün adı zorunlu.");
+    setProductErrorField("");
+    const parsed = parseProductForm(productForm);
+    if (!parsed.success) {
+      setProductFormError(parsed.error);
+      setProductErrorField(parsed.field);
+      // Move focus to the control that failed. Announcing the message is not enough: a
+      // keyboard user would otherwise have to hunt through the form for the bad field.
+      const target = document.getElementById(parsed.field);
+      if (target instanceof HTMLElement) target.focus();
       return;
     }
-
-    if (!Number.isFinite(price) || price <= 0) {
-      setProductFormError("Geçerli bir fiyat girin. Örnek: 1200 veya 1.200,50");
-      return;
-    }
-
-    if (salePrice != null && (!Number.isFinite(salePrice) || salePrice < 0)) {
-      setProductFormError("İndirimli fiyat geçerli değil. Boş bırakabilir ya da 950 gibi yazabilirsiniz.");
-      return;
-    }
-
-    if (!Number.isFinite(stock) || stock < 0) {
-      setProductFormError("Stok sayısı geçerli değil. Renk/beden stoklarını kontrol edin.");
-      return;
-    }
-
-    const payload = {
-      name: productForm.name.trim(),
-      categoryId: productForm.categoryId || undefined,
-      price,
-      salePrice: salePrice != null && Number.isFinite(salePrice) ? salePrice : null,
-      stock,
-      status: productForm.status,
-      colors: splitCsvLines(productForm.colorsText),
-      sizes: splitCsvLines(productForm.sizesText),
-      variants,
-      images: splitImageLines(productForm.imagesText),
-      details: {
-        short_description: productForm.shortDescription.trim(),
-        story: "",
-        measurements: productForm.measurements.trim(),
-        delivery_note: productForm.deliveryNote.trim(),
-        fabric_info: productForm.fabricInfo.trim().slice(0, 1000),
-      },
-      tags: productForm.tags.trim(),
-      description: productForm.description.trim(),
-      product_story: productForm.productStory.trim(),
-    };
 
     if (editingProductId) {
-      updateProductMutation.mutate({ id: editingProductId, payload });
+      updateProductMutation.mutate({ id: editingProductId, payload: parsed.data });
       return;
     }
 
-    productMutation.mutate(payload);
+    productMutation.mutate(parsed.data);
   }
 
   return (
@@ -932,7 +798,7 @@ export function ProductsSection({
                 type="button"
               >
                 <span className="block text-sm font-semibold">{tab.label}</span>
-                <span className={["mt-1 block text-xs", active ? "text-white/70" : "text-zinc-500"].join(" ")}>
+                <span className={["mt-1 block text-xs", active ? "text-white/70" : "text-zinc-600"].join(" ")}>
                   {tab.description}
                 </span>
               </button>
@@ -947,167 +813,49 @@ export function ProductsSection({
           title="Ürünler"
           description="Türkiye mağaza vitrini için katalog kayıtları"
           actions={(
-            <div className="flex flex-wrap gap-2">
-              <input
-                className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="Ürün ara"
-                value={search}
-              />
-              <select
-                className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
-                onChange={(event) => setCategoryId(event.target.value)}
-                value={categoryId}
-              >
-                <option value="">Tüm kategoriler</option>
-                {categories.map((category) => (
-                  <option key={category.id} value={category.id}>{category.name}</option>
-                ))}
-              </select>
-              <select
-                className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
-                onChange={(event) => setStatus(event.target.value as ProductStatus | "")}
-                value={status}
-              >
-                <option value="">Tüm durumlar</option>
-                {productStatusOptions.map((option) => (
-                  <option key={option} value={option}>{productStatusLabels[option]}</option>
-                ))}
-              </select>
-              {productsQuery.isFetching ? (
-                <span className="inline-flex h-10 items-center rounded-lg border border-line px-3 text-xs font-semibold text-zinc-500">
-                  Güncelleniyor
-                </span>
-              ) : null}
-            </div>
+            <ProductFilters
+              categories={categories}
+              categoryId={categoryId}
+              isFetching={productsQuery.isFetching}
+              onCategoryChange={setCategoryId}
+              onSearchChange={setSearch}
+              onStatusChange={setStatus}
+              search={search}
+              status={status}
+              statusLabels={productStatusLabels}
+              statusOptions={productStatusOptions}
+            />
           )}
         >
           {canManageCatalog && products.length > 0 ? (
-            <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-line bg-zinc-50 px-3 py-3">
-              <span className="text-xs font-semibold text-zinc-600">{selectedProductIds.length} ürün seçili</span>
-              <button
-                className="focus-ring inline-flex h-9 items-center rounded-lg border border-line bg-white px-3 text-xs font-semibold text-ink"
-                onClick={toggleVisibleProductSelection}
-                type="button"
-              >
-                {products.every((product) => selectedProductIds.includes(product.id)) ? "Görünenleri bırak" : "Görünenleri seç"}
-              </button>
-              <select
-                className="focus-ring h-9 rounded-lg border border-line bg-white px-2 text-xs"
-                onChange={(event) => setBulkStatus(event.target.value as ProductStatus)}
-                value={bulkStatus}
-              >
-                {productStatusOptions.map((option) => (
-                  <option key={option} value={option}>{productStatusLabels[option]}</option>
-                ))}
-              </select>
-              <button
-                className="focus-ring inline-flex h-9 items-center rounded-lg border border-line bg-white px-3 text-xs font-semibold text-ink disabled:opacity-50"
-                disabled={!selectedProductIds.length || bulkProductsMutation.isPending}
-                onClick={() => runBulkAction("status")}
-                type="button"
-              >
-                Durumu uygula
-              </button>
-              <select
-                className="focus-ring h-9 rounded-lg border border-line bg-white px-2 text-xs"
-                onChange={(event) => setBulkCategoryId(event.target.value)}
-                value={bulkCategoryId}
-              >
-                <option value="">Kategorisiz yap</option>
-                {categories.map((category) => (
-                  <option key={category.id} value={category.id}>{category.name}</option>
-                ))}
-              </select>
-              <button
-                className="focus-ring inline-flex h-9 items-center rounded-lg border border-line bg-white px-3 text-xs font-semibold text-ink disabled:opacity-50"
-                disabled={!selectedProductIds.length || bulkProductsMutation.isPending}
-                onClick={() => runBulkAction("category")}
-                type="button"
-              >
-                Kategoriye taşı
-              </button>
-              {canDeleteCatalog ? (
-                <button
-                  className="focus-ring inline-flex h-9 items-center rounded-lg border border-coral/40 bg-white px-3 text-xs font-semibold text-coral disabled:opacity-50"
-                  disabled={!selectedProductIds.length || bulkProductsMutation.isPending}
-                  onClick={() => runBulkAction("delete")}
-                  type="button"
-                >
-                  Seçili ürünleri sil
-                </button>
-              ) : null}
-              {bulkProductsMutation.isError ? <InlineError message={bulkProductsMutation.error.message} /> : null}
-            </div>
+            <ProductStatusActions
+              allVisibleSelected={products.every((product) => selectedProductIds.includes(product.id))}
+              bulkCategoryId={bulkCategoryId}
+              bulkStatus={bulkStatus}
+              canDelete={canDeleteCatalog}
+              categories={categories}
+              errorMessage={bulkProductsMutation.isError ? bulkProductsMutation.error.message : undefined}
+              isPending={bulkProductsMutation.isPending}
+              onCategoryChange={setBulkCategoryId}
+              onRun={runBulkAction}
+              onStatusChange={setBulkStatus}
+              onToggleVisible={toggleVisibleProductSelection}
+              selectedCount={selectedProductIds.length}
+              statusLabels={productStatusLabels}
+              statusOptions={productStatusOptions}
+            />
           ) : null}
-          <DataGrid
-            columns={["Seç", "Ürün", "Kategori", "Vitrin", "Fiyat", "Stok", "Aksiyon"]}
-            emptyMessage="Bu filtrelerle ürün bulunamadı."
-            rows={products}
-            renderRow={(product) => (
-              <tr key={product.id}>
-                <DataCell>
-                  <input
-                    checked={selectedProductIds.includes(product.id)}
-                    className="h-4 w-4 rounded border-line"
-                    disabled={!canManageCatalog || bulkProductsMutation.isPending}
-                    onChange={() => toggleProductSelection(product.id)}
-                    type="checkbox"
-                  />
-                </DataCell>
-                <DataCell>
-                  <div className="space-y-1">
-                    <p className="font-semibold text-ink">{product.name}</p>
-                    <p className="text-xs text-zinc-500">
-                      {product.emoji || "Ürün"}
-                      {" - "}
-                      {product.images.length} görsel
-                      {product.tags ? ` - ${product.tags}` : ""}
-                    </p>
-                  </div>
-                </DataCell>
-                <DataCell>{product.category_name || "Kategorisiz"}</DataCell>
-                <DataCell>
-                  <div className="space-y-1 text-xs text-zinc-500">
-                    <p>{product.colors.length > 0 ? `${product.colors.length} renk` : "Renk yok"}</p>
-                    <p>{product.sizes.length > 0 ? `${product.sizes.length} beden` : "Beden yok"}</p>
-                  </div>
-                </DataCell>
-                <DataCell>{formatCurrency(product.sale_price || product.price)}</DataCell>
-                <DataCell>
-                  <div className="space-y-2">
-                    <p>{formatCount(product.stock)}</p>
-                    <StatusPill tone={product.stock === 0 ? "coral" : product.status === "active" ? "mint" : "sun"}>
-                      {product.stock === 0 ? "Tükendi" : productStatusLabels[product.status]}
-                    </StatusPill>
-                  </div>
-                </DataCell>
-                <DataCell>
-                  <div className="flex flex-wrap gap-2">
-                    {canManageCatalog ? (
-                      <button
-                        className="focus-ring inline-flex h-9 items-center rounded-lg border border-line px-3 text-xs font-semibold text-ink"
-                        onClick={() => openProductEditor(product)}
-                        type="button"
-                      >
-                        Düzenle
-                      </button>
-                    ) : null}
-                    {canDeleteCatalog ? (
-                      <button
-                        className="focus-ring inline-flex h-9 items-center rounded-lg border border-line px-3 text-xs font-semibold text-coral"
-                        disabled={deleteProductMutation.isPending && deleteProductMutation.variables === product.id}
-                        onClick={() => deleteProductMutation.mutate(product.id)}
-                        type="button"
-                      >
-                        {deleteProductMutation.isPending && deleteProductMutation.variables === product.id ? "Siliniyor" : "Sil"}
-                      </button>
-                    ) : null}
-                    {!canManageCatalog && !canDeleteCatalog ? <span className="text-xs text-zinc-400">Salt okunur</span> : null}
-                  </div>
-                </DataCell>
-              </tr>
-            )}
+          <ProductTable
+            canDelete={canDeleteCatalog}
+            canManage={canManageCatalog}
+            deletingId={deleteProductMutation.isPending ? deleteProductMutation.variables ?? null : null}
+            isBulkPending={bulkProductsMutation.isPending}
+            onDelete={(id) => deleteProductMutation.mutate(id)}
+            onEdit={openProductEditor}
+            onToggle={toggleProductSelection}
+            products={products}
+            selectedIds={selectedProductIds}
+            statusLabels={productStatusLabels}
           />
         </Panel>
         <ActivityPanel
@@ -1125,19 +873,19 @@ export function ProductsSection({
             <div className="space-y-5">
               <div className="grid gap-3 sm:grid-cols-3">
                 <div className="rounded-lg border border-line bg-zinc-50 px-3 py-3">
-                  <p className="text-xs font-semibold uppercase text-zinc-500">1. Temel bilgi</p>
+                  <p className="text-xs font-semibold uppercase text-zinc-600">1. Temel bilgi</p>
                   <p className="mt-1 text-sm font-semibold text-ink">Ad, fiyat ve varyantlar</p>
                 </div>
                 <div className="rounded-lg border border-line bg-zinc-50 px-3 py-3">
-                  <p className="text-xs font-semibold uppercase text-zinc-500">2. Görsel</p>
+                  <p className="text-xs font-semibold uppercase text-zinc-600">2. Görsel</p>
                   <p className="mt-1 text-sm font-semibold text-ink">Kapak fotoğrafını yükle</p>
                 </div>
                 <div className="rounded-lg border border-line bg-zinc-50 px-3 py-3">
-                  <p className="text-xs font-semibold uppercase text-zinc-500">3. Yayın</p>
+                  <p className="text-xs font-semibold uppercase text-zinc-600">3. Yayın</p>
                   <p className="mt-1 text-sm font-semibold text-ink">Aktif veya taslak seç</p>
                 </div>
               </div>
-              <form className="grid gap-4" onSubmit={submitProduct}>
+              <ProductForm onSubmit={submitProduct}>
                 <div className="flex items-center justify-between gap-3">
                   <FieldLabel htmlFor="product-name">{editingProductId ? "Ürünü düzenle" : "Yeni ürün"}</FieldLabel>
                   {editingProductId ? (
@@ -1159,12 +907,14 @@ export function ProductsSection({
                     </button>
                   )}
                 </div>
-                <input
-                  className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
-                  id="product-name"
-                  onChange={(event) => setProductForm((current) => ({ ...current, name: event.target.value }))}
-                  placeholder="Ürün adı"
-                  value={productForm.name}
+                <ProductGeneralFields
+                  categories={categories}
+                  errorId="product-form-error"
+                  form={productForm}
+                  invalidField={productErrorField}
+                  setForm={setProductForm}
+                  statusLabels={productStatusLabels}
+                  statusOptions={productStatusOptions}
                 />
                 <div className="grid gap-4">
                   <div className="space-y-2">
@@ -1180,12 +930,12 @@ export function ProductsSection({
                             type="button"
                           >
                             {tag}
-                            <span className="text-zinc-400">×</span>
+                            <span className="text-zinc-600">×</span>
                           </button>
                         ))}
                       </div>
                     ) : (
-                      <div className="rounded-lg border border-dashed border-line bg-zinc-50 px-3 py-2 text-xs text-zinc-500">
+                      <div className="rounded-lg border border-dashed border-line bg-zinc-50 px-3 py-2 text-xs text-zinc-600">
                         Henüz etiket seçilmedi.
                       </div>
                     )}
@@ -1234,50 +984,7 @@ export function ProductsSection({
                     <InlineHint>Mevcut etiketlerden seçebilir veya yeni etiket yazıp bu üründe kullanabilirsin.</InlineHint>
                   </div>
                 </div>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <select
-                    className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
-                    onChange={(event) => setProductForm((current) => ({ ...current, categoryId: event.target.value }))}
-                    value={productForm.categoryId}
-                  >
-                    <option value="">Kategori seç</option>
-                    {categories.map((category) => (
-                      <option key={category.id} value={category.id}>{category.name}</option>
-                    ))}
-                  </select>
-                  <select
-                    className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
-                    onChange={(event) => setProductForm((current) => ({ ...current, status: event.target.value as ProductStatus }))}
-                    value={productForm.status}
-                  >
-                    {productStatusOptions.map((option) => (
-                      <option key={option} value={option}>{productStatusLabels[option]}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <input
-                    className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
-                    inputMode="decimal"
-                    onChange={(event) => setProductForm((current) => ({ ...current, price: event.target.value }))}
-                    placeholder="Fiyat"
-                    value={productForm.price}
-                  />
-                  <input
-                    className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
-                    inputMode="decimal"
-                    onChange={(event) => setProductForm((current) => ({ ...current, salePrice: event.target.value }))}
-                    placeholder="İndirimli fiyat"
-                    value={productForm.salePrice}
-                  />
-                </div>
-                <details className="group rounded-lg border border-line bg-zinc-50">
-                  <summary className="focus-ring flex cursor-pointer list-none items-center justify-between gap-3 rounded-lg px-4 py-3 text-sm font-semibold text-ink">
-                    <span>Renk, beden ve stok akışı (önce renk, sonra beden, sonra stok)</span>
-                    <span className="text-xs font-semibold text-zinc-500 group-open:hidden">Aç</span>
-                    <span className="hidden text-xs font-semibold text-zinc-500 group-open:inline">Kapat</span>
-                  </summary>
-                  <div className="space-y-4 border-t border-line bg-white px-4 py-4">
+                <VariantEditor>
                     <div className="space-y-2">
                       <FieldLabel htmlFor="product-colors">Renk seç (seçilen her renk için beden ve stok kutuları açılır)</FieldLabel>
                       <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3" id="product-colors">
@@ -1322,7 +1029,7 @@ export function ProductsSection({
                                   style={{ background: color.hex }}
                                 />
                                 <span className="text-xs font-semibold leading-tight text-zinc-800">{color.name}</span>
-                                <span className="ml-auto text-[10px] text-zinc-400">Özel</span>
+                                <span className="ml-auto text-[10px] text-zinc-600">Özel</span>
                               </button>
                             );
                           })}
@@ -1370,7 +1077,7 @@ export function ProductsSection({
                         </div>
                       ) : (
                         <button
-                          className="focus-ring mt-1 flex h-9 items-center gap-1.5 rounded-lg border border-dashed border-zinc-300 bg-white px-3 text-xs font-semibold text-zinc-500 hover:border-zinc-400 hover:text-zinc-700"
+                          className="focus-ring mt-1 flex h-9 items-center gap-1.5 rounded-lg border border-dashed border-zinc-300 bg-white px-3 text-xs font-semibold text-zinc-600 hover:border-zinc-400 hover:text-zinc-700"
                           disabled={!canManageCatalog}
                           onClick={() => setShowCustomColorForm(true)}
                           type="button"
@@ -1405,7 +1112,7 @@ export function ProductsSection({
                                 </button>
                               </div>
                               <div className="mt-3 space-y-2">
-                                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-500">Beden seç</p>
+                                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-600">Beden seç</p>
                                 <div className="flex flex-wrap gap-2">
                                   {sizeOptions.map((size) => {
                                     const isSelected = colorVariants.some((variant) => sameEntry(variant.size, size));
@@ -1424,7 +1131,7 @@ export function ProductsSection({
                                       >
                                         {size}
                                         {isCustom ? (
-                                          <span className="rounded bg-zinc-100 px-1 text-[9px] font-semibold uppercase tracking-wide text-zinc-500">
+                                          <span className="rounded bg-zinc-100 px-1 text-[9px] font-semibold uppercase tracking-wide text-zinc-600">
                                             Özel
                                           </span>
                                         ) : null}
@@ -1469,7 +1176,7 @@ export function ProductsSection({
                                   </div>
                                 ) : (
                                   <button
-                                    className="focus-ring mt-2 flex h-9 items-center gap-1.5 rounded-lg border border-dashed border-zinc-300 bg-white px-3 text-xs font-semibold text-zinc-500 hover:border-zinc-400 hover:text-zinc-700"
+                                    className="focus-ring mt-2 flex h-9 items-center gap-1.5 rounded-lg border border-dashed border-zinc-300 bg-white px-3 text-xs font-semibold text-zinc-600 hover:border-zinc-400 hover:text-zinc-700"
                                     disabled={!canManageCatalog}
                                     onClick={() => {
                                       setCustomSizeColor(color);
@@ -1482,7 +1189,7 @@ export function ProductsSection({
                                 )}
                               </div>
                               <div className="mt-3 space-y-2">
-                                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-500">Stok sayısı</p>
+                                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-600">Stok sayısı</p>
                                 {colorVariants.length > 0 ? (
                                   <div className="grid gap-2 sm:grid-cols-2">
                                     {colorVariants.map((variant) => (
@@ -1493,7 +1200,7 @@ export function ProductsSection({
                                         <div className="mb-2 flex items-center justify-between gap-2">
                                           <span className="text-xs font-semibold text-ink">{colorName} / {variant.size}</span>
                                           <button
-                                            className="focus-ring rounded-md px-2 py-1 text-xs font-semibold text-zinc-500 hover:bg-zinc-50"
+                                            className="focus-ring rounded-md px-2 py-1 text-xs font-semibold text-zinc-600 hover:bg-zinc-50"
                                             onClick={() => removeVariantSize(color, variant.size)}
                                             type="button"
                                           >
@@ -1521,76 +1228,27 @@ export function ProductsSection({
                         })}
                       </div>
                     ) : (
-                      <div className="rounded-lg border border-dashed border-line bg-zinc-50 px-3 py-4 text-sm text-zinc-500">
+                      <div className="rounded-lg border border-dashed border-line bg-zinc-50 px-3 py-4 text-sm text-zinc-600">
                         Önce bir renk seçin. Renk seçilince hemen altında beden ve stok kutuları açılır.
                       </div>
                     )}
                     <div className="rounded-lg border border-line bg-zinc-50 px-3 py-2 text-xs text-zinc-600">
                       Toplam stok, seçilen renk/beden kutularındaki stokların toplamından otomatik hesaplanır.
                     </div>
-                  </div>
-                </details>
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between gap-3">
-                    <FieldLabel htmlFor="product-images">Ürün görselleri (kapak ve renk seçilince değişen galeri)</FieldLabel>
-                    <div className="flex flex-wrap items-center justify-end gap-2">
-                      <select
-                        className="focus-ring h-9 rounded-lg border border-line bg-white px-2 text-xs"
-                        onChange={(event) => setImageColor(event.target.value)}
-                        value={imageColor}
-                      >
-                          <option value="">Genel görsel</option>
-                        {productColors.map((color) => (
-                          <option key={color} value={color}>{colorEntryLabel(color)}</option>
-                        ))}
-                      </select>
-                      <label className="focus-ring inline-flex h-9 cursor-pointer items-center rounded-lg border border-line px-3 text-xs font-semibold text-ink">
-                        <input
-                          accept="image/png,image/jpeg,image/webp"
-                          className="hidden"
-                          multiple
-                          onChange={(event) => {
-                            const files = Array.from(event.target.files || []);
-                            if (files.length > 0) {
-                              uploadImagesMutation.mutate(files);
-                            }
-                            event.currentTarget.value = "";
-                          }}
-                          type="file"
-                        />
-                        {uploadImagesMutation.isPending ? "Yükleniyor" : "Görsel yükle"}
-                      </label>
-                    </div>
-                  </div>
-                  <textarea
-                    className="focus-ring min-h-32 rounded-lg border border-line bg-white px-3 py-3 text-sm"
-                    id="product-images"
-                    onChange={(event) => setProductForm((current) => ({ ...current, imagesText: event.target.value }))}
-                    placeholder={"Önce renk seçip görsel yükleyin ya da elle yazın\n#111111 | /uploads/siyah.webp\n#d8c6b0 | /uploads/ekru.webp\n/uploads/genel-kapak.webp"}
-                    value={productForm.imagesText}
-                  />
-                  <InlineHint>Renk seçiliyken yüklenen görsel o renge bağlanır. Düz linkler genel galeri görseli olur.</InlineHint>
-                  {imageEntries.length > 0 ? (
-                    <div className="grid gap-3 sm:grid-cols-3">
-                      {imageEntries.slice(0, 9).map((entry, index) => (
-                        <div className="overflow-hidden rounded-lg border border-line bg-zinc-50" key={`${entry.color}-${entry.url}-${index}`}>
-                          <Image
-                            alt=""
-                            className="h-28 w-full object-cover"
-                            height={160}
-                            src={assetUrl(entry.url)}
-                            unoptimized
-                            width={240}
-                          />
-                          <p className="truncate px-3 py-2 text-xs font-semibold text-zinc-600">
-                            {entry.color ? `${colorEntryLabel(entry.color)} rengi` : "Genel görsel"}
-                          </p>
-                        </div>
-                      ))}
-                    </div>
-                  ) : null}
-                  {uploadImagesMutation.isError ? <InlineError message={uploadImagesMutation.error.message} /> : null}
-                </div>
+                </VariantEditor>
+                <ImageManager
+                  colorLabel={colorEntryLabel}
+                  colors={productColors}
+                  entries={imageEntries}
+                  errorMessage={uploadImagesMutation.isError ? uploadImagesMutation.error.message : undefined}
+                  imageColor={imageColor}
+                  imagesText={productForm.imagesText}
+                  isUploading={uploadImagesMutation.isPending}
+                  onFiles={(files) => uploadImagesMutation.mutate(files)}
+                  onImageColorChange={setImageColor}
+                  onImagesTextChange={(imagesText) => setProductForm((current) => ({ ...current, imagesText }))}
+                  resolveUrl={resolveApiAssetUrl}
+                />
                 <div className="space-y-2">
                   <FieldLabel htmlFor="product-short-description">Kısa açıklama (fiyatın altında görünen kısa ürün özeti)</FieldLabel>
                   <textarea
@@ -1604,8 +1262,8 @@ export function ProductsSection({
                 <details className="group rounded-lg border border-line bg-zinc-50">
                   <summary className="focus-ring flex cursor-pointer list-none items-center justify-between gap-3 rounded-lg px-4 py-3 text-sm font-semibold text-ink">
                     <span>Uzun açıklama, ölçü ve teslimat notu (ürün detayındaki bilgi sekmeleri)</span>
-                    <span className="text-xs font-semibold text-zinc-500 group-open:hidden">Aç</span>
-                    <span className="hidden text-xs font-semibold text-zinc-500 group-open:inline">Kapat</span>
+                    <span className="text-xs font-semibold text-zinc-600 group-open:hidden">Aç</span>
+                    <span className="hidden text-xs font-semibold text-zinc-600 group-open:inline">Kapat</span>
                   </summary>
                   <div className="space-y-4 border-t border-line bg-white px-4 py-4">
                     <div className="space-y-2">
@@ -1667,6 +1325,7 @@ export function ProductsSection({
                 </details>
                 <button
                   className="focus-ring inline-flex h-10 items-center justify-center rounded-lg bg-ink px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                  aria-describedby={canManageCatalog ? undefined : "product-permission-note"}
                   disabled={!canManageCatalog || productMutation.isPending || updateProductMutation.isPending || uploadImagesMutation.isPending}
                   type="submit"
                 >
@@ -1678,10 +1337,30 @@ export function ProductsSection({
                         ? "Ürünü güncelle"
                         : "Ürün oluştur"}
                 </button>
-                {productFormError ? <InlineError message={productFormError} /> : null}
+                {canManageCatalog ? null : (
+                  <p className="text-xs text-zinc-600" id="product-permission-note">
+                    Ürün oluşturma ve düzenleme yetkiniz yok. Erişim için mağaza yöneticinizle görüşün.
+                  </p>
+                )}
+                {productFormError ? <InlineError id="product-form-error" message={productFormError} /> : null}
                 {productMutation.isError && <InlineError message={productMutation.error.message} />}
                 {updateProductMutation.isError && <InlineError message={updateProductMutation.error.message} />}
-              </form>
+              </ProductForm>
+              {editingProductId ? (
+                <ProductRelationsEditor
+                  key={editingProductId}
+                  organizationSlug={organizationSlug}
+                  productId={editingProductId}
+                  products={products}
+                />
+              ) : null}
+              {editingProductId ? (
+                <ProductSizeGuideEditor
+                  key={`sg-${editingProductId}`}
+                  organizationSlug={organizationSlug}
+                  productId={editingProductId}
+                />
+              ) : null}
             </div>
           </Panel>
       ) : null}
@@ -1691,8 +1370,8 @@ export function ProductsSection({
             <details className="group rounded-lg border border-line bg-zinc-50">
               <summary className="focus-ring flex cursor-pointer list-none items-center justify-between gap-3 rounded-lg px-4 py-3 text-sm font-semibold text-ink">
                 <span>{editingCategoryId ? "Kategoriyi düzenle" : "Kategori ekle veya düzenle"}</span>
-                <span className="text-xs font-semibold text-zinc-500 group-open:hidden">Aç</span>
-                <span className="hidden text-xs font-semibold text-zinc-500 group-open:inline">Kapat</span>
+                <span className="text-xs font-semibold text-zinc-600 group-open:hidden">Aç</span>
+                <span className="hidden text-xs font-semibold text-zinc-600 group-open:inline">Kapat</span>
               </summary>
               <form className="space-y-3 border-t border-line bg-white px-4 py-4" onSubmit={submitCategory}>
                 <div className="flex items-center justify-between gap-3">
@@ -1754,7 +1433,7 @@ export function ProductsSection({
                       alt=""
                       className="aspect-[16/9] w-full object-cover"
                       height={360}
-                      src={assetUrl(categoryForm.imageUrl)}
+                      src={resolveApiAssetUrl(categoryForm.imageUrl)}
                       unoptimized
                       width={640}
                     />
@@ -1797,19 +1476,19 @@ export function ProductsSection({
                               alt=""
                               className="h-full w-full object-cover"
                               height={96}
-                              src={assetUrl(category.image_url)}
+                              src={resolveApiAssetUrl(category.image_url)}
                               unoptimized
                               width={96}
                             />
                           ) : (
-                            <div className="flex h-full w-full items-center justify-center text-xs font-bold text-zinc-400">
+                            <div className="flex h-full w-full items-center justify-center text-xs font-bold text-zinc-600">
                               {category.name.slice(0, 2).toLocaleUpperCase("tr-TR")}
                             </div>
                           )}
                         </div>
                         <div className="min-w-0">
                           <p className="truncate text-sm font-semibold">{category.name}</p>
-                          <p className="truncate text-xs text-zinc-500">{category.slug}</p>
+                          <p className="truncate text-xs text-zinc-600">{category.slug}</p>
                         </div>
                       </div>
                       <div className="flex shrink-0 flex-wrap gap-2">
@@ -1850,7 +1529,7 @@ export function ProductsSection({
                           <p className="text-xs font-semibold uppercase tracking-[1.5px] text-zinc-600">
                             Suvera &ldquo;{category.name}&rdquo; sayfasındaki öne çıkanlar
                           </p>
-                          <p className="text-xs text-zinc-500">
+                          <p className="text-xs text-zinc-600">
                             Seçili: <strong>{featuredSelection.size}</strong> ürün
                           </p>
                         </div>
@@ -1881,7 +1560,7 @@ export function ProductsSection({
                                       type="checkbox"
                                     />
                                     <span className="min-w-0 flex-1 truncate">{product.name}</span>
-                                    <span className="shrink-0 text-xs text-zinc-500">
+                                    <span className="shrink-0 text-xs text-zinc-600">
                                       {product.status === "active" ? "Aktif" : product.status === "draft" ? "Taslak" : "Stoksuz"}
                                     </span>
                                   </label>
@@ -1925,7 +1604,7 @@ export function ProductsSection({
         <Panel title="Renkler" description="Ürün formunda önerilen özel renkleri buradan yönet.">
           <div className="space-y-5">
             <div className="space-y-2">
-              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-500">Varsayılan renkler</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-600">Varsayılan renkler</p>
               <div className="flex flex-wrap gap-2">
                 {productColorPresets.map((color) => (
                   <span className="inline-flex items-center gap-2 rounded-lg border border-line bg-zinc-50 px-3 py-1.5 text-xs font-semibold text-zinc-600" key={color.value}>
@@ -1936,7 +1615,7 @@ export function ProductsSection({
               </div>
             </div>
             <div className="space-y-2">
-              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-500">Özel renkler ({(customColorsQuery.data ?? []).length})</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-600">Özel renkler ({(customColorsQuery.data ?? []).length})</p>
               {(customColorsQuery.data ?? []).length > 0 ? (
                 <div className="flex flex-wrap gap-2">
                   {(customColorsQuery.data ?? []).map((color) => (
@@ -1974,7 +1653,7 @@ export function ProductsSection({
         <Panel title="Bedenler" description="Ürün formunda önerilen özel bedenleri buradan yönet.">
           <div className="space-y-5">
             <div className="space-y-2">
-              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-500">Varsayılan bedenler</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-600">Varsayılan bedenler</p>
               <div className="flex flex-wrap gap-2">
                 {productSizePresets.map((size) => (
                   <span className="rounded-lg border border-line bg-zinc-50 px-3 py-1.5 text-xs font-semibold text-zinc-600" key={size}>{size}</span>
@@ -1982,7 +1661,7 @@ export function ProductsSection({
               </div>
             </div>
             <div className="space-y-2">
-              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-500">Özel bedenler ({(customSizesQuery.data ?? []).length})</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-600">Özel bedenler ({(customSizesQuery.data ?? []).length})</p>
               {(customSizesQuery.data ?? []).length > 0 ? (
                 <div className="flex flex-wrap gap-2">
                   {(customSizesQuery.data ?? []).map((size) => (

@@ -2,9 +2,16 @@
 
 import type { FormEvent } from "react";
 import Image from "next/image";
+import { startAuthentication } from "@simplewebauthn/browser";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { loginAdminSession, loginSession, registerWorkspace } from "@/lib/api";
+import {
+  beginPasskeyLogin,
+  finishPasskeyLogin,
+  loginAdminSession,
+  loginSession,
+  registerWorkspace,
+} from "@/lib/api";
 import { PLATFORM_NAME } from "@/lib/branding";
 import { useSessionStore } from "@/store/session";
 import { useToastStore } from "@/store/toast";
@@ -14,7 +21,7 @@ type LoginRole = "store" | "admin";
 
 export default function LoginPage() {
   const router = useRouter();
-  const accessToken = useSessionStore((state) => state.accessToken);
+  const authenticated = useSessionStore((state) => state.authenticated);
   const actorType = useSessionStore((state) => state.actorType);
   const hydrated = useSessionStore((state) => state.hydrated);
   const applySession = useSessionStore((state) => state.applySession);
@@ -38,10 +45,10 @@ export default function LoginPage() {
   });
 
   useEffect(() => {
-    if (hydrated && accessToken) {
+    if (hydrated && authenticated) {
       router.replace(actorType === "admin" ? "/superadmin" : "/dashboard");
     }
-  }, [hydrated, accessToken, actorType, router]);
+  }, [hydrated, authenticated, actorType, router]);
 
   async function handleLogin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -119,6 +126,38 @@ export default function LoginPage() {
     }
   }
 
+  async function handlePasskeyLogin() {
+    setLoading(true);
+    setError("");
+    try {
+      const begun = await beginPasskeyLogin();
+      const response = await startAuthentication({ optionsJSON: begun.options });
+      const session = await finishPasskeyLogin({
+        response,
+        challengeId: begun.challengeId,
+        organizationSlug: loginForm.organizationSlug.trim() || undefined,
+      });
+      if (session.actorType === "admin") {
+        applyAdminSession(session);
+        router.replace("/superadmin");
+      } else {
+        applySession(session);
+        router.replace("/dashboard");
+      }
+      pushToast({
+        title: "Passkey ile oturum açıldı",
+        description: "Cihaz doğrulaması tamamlandı.",
+        tone: "success",
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Passkey ile oturum açılamadı";
+      setError(message);
+      pushToast({ title: "Passkey girişi başarısız", description: message, tone: "error" });
+    } finally {
+      setLoading(false);
+    }
+  }
+
   return (
     <main className="grid min-h-screen grid-cols-1 bg-paper text-ink lg:grid-cols-[1.05fr_0.95fr]">
       <section className="flex items-center px-6 py-10 sm:px-10 lg:px-16">
@@ -151,6 +190,7 @@ export default function LoginPage() {
               <div className="grid grid-cols-2 gap-2 rounded-lg border border-line bg-white p-1">
                 <button
                   className={`focus-ring rounded-md px-3 py-2 text-sm font-semibold ${loginRole === "store" ? "bg-ink text-white" : "text-zinc-600"}`}
+                  data-testid="login-role-store"
                   onClick={() => { setLoginRole("store"); setError(""); }}
                   type="button"
                 >
@@ -158,13 +198,14 @@ export default function LoginPage() {
                 </button>
                 <button
                   className={`focus-ring rounded-md px-3 py-2 text-sm font-semibold ${loginRole === "admin" ? "bg-ink text-white" : "text-zinc-600"}`}
+                  data-testid="login-role-admin"
                   onClick={() => { setLoginRole("admin"); setError(""); }}
                   type="button"
                 >
                   Platform Yöneticisi
                 </button>
               </div>
-              <p className="text-xs text-zinc-500">
+              <p className="text-xs text-zinc-600">
                 {loginRole === "admin"
                   ? "Sistem sahibi (super_admin) girişi — mağaza kısa adı gerekmez."
                   : "Mağaza ekibi girişi. Birden fazla mağazanız varsa kısa ad ile seçebilirsiniz."}
@@ -174,6 +215,7 @@ export default function LoginPage() {
                 <input
                   autoComplete="username"
                   className="focus-ring mt-2 h-12 w-full rounded-lg border border-line bg-white px-4"
+                  data-testid="login-email"
                   onChange={(event) => setLoginForm((state) => ({ ...state, email: event.target.value }))}
                   placeholder={loginRole === "admin" ? "yonetici@ornek.com" : "magaza-sahibi@ornek.com"}
                   type="email"
@@ -185,6 +227,7 @@ export default function LoginPage() {
                 <input
                   autoComplete="current-password"
                   className="focus-ring mt-2 h-12 w-full rounded-lg border border-line bg-white px-4"
+                  data-testid="login-password"
                   onChange={(event) => setLoginForm((state) => ({ ...state, password: event.target.value }))}
                   placeholder="************"
                   type="password"
@@ -193,9 +236,10 @@ export default function LoginPage() {
               </label>
               {loginRole === "store" ? (
                 <label className="block">
-                  <span className="text-sm font-semibold text-zinc-700">Mağaza kısa adı <span className="font-normal text-zinc-400">(opsiyonel)</span></span>
+                  <span className="text-sm font-semibold text-zinc-700">Mağaza kısa adı <span className="font-normal text-zinc-600">(opsiyonel)</span></span>
                   <input
                     className="focus-ring mt-2 h-12 w-full rounded-lg border border-line bg-white px-4"
+                    data-testid="login-organization-slug"
                     onChange={(event) => setLoginForm((state) => ({ ...state, organizationSlug: event.target.value }))}
                     placeholder="panelya"
                     type="text"
@@ -203,8 +247,22 @@ export default function LoginPage() {
                   />
                 </label>
               ) : null}
-              <button className="focus-ring h-12 w-full rounded-lg bg-mint px-5 font-semibold text-white disabled:opacity-70" disabled={loading} type="submit">
+              <button className="focus-ring h-12 w-full rounded-lg bg-mint px-5 font-semibold text-white disabled:opacity-70" data-testid="login-submit" disabled={loading} type="submit">
                 {loading ? "Oturum açılıyor" : loginRole === "admin" ? "Platform yöneticisi girişi" : "Giriş yap"}
+              </button>
+              <div className="flex items-center gap-3" aria-hidden="true">
+                <span className="h-px flex-1 bg-line" />
+                <span className="text-xs font-semibold uppercase text-zinc-600">veya</span>
+                <span className="h-px flex-1 bg-line" />
+              </div>
+              <button
+                className="focus-ring h-12 w-full rounded-lg border border-line bg-white px-5 font-semibold text-ink disabled:opacity-70"
+                data-testid="passkey-login"
+                disabled={loading}
+                onClick={() => void handlePasskeyLogin()}
+                type="button"
+              >
+                Passkey ile giriş yap
               </button>
             </form>
           ) : (

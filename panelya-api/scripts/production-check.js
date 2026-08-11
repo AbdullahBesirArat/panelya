@@ -62,6 +62,47 @@ async function main() {
     issues.push(`Payment callback queue tablosu eksik gorunuyor: ${err.message}`);
   }
 
+  if (process.env.NODE_ENV === 'production') {
+    try {
+      const runtimeRole = await db.query(
+        `select r.rolsuper,
+                r.rolbypassrls,
+                exists (
+                  select 1 from pg_tables t
+                   where t.schemaname = 'public' and t.tableowner = current_user
+                ) as owns_tables
+           from pg_roles r
+          where r.rolname = current_user`
+      );
+      const role = runtimeRole.rows[0];
+      if (!role || role.rolsuper || role.rolbypassrls || role.owns_tables) {
+        issues.push('Runtime database rolu owner/superuser/BYPASSRLS olamaz.');
+      }
+    } catch (err) {
+      issues.push(`Runtime database rol kontrolu yapilamadi: ${err.message}`);
+    }
+
+    try {
+      const systemRole = await db.getSystemPool().query(
+        `select r.rolsuper,
+                r.rolbypassrls,
+                pg_has_role(current_user, 'panelya_rls_bypass', 'member') as explicit_bypass,
+                exists (
+                  select 1 from pg_tables t
+                   where t.schemaname = 'public' and t.tableowner = current_user
+                ) as owns_tables
+           from pg_roles r
+          where r.rolname = current_user`
+      );
+      const role = systemRole.rows[0];
+      if (!role || role.rolsuper || role.rolbypassrls || role.owns_tables || !role.explicit_bypass) {
+        issues.push('System database rolu yalniz explicit RLS bypass uyeligi olan non-owner rol olmali.');
+      }
+    } catch (err) {
+      issues.push(`System database rol kontrolu yapilamadi: ${err.message}`);
+    }
+  }
+
   try {
     const sequenceResult = await db.query("select to_regclass('public.order_code_seq') as sequence_name");
     if (!sequenceResult.rows[0].sequence_name) {
@@ -94,4 +135,9 @@ main()
     console.error(err.message);
     process.exitCode = 1;
   })
-  .finally(() => db.pool.end());
+  .finally(async () => {
+    await db.pool.end();
+    if (process.env.SYSTEM_DATABASE_URL) {
+      await db.getSystemPool().end();
+    }
+  });

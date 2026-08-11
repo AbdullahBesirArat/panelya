@@ -5,9 +5,10 @@ import Image from "next/image";
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { MetricGrid } from "@/components/page-kit";
+import { AdminDialog } from "@/components/ui/admin-dialog";
 import { Button } from "@/components/ui/button";
+import { queryKeys } from "@/lib/query-keys";
 import {
-  API_BASE,
   createBlogPost,
   createCampaign,
   createCollection,
@@ -26,13 +27,15 @@ import {
   updateCollection,
   updateCollectionProducts,
   updateSlide,
-  type ApiBlogPost,
-  type ApiCampaign,
-  type ApiCollection,
-  type ApiSlide,
   type CollectionProductMembership,
-  uploadProductImages,
-} from "@/lib/api";
+} from "@/lib/api/content";
+import { resolveApiAssetUrl, uploadProductImages } from "@/lib/api/media";
+import type {
+  ApiBlogPost,
+  ApiCampaign,
+  ApiCollection,
+  ApiSlide,
+} from "@/lib/api/types";
 import {
   ActivityPanel,
   DataCell,
@@ -97,17 +100,6 @@ const contentTabs: Array<{ key: ContentTab; label: string; description: string }
   { key: "blog", label: "Blog", description: "SEO içerikleri" },
 ];
 
-function assetUrl(url: string | null | undefined) {
-  const value = String(url || "").trim();
-  if (!value) return "";
-  if (/^https?:\/\//i.test(value)) return value;
-  const assetBase = API_BASE.replace(/\/api\/?$/, "").replace(/\/$/, "");
-  if (value.startsWith("/uploads/")) return `${assetBase}${value}`;
-  if (value.startsWith("uploads/")) return `${assetBase}/${value}`;
-  if (value.startsWith("/")) return `${assetBase}${value}`;
-  return `${assetBase}/uploads/${value}`;
-}
-
 function collectionKey(value: string) {
   return value
     .trim()
@@ -156,25 +148,25 @@ export function ContentSection({
   const [collectionProductFilter, setCollectionProductFilter] = useState("");
 
   const slidesQuery = useQuery({
-    queryKey: ["slides", organizationSlug],
+    queryKey: queryKeys.content.slides(organizationSlug),
     queryFn: fetchSlides,
     staleTime: 30_000,
   });
 
   const campaignsQuery = useQuery({
-    queryKey: ["campaigns", organizationSlug],
+    queryKey: queryKeys.content.campaigns(organizationSlug),
     queryFn: fetchCampaigns,
     staleTime: 30_000,
   });
 
   const collectionsQuery = useQuery({
-    queryKey: ["collections", organizationSlug],
+    queryKey: queryKeys.content.collections(organizationSlug),
     queryFn: fetchCollections,
     staleTime: 30_000,
   });
 
   const blogQuery = useQuery({
-    queryKey: ["blog-posts", organizationSlug],
+    queryKey: queryKeys.content.blog(organizationSlug),
     queryFn: fetchBlogPosts,
     staleTime: 30_000,
   });
@@ -306,7 +298,7 @@ export function ContentSection({
   });
 
   const collectionProductsQuery = useQuery({
-    queryKey: ["collection-products", organizationSlug, collectionProductsModal?.id ?? null],
+    queryKey: queryKeys.content.collectionProducts(organizationSlug, collectionProductsModal?.id ?? null),
     queryFn: () => fetchCollectionProducts(collectionProductsModal!.id),
     enabled: !!collectionProductsModal,
     staleTime: 0,
@@ -321,7 +313,7 @@ export function ContentSection({
         description: `${data.memberCount} ürün koleksiyonda, ${data.updated} ürün güncellendi.`,
         tone: "success",
       });
-      await queryClient.invalidateQueries({ queryKey: ["products", organizationSlug] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.catalog.products.all(organizationSlug) });
       setCollectionProductsModal(null);
     },
   });
@@ -438,11 +430,11 @@ export function ContentSection({
 
   async function invalidateContent() {
     await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ["slides", organizationSlug] }),
-      queryClient.invalidateQueries({ queryKey: ["campaigns", organizationSlug] }),
-      queryClient.invalidateQueries({ queryKey: ["collections", organizationSlug] }),
-      queryClient.invalidateQueries({ queryKey: ["blog-posts", organizationSlug] }),
-      queryClient.invalidateQueries({ queryKey: ["summary", organizationSlug] }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.content.slides(organizationSlug) }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.content.campaigns(organizationSlug) }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.content.collections(organizationSlug) }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.content.blog(organizationSlug) }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.summary.detail(organizationSlug) }),
     ]);
   }
 
@@ -635,7 +627,7 @@ export function ContentSection({
                 type="button"
               >
                 <span className="block text-sm font-semibold">{tab.label}</span>
-                <span className={["mt-1 block text-xs", active ? "text-white/70" : "text-zinc-500"].join(" ")}>
+                <span className={["mt-1 block text-xs", active ? "text-white/70" : "text-zinc-600"].join(" ")}>
                   {tab.description}
                 </span>
               </button>
@@ -652,6 +644,7 @@ export function ContentSection({
           actions={slidesQuery.isFetching ? <StatusPill tone="leaf">Güncelleniyor</StatusPill> : null}
         >
           <DataGrid
+            caption="Vitrin slaytları"
             columns={["Sıra", "Başlık", "Etiket", "Buton", "Durum", "Aksiyon"]}
             emptyMessage="Bu mağaza için henüz slayt yok."
             rows={slides}
@@ -660,7 +653,7 @@ export function ContentSection({
                 <DataCell>{formatCount(slide.sort_order)}</DataCell>
                 <DataCell>
                   <p className="font-semibold text-ink">{slide.title}</p>
-                  <p className="mt-1 line-clamp-2 text-xs text-zinc-500">{slide.sub || "Alt metin yok"}</p>
+                  <p className="mt-1 line-clamp-2 text-xs text-zinc-600">{slide.sub || "Alt metin yok"}</p>
                 </DataCell>
                 <DataCell>{slide.tag || "-"}</DataCell>
                 <DataCell>{slide.btn || "-"}</DataCell>
@@ -687,7 +680,7 @@ export function ContentSection({
                         {deleteSlideMutation.isPending && deleteSlideMutation.variables === slide.id ? "Siliniyor" : "Sil"}
                       </Button>
                     ) : null}
-                    {!canManageContent && !canDeleteContent ? <span className="text-xs text-zinc-400">Salt okunur</span> : null}
+                    {!canManageContent && !canDeleteContent ? <span className="text-xs text-zinc-600">Salt okunur</span> : null}
                   </div>
                 </DataCell>
               </tr>
@@ -802,6 +795,7 @@ export function ContentSection({
           actions={campaignsQuery.isFetching ? <StatusPill tone="leaf">Güncelleniyor</StatusPill> : null}
         >
           <DataGrid
+            caption="Kampanyalar"
             columns={["Ad", "Tip", "Değer", "Bitiş", "Durum", "Aksiyon"]}
             emptyMessage="Bu mağaza için henüz kampanya yok."
             rows={campaigns}
@@ -834,7 +828,7 @@ export function ContentSection({
                         {deleteCampaignMutation.isPending && deleteCampaignMutation.variables === campaign.id ? "Siliniyor" : "Sil"}
                       </Button>
                     ) : null}
-                    {!canManageContent && !canDeleteContent ? <span className="text-xs text-zinc-400">Salt okunur</span> : null}
+                    {!canManageContent && !canDeleteContent ? <span className="text-xs text-zinc-600">Salt okunur</span> : null}
                   </div>
                 </DataCell>
               </tr>
@@ -1008,7 +1002,7 @@ export function ContentSection({
                   alt=""
                   className="h-24 w-full rounded-lg border border-line object-cover"
                   height={160}
-                  src={assetUrl(collectionForm.imageUrl)}
+                  src={resolveApiAssetUrl(collectionForm.imageUrl)}
                   unoptimized
                   width={640}
                 />
@@ -1055,6 +1049,7 @@ export function ContentSection({
             actions={collectionsQuery.isFetching ? <StatusPill tone="leaf">Güncelleniyor</StatusPill> : null}
           >
             <DataGrid
+              caption="Koleksiyonlar"
               columns={["Sıra", "Ad", "Link", "Durum", "Aksiyon"]}
               emptyMessage="Bu mağaza için henüz koleksiyon yok."
               rows={collections}
@@ -1069,19 +1064,19 @@ export function ContentSection({
                             alt=""
                             className="h-full w-full object-cover"
                             height={88}
-                            src={assetUrl(collection.image_url)}
+                            src={resolveApiAssetUrl(collection.image_url)}
                             unoptimized
                             width={88}
                           />
                         ) : (
-                          <div className="flex h-full w-full items-center justify-center text-xs font-bold text-zinc-400">
+                          <div className="flex h-full w-full items-center justify-center text-xs font-bold text-zinc-600">
                             {collection.title.slice(0, 2).toLocaleUpperCase("tr-TR")}
                           </div>
                         )}
                       </div>
                       <div>
                         <p className="font-semibold text-ink">{collection.title}</p>
-                        <p className="line-clamp-1 text-xs text-zinc-500">{collection.description || collection.slug}</p>
+                        <p className="line-clamp-1 text-xs text-zinc-600">{collection.description || collection.slug}</p>
                       </div>
                     </div>
                   </DataCell>
@@ -1114,7 +1109,7 @@ export function ContentSection({
                           {deleteCollectionMutation.isPending && deleteCollectionMutation.variables === collection.id ? "Siliniyor" : "Sil"}
                         </Button>
                       ) : null}
-                      {!canManageContent && !canDeleteContent ? <span className="text-xs text-zinc-400">Salt okunur</span> : null}
+                      {!canManageContent && !canDeleteContent ? <span className="text-xs text-zinc-600">Salt okunur</span> : null}
                     </div>
                   </DataCell>
                 </tr>
@@ -1134,15 +1129,15 @@ export function ContentSection({
             <form className="grid gap-3" onSubmit={submitBlog}>
               <div className="grid gap-3 rounded-lg border border-line bg-zinc-50 p-3 sm:grid-cols-3">
                 <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-500">1. Kapak</p>
+                  <p className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-600">1. Kapak</p>
                   <p className="mt-1 text-sm font-semibold text-ink">Yatay, aydınlık görsel</p>
                 </div>
                 <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-500">2. SEO</p>
+                  <p className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-600">2. SEO</p>
                   <p className="mt-1 text-sm font-semibold text-ink">Başlık, kısa ad, özet</p>
                 </div>
                 <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-500">3. İçerik</p>
+                  <p className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-600">3. İçerik</p>
                   <p className="mt-1 text-sm font-semibold text-ink">Rehber, bakım, kombin</p>
                 </div>
               </div>
@@ -1214,7 +1209,7 @@ export function ContentSection({
                     alt=""
                     className="aspect-[16/9] w-full rounded-lg border border-line object-cover"
                     height={360}
-                    src={assetUrl(blogForm.imageUrl)}
+                    src={resolveApiAssetUrl(blogForm.imageUrl)}
                     unoptimized
                     width={640}
                   />
@@ -1283,6 +1278,7 @@ export function ContentSection({
             actions={blogQuery.isFetching ? <StatusPill tone="leaf">Güncelleniyor</StatusPill> : null}
           >
             <DataGrid
+              caption="Blog yazıları"
               columns={["Sıra", "Başlık", "Yayın", "Durum", "Aksiyon"]}
               emptyMessage="Bu mağaza için henüz blog yazısı yok."
               rows={blogPosts}
@@ -1297,19 +1293,19 @@ export function ContentSection({
                             alt=""
                             className="h-full w-full object-cover"
                             height={88}
-                            src={assetUrl(post.image_url)}
+                            src={resolveApiAssetUrl(post.image_url)}
                             unoptimized
                             width={88}
                           />
                         ) : (
-                          <div className="flex h-full w-full items-center justify-center text-xs font-bold text-zinc-400">
+                          <div className="flex h-full w-full items-center justify-center text-xs font-bold text-zinc-600">
                             {post.title.slice(0, 2).toLocaleUpperCase("tr-TR")}
                           </div>
                         )}
                       </div>
                       <div>
                         <p className="font-semibold text-ink">{post.title}</p>
-                        <p className="line-clamp-1 text-xs text-zinc-500">{post.excerpt || post.slug}</p>
+                        <p className="line-clamp-1 text-xs text-zinc-600">{post.excerpt || post.slug}</p>
                       </div>
                     </div>
                   </DataCell>
@@ -1337,7 +1333,7 @@ export function ContentSection({
                           {deleteBlogMutation.isPending && deleteBlogMutation.variables === post.id ? "Siliniyor" : "Sil"}
                         </Button>
                       ) : null}
-                      {!canManageContent && !canDeleteContent ? <span className="text-xs text-zinc-400">Salt okunur</span> : null}
+                      {!canManageContent && !canDeleteContent ? <span className="text-xs text-zinc-600">Salt okunur</span> : null}
                     </div>
                   </DataCell>
                 </tr>
@@ -1361,34 +1357,12 @@ export function ContentSection({
       ) : null}
 
       {collectionProductsModal ? (
-        <div
-          aria-modal="true"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-          onClick={(event) => {
-            if (event.target === event.currentTarget) setCollectionProductsModal(null);
-          }}
-          role="dialog"
+        <AdminDialog
+          description="Seçtiğiniz ürünler bu koleksiyona güvenli ilişki kaydıyla bağlanır. Ürün etiketleri değiştirilmez."
+          onClose={() => setCollectionProductsModal(null)}
+          size="lg"
+          title={`${collectionProductsModal.title} – Ürünleri yönet`}
         >
-          <div className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl bg-white shadow-xl">
-            <div className="flex items-start justify-between gap-3 border-b border-line px-5 py-4">
-              <div>
-                <h3 className="text-base font-semibold text-ink">
-                  {collectionProductsModal.title} – Ürünleri yönet
-                </h3>
-                <p className="mt-1 text-xs text-zinc-500">
-                  Seçtiğiniz ürünler bu koleksiyona güvenli ilişki kaydıyla bağlanır.
-                  Ürün etiketleri değiştirilmez.
-                </p>
-              </div>
-              <Button
-                onClick={() => setCollectionProductsModal(null)}
-                size="sm"
-                type="button"
-                variant="outline"
-              >
-                Kapat
-              </Button>
-            </div>
             <div className="border-b border-line px-5 py-3">
               <input
                 aria-label="Ürün ara"
@@ -1401,7 +1375,7 @@ export function ContentSection({
             </div>
             <div className="flex-1 overflow-y-auto px-5 py-3">
               {collectionProductsQuery.isLoading ? (
-                <p className="py-8 text-center text-sm text-zinc-500">Ürünler yükleniyor...</p>
+                <p className="py-8 text-center text-sm text-zinc-600">Ürünler yükleniyor...</p>
               ) : collectionProductsQuery.isError ? (
                 <InlineError message={collectionProductsQuery.error.message} />
               ) : collectionProductsQuery.data ? (
@@ -1420,7 +1394,7 @@ export function ContentSection({
               ) : null}
             </div>
             <div className="flex items-center justify-between gap-3 border-t border-line px-5 py-3">
-              <span className="text-xs text-zinc-500">
+              <span className="text-xs text-zinc-600">
                 {collectionProductSelectedIds.length} ürün seçildi
               </span>
               <div className="flex gap-2">
@@ -1451,8 +1425,7 @@ export function ContentSection({
                 <InlineError message={collectionProductsMutation.error.message} />
               </div>
             ) : null}
-          </div>
-        </div>
+        </AdminDialog>
       ) : null}
     </>
   );
@@ -1475,7 +1448,7 @@ function CollectionProductPicker({
     ? products.filter((product) => product.name.toLocaleLowerCase("tr-TR").includes(query))
     : products;
   if (visible.length === 0) {
-    return <p className="py-6 text-center text-sm text-zinc-500">Eşleşen ürün bulunamadı.</p>;
+    return <p className="py-6 text-center text-sm text-zinc-600">Eşleşen ürün bulunamadı.</p>;
   }
   return (
     <ul className="space-y-1">
@@ -1491,7 +1464,7 @@ function CollectionProductPicker({
                 type="checkbox"
               />
               <span className="flex-1 truncate">{product.name}</span>
-              <span className="text-xs uppercase text-zinc-400">{product.status}</span>
+              <span className="text-xs uppercase text-zinc-600">{product.status}</span>
             </label>
           </li>
         );

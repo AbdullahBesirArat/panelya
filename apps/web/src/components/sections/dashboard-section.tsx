@@ -38,6 +38,7 @@ export function DashboardSection({ organizationSlug }: { organizationSlug: strin
       <div className="grid gap-5 xl:grid-cols-[1.2fr_0.8fr]">
         <Panel title="Öncelikli işler" description="Düşük stok ve son siparişler">
           <DataGrid
+            caption="Öncelikli işler"
             columns={["Ürün", "Kategori", "Stok", "Durum"]}
             emptyMessage="Kritik stok uyarisi yok."
             rows={summary.lowStockProducts}

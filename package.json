@@ -6,6 +6,11 @@
     "apps/web",
     "panelya-api"
   ],
+  "overrides": {
+    "exceljs": {
+      "uuid": "^11.1.1"
+    }
+  },
   "scripts": {
     "dev:web": "npm --prefix apps/web run dev",
     "build:web": "npm --prefix apps/web run build",
@@ -15,7 +20,18 @@
     "start": "npm run start:api",
     "start:api": "npm --prefix panelya-api run start",
     "check:api": "npm --prefix panelya-api run check:syntax",
+    "test:api": "npm --prefix panelya-api run test:unit",
+    "test:web": "npm --prefix apps/web run test",
+    "test:integration": "npm --prefix panelya-api run test:integration:rls",
+    "test:storage": "npm --prefix panelya-api run test:integration:s3",
+    "test": "npm run test:api && npm run test:web",
+    "lint": "npm run lint:web",
+    "typecheck": "npm run typecheck:web",
+    "check": "npm run check:api && npm run test:api && npm run lint:web && npm run typecheck:web",
     "db:migrate": "npm --prefix panelya-api run db:migrate",
+    "db:roles": "npm --prefix panelya-api run db:roles",
+    "media:backfill": "npm --prefix panelya-api run media:backfill",
+    "media:cleanup": "npm --prefix panelya-api run media:cleanup",
     "db:setup": "npm --prefix panelya-api run db:setup",
     "demo:seed": "npm --prefix panelya-api run demo:seed",
     "suvera:seed": "npm --prefix panelya-api run suvera:seed",

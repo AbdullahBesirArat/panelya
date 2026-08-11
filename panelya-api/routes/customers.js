@@ -52,11 +52,13 @@ router.get('/', requireAuth, requireRole(['super_admin', 'owner', 'admin', 'memb
         coalesce(sum(o.total), 0)::numeric(12,2) as total
        from customers c
        left join orders o on o.customer_id = c.id and o.organization_id = c.organization_id and o.status <> 'cancelled'
-       where c.organization_id = $1 and (c.name ilike $2 or c.email ilike $2 or c.phone ilike $2)
+       where c.organization_id = $1
+         and catalog_search_normalize(c.organization_id::text || ' ' || c.name || ' ' || c.email || ' ' || c.phone)
+             like '%' || catalog_search_normalize($1::text) || '%' || catalog_search_normalize($2) || '%'
        group by c.id
        order by c.created_at desc
        limit $3 offset $4`,
-      [organization.id, `%${String(q).slice(0, 120)}%`, safeLimit, safeOffset]
+      [organization.id, String(q).slice(0, 120), safeLimit, safeOffset]
     );
 
     res.json(result.rows);
@@ -79,7 +81,7 @@ async function customerAccountView(client, { organization, account }) {
     customer = customerResult.rows[0] || null;
   }
 
-  const orders = await customerAuth.accountOrders(client, organization.id, customerId);
+  const orders = await customerAuth.accountOrders(client, organization.id, customerId, account?.id || null);
   return {
     customer,
     account: customerAuth.publicAccount(account),

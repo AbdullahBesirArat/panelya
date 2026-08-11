@@ -4,211 +4,22 @@ const { requireAuth, requireRole } = require('../middleware/auth');
 const { auditLog } = require('../services/audit');
 const { resolveOrganization } = require('../services/tenant');
 const { assertPlanCapacity } = require('../services/planLimits');
-const { syncProductStock } = require('../services/inventory');
-const { syncProductVariants } = require('../services/productVariants');
+const { setInventoryBalances } = require('../services/inventory');
+const { syncMediaReferences } = require('../services/mediaAssets');
+const notifications = require('../modules/notifications/service');
 
 const router = express.Router();
-const PRODUCT_STATUSES = ['active', 'draft', 'out'];
-const VARIANT_STATUSES = ['active', 'out'];
-
-// Pasif (is_active=false) varyantlari yalnizca GERCEK admin yonetim baglami
-// gorebilir. `attachAuthIfPresent` global middleware'i her gecerli JWT icin
-// req.auth doldurdugundan, salt varlik (`!!req.auth`) guvenli degildir:
-// gelecekte musteri/app veya impersonation tokeni de req.auth'u doldurabilir ve
-// public bir istek pasif varyantlari gormeye baslardi. Bu yuzden acik ve dar bir
-// isaret kullanilir: admin-audience token (actorType === 'admin') + bilinen
-// personel rolu. Musteriye admin-audience token verilmez.
-const VARIANT_ADMIN_ROLES = ['super_admin', 'owner', 'admin', 'member', 'viewer'];
-
-function isAdminManagementRequest(req) {
-  const auth = req && req.auth;
-  return !!auth
-    && auth.actorType === 'admin'
-    && VARIANT_ADMIN_ROLES.includes(auth.role);
-}
-
-function normalizeProductIds(ids) {
-  const uniqueIds = [...new Set((Array.isArray(ids) ? ids : []).map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))];
-  return uniqueIds.slice(0, 200);
-}
-
-function normalizeStockUpdates(rawUpdates) {
-  const updates = Array.isArray(rawUpdates) ? rawUpdates : [];
-  const seen = new Set();
-
-  return updates.map((raw) => {
-    const productId = Number(raw.product_id || raw.productId || raw.id || 0);
-    const variantId = Number(raw.variant_id || raw.variantId || 0) || null;
-    const stock = Number(raw.stock);
-    if (!Number.isInteger(productId) || productId < 1 || !Number.isFinite(stock) || stock < 0) return null;
-    if (variantId != null && (!Number.isInteger(variantId) || variantId < 1)) return null;
-
-    const key = `${productId}:${variantId || ''}`;
-    if (seen.has(key)) return null;
-    seen.add(key);
-    return {
-      product_id: productId,
-      variant_id: variantId,
-      stock: Math.floor(stock),
-    };
-  }).filter(Boolean).slice(0, 200);
-}
-
-function safePaging(limit, offset, defaultLimit = 50) {
-  return {
-    limit: Math.min(Math.max(Number(limit) || defaultLimit, 1), 200),
-    offset: Math.max(Number(offset) || 0, 0),
-  };
-}
-
-function productParams(body, options = {}) {
-  const price = Number(body.price);
-  const salePrice = body.sale_price == null || body.sale_price === '' ? null : Number(body.sale_price);
-  const variants = normalizeVariants(body.variants);
-  const stock = variants.length
-    ? variants.reduce((sum, variant) => sum + variant.stock, 0)
-    : Number(body.stock || 0);
-  const status = PRODUCT_STATUSES.includes(body.status) ? body.status : 'draft';
-
-  if (!String(body.name || '').trim() || !Number.isFinite(price) || price <= 0) {
-    throw Object.assign(new Error('Urun adi ve gecerli fiyat zorunlu'), { status: 400 });
-  }
-  if (Number.isFinite(salePrice) && salePrice > price) {
-    throw Object.assign(new Error('Indirimli fiyat normal fiyattan yuksek olamaz'), { status: 400 });
-  }
-
-  return [
-    String(body.name).trim().slice(0, 200),
-    body.category_id ? Number(body.category_id) : null,
-    price,
-    Number.isFinite(salePrice) ? salePrice : null,
-    Number.isFinite(stock) ? Math.max(0, Math.floor(stock)) : 0,
-    status,
-    JSON.stringify(Array.isArray(body.colors) ? body.colors.slice(0, 20) : []),
-    JSON.stringify(Array.isArray(body.sizes) ? body.sizes.slice(0, 30) : []),
-    JSON.stringify(Array.isArray(body.images) ? body.images.slice(0, 20) : []),
-    JSON.stringify(body.details && typeof body.details === 'object' ? body.details : {}),
-    String(body.tags || '').slice(0, 500),
-    String(body.description || '').slice(0, 5000),
-    String(body.product_story || '').slice(0, 5000),
-    options.preserveMissingEmoji && !Object.prototype.hasOwnProperty.call(body, 'emoji')
-      ? null
-      : String(body.emoji || '').slice(0, 16),
-    Boolean(body.featured_in_category),
-  ];
-}
-
-function normalizeText(value, limit = 120) {
-  return String(value || '').trim().slice(0, limit);
-}
-
-function normalizeVariants(rawVariants) {
-  if (!Array.isArray(rawVariants)) return [];
-
-  const seen = new Set();
-  const variants = [];
-  for (const rawVariant of rawVariants.slice(0, 300)) {
-    const color = normalizeText(rawVariant.color || rawVariant.selected_color || '', 80);
-    const size = normalizeText(rawVariant.size || rawVariant.selected_size || '', 80);
-    const sku = normalizeText(rawVariant.sku || '', 120);
-    const stock = Number(rawVariant.stock || 0);
-    const status = VARIANT_STATUSES.includes(rawVariant.status) ? rawVariant.status : 'active';
-    if (!color && !size) continue;
-    if (!Number.isFinite(stock) || stock < 0) continue;
-
-    const key = `${color.toLowerCase()}::${size.toLowerCase()}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    variants.push({
-      color,
-      size,
-      sku,
-      stock: Math.floor(stock),
-      status: Math.floor(stock) <= 0 ? 'out' : status,
-    });
-  }
-
-  return variants;
-}
-
-async function assertCategoryScope(client, organizationId, categoryId) {
-  if (categoryId == null) return;
-  if (!Number.isInteger(categoryId) || categoryId < 1) {
-    throw Object.assign(new Error('Kategori gecersiz'), { status: 400 });
-  }
-
-  const categoryResult = await client.query(
-    'select id from categories where id = $1 and organization_id = $2 limit 1',
-    [categoryId, organizationId]
-  );
-
-  if (!categoryResult.rows[0]) {
-    throw Object.assign(new Error('Kategori bulunamadi'), { status: 400 });
-  }
-}
-
-// includeInactiveVariants: yalnizca admin (authenticated) yanitlari icin true.
-// Admin pasif (kaldirilmis) varyantlari `is_active` bilgisiyle gorur; public
-// katalog/detay yalnizca aktif varyantlari doner (checkout guvenligi korunur).
-// Filtre koru koru ortak degil, cagirana gore parametreyle uygulanir.
-function productSelect(whereClause, { includeInactiveVariants = false } = {}) {
-  const activeVariantFilter = includeInactiveVariants ? '' : '\n          and pv.is_active';
-  const isActiveField = includeInactiveVariants ? ",\n            'is_active', pv.is_active" : '';
-  return `select
-    p.id,
-    p.name,
-    p.category_id,
-    c.name as category_name,
-    p.price,
-    p.sale_price,
-    p.stock,
-    p.status,
-    p.colors,
-    p.sizes,
-    p.images,
-    p.details,
-    p.tags,
-    p.description,
-    p.product_story,
-    p.featured_in_category,
-    p.emoji,
-    p.created_at,
-    p.updated_at,
-    coalesce(
-      (
-        select jsonb_agg(
-          jsonb_build_object(
-            'id', pv.id,
-            'product_id', pv.product_id,
-            'color', pv.color,
-            'size', pv.size,
-            'sku', pv.sku,
-            'stock', pv.stock,
-            'status', pv.status${isActiveField}
-          )
-          order by pv.color, pv.size, pv.id
-        )
-        from product_variants pv
-        where pv.product_id = p.id and pv.organization_id = p.organization_id${activeVariantFilter}
-      ),
-      '[]'::jsonb
-    ) as variants
-   from products p
-   left join categories c on c.id = p.category_id and c.organization_id = p.organization_id
-   where ${whereClause}`;
-}
-
-// fetchProduct yalnizca admin create/update route'larindan cagrilir; bu yuzden
-// pasif varyantlar da (is_active ile) dondurulur.
-async function fetchProduct(client, productId, organizationId) {
-  const result = await client.query(
-    `${productSelect('p.id = $1 and p.organization_id = $2', { includeInactiveVariants: true })}
-     limit 1`,
-    [productId, organizationId]
-  );
-
-  return result.rows[0] || null;
-}
+const {
+  PRODUCT_STATUSES,
+  normalizeProductIds,
+  normalizeStockUpdates,
+  normalizeVariants,
+  productParams,
+} = require('../modules/catalog/validation');
+const { isAdminManagementRequest } = require('../modules/catalog/policy');
+const { assertCategoryScope, productSelect, fetchProduct } = require('../modules/catalog/repository');
+const { synchronizeProductRelations } = require('../modules/catalog/service');
+const { listProducts, getProduct } = require('../modules/catalog/controller');
 
 /**
  * @swagger
@@ -307,86 +118,44 @@ async function fetchProduct(client, productId, organizationId) {
  *       403:
  *         $ref: '#/components/responses/Forbidden'
  */
-router.get('/', async (req, res, next) => {
-  try {
-    const organization = await resolveOrganization(req, db, { allowPublic: !req.auth });
-    const { q = '', category_id, status, featured_in_category, limit = 50, offset = 0 } = req.query;
-    const paging = safePaging(limit, offset);
-    const params = [organization.id, `%${String(q).slice(0, 120)}%`];
-    const filters = ['p.organization_id = $1', 'p.name ilike $2'];
+router.get('/', listProducts);
 
-    if (category_id) {
-      const categoryId = Number(category_id);
-      if (!Number.isInteger(categoryId) || categoryId < 1) return res.status(400).json({ error: 'Kategori gecersiz' });
-      params.push(categoryId);
-      filters.push(`p.category_id = $${params.length}`);
-    }
-
-    if (featured_in_category != null && featured_in_category !== '') {
-      const truthy = ['1', 'true', 'yes', 'on'].includes(String(featured_in_category).toLowerCase());
-      filters.push(`p.featured_in_category = ${truthy ? 'true' : 'false'}`);
-    }
-
-    if (status) {
-      if (!PRODUCT_STATUSES.includes(status)) return res.status(400).json({ error: 'Durum gecersiz' });
-      params.push(status);
-      filters.push(`p.status = $${params.length}`);
-    } else if (!req.auth) {
-      filters.push("p.status in ('active', 'out')");
-    }
-
-    params.push(paging.limit, paging.offset);
-
-    const result = await db.query(
-      `${productSelect(filters.join(' and '), { includeInactiveVariants: isAdminManagementRequest(req) })}
-       order by p.created_at desc
-       limit $${params.length - 1} offset $${params.length}`,
-      params
-    );
-
-    res.json(result.rows);
-  } catch (err) {
-    next(err);
-  }
-});
-
-router.get('/:id', async (req, res, next) => {
-  try {
-    const organization = await resolveOrganization(req, db, { allowPublic: !req.auth });
-    const publicStatusFilter = req.auth ? '' : " and p.status in ('active', 'out')";
-    const result = await db.query(
-      `${productSelect(`p.id = $1 and p.organization_id = $2${publicStatusFilter}`, { includeInactiveVariants: isAdminManagementRequest(req) })}`,
-      [req.params.id, organization.id]
-    );
-
-    if (!result.rows[0]) {
-      return res.status(404).json({ error: 'Urun bulunamadi' });
-    }
-    res.json(result.rows[0]);
-  } catch (err) {
-    next(err);
-  }
-});
+router.get('/:id', getProduct);
 
 router.post('/', requireAuth, requireRole(['super_admin', 'owner', 'admin']), async (req, res, next) => {
   const client = await db.pool.connect();
 
   try {
     const organization = await resolveOrganization(req, client);
-    await assertPlanCapacity(client, organization.id, 'products');
     const variants = normalizeVariants(req.body.variants);
     const params = productParams(req.body);
+    const requestedStock = params[4];
+    const canonicalParams = [...params.slice(0, 4), ...params.slice(5)];
 
     await client.query('begin');
+    await db.setTenantContext(client, organization.id);
+    await assertPlanCapacity(client, organization.id, 'products');
     await assertCategoryScope(client, organization.id, params[1]);
     const result = await client.query(
       `insert into products
        (organization_id, name, category_id, price, sale_price, stock, status, colors, sizes, images, details, tags, description, product_story, emoji, featured_in_category)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+       values ($1,$2,$3,$4,$5,0,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
        returning *`,
-      [organization.id, ...params]
+      [organization.id, ...canonicalParams]
     );
-    await syncProductVariants(client, organization.id, result.rows[0].id, variants);
+    await synchronizeProductRelations(client, {
+      organizationId: organization.id,
+      productId: result.rows[0].id,
+      variants,
+      defaultStock: requestedStock,
+      productStatus: params[5],
+      autoGenerateSku: req.body.auto_generate_sku === true,
+      tenantPrefix: organization.slug,
+      productName: params[0],
+      actorId: req.auth?.sub || req.auth?.userId || null,
+      images: JSON.parse(params[8]),
+      altText: params[0],
+    });
     const product = await fetchProduct(client, result.rows[0].id, organization.id);
 
     await auditLog(req, {
@@ -420,6 +189,7 @@ router.post('/bulk', requireAuth, requireRole(['super_admin', 'owner', 'admin'])
     }
 
     await client.query('begin');
+    await db.setTenantContext(client, organization.id);
     const oldResult = await client.query(
       'select id, name, status, category_id from products where organization_id = $1 and id = any($2::bigint[]) order by id',
       [organization.id, ids]
@@ -467,6 +237,15 @@ router.post('/bulk', requireAuth, requireRole(['super_admin', 'owner', 'admin'])
          returning id, name, status, category_id`,
         [organization.id, ids]
       );
+      for (const product of result.rows) {
+        await syncMediaReferences(client, {
+          organizationId: organization.id,
+          resourceType: 'product',
+          resourceId: product.id,
+          fieldName: 'images',
+          values: [],
+        });
+      }
     }
 
     await auditLog(req, {
@@ -506,8 +285,7 @@ router.patch('/bulk-stock', requireAuth, requireRole(['super_admin', 'owner', 'a
     if (!updates.length) return res.status(400).json({ error: 'Gecerli stok guncellemesi zorunlu' });
 
     await client.query('begin');
-    const productUpdates = updates.filter((item) => !item.variant_id);
-    const variantUpdates = updates.filter((item) => item.variant_id);
+    await db.setTenantContext(client, organization.id);
     const oldProducts = await client.query(
       `select id, name, stock, status
        from products
@@ -516,56 +294,20 @@ router.patch('/bulk-stock', requireAuth, requireRole(['super_admin', 'owner', 'a
       [organization.id, [...new Set(updates.map((item) => item.product_id))]]
     );
 
-    let productResult = { rows: [] };
-    if (productUpdates.length) {
-      productResult = await client.query(
-        `with requested as (
-           select product_id, stock
-           from jsonb_to_recordset($1::jsonb) as item(product_id bigint, stock int)
-         )
-         update products p
-         set stock = requested.stock,
-             status = case
-               when requested.stock <= 0 then 'out'
-               when p.status = 'out' and requested.stock > 0 then 'active'
-               else p.status
-             end,
-             updated_at = now()
-         from requested
-         where p.organization_id = $2 and p.id = requested.product_id
-         returning p.id, p.name, p.stock, p.status`,
-        [JSON.stringify(productUpdates), organization.id]
-      );
-    }
-
-    let variantResult = { rows: [] };
-    if (variantUpdates.length) {
-      variantResult = await client.query(
-        `with requested as (
-           select product_id, variant_id, stock
-           from jsonb_to_recordset($1::jsonb) as item(product_id bigint, variant_id bigint, stock int)
-         )
-         update product_variants pv
-         set stock = requested.stock,
-             status = case
-               when requested.stock <= 0 then 'out'
-               when pv.status = 'out' and requested.stock > 0 then 'active'
-               else pv.status
-             end,
-             updated_at = now()
-         from requested
-         where pv.organization_id = $2
-           and pv.product_id = requested.product_id
-           and pv.id = requested.variant_id
-         returning pv.id, pv.product_id, pv.color, pv.size, pv.stock, pv.status`,
-        [JSON.stringify(variantUpdates), organization.id]
-      );
-      await syncProductStock(client, variantResult.rows.map((item) => item.product_id), {
-        organizationId: organization.id,
-      });
-    }
-
-    const affectedCount = productResult.rows.length + variantResult.rows.length;
+    const inventoryResult = await setInventoryBalances(client, updates, {
+      organizationId: organization.id,
+      reason: 'Bulk inventory adjustment',
+      actorType: 'admin',
+      actorId: req.auth?.sub || req.auth?.userId || null,
+    });
+    const variants = inventoryResult.results.map((entry) => entry.variant).filter(Boolean);
+    const affectedCount = inventoryResult.results.length;
+    // A23: notify back-in-stock subscribers for every variant this adjustment brought
+    // from 0 -> positive availability, atomically within this stock transaction.
+    await notifications.notifyRestockTransitions(client, {
+      organizationId: organization.id,
+      results: inventoryResult.results,
+    });
     await auditLog(req, {
       action: 'BULK_STOCK',
       resourceType: 'product',
@@ -573,8 +315,8 @@ router.patch('/bulk-stock', requireAuth, requireRole(['super_admin', 'owner', 'a
       newValue: {
         requestedCount: updates.length,
         affectedCount,
-        products: productResult.rows,
-        variants: variantResult.rows,
+        products: inventoryResult.products,
+        variants,
       },
     });
     await client.query('commit');
@@ -582,8 +324,8 @@ router.patch('/bulk-stock', requireAuth, requireRole(['super_admin', 'owner', 'a
     res.json({
       ok: true,
       affectedCount,
-      products: productResult.rows,
-      variants: variantResult.rows,
+      products: inventoryResult.products,
+      variants,
     });
   } catch (err) {
     await client.query('rollback');
@@ -662,8 +404,11 @@ router.put('/:id', requireAuth, requireRole(['super_admin', 'owner', 'admin']), 
     const organization = await resolveOrganization(req, client);
     const variants = normalizeVariants(req.body.variants);
     const params = productParams(req.body, { preserveMissingEmoji: true });
+    const requestedStock = params[4];
+    const canonicalParams = [...params.slice(0, 4), ...params.slice(5)];
 
     await client.query('begin');
+    await db.setTenantContext(client, organization.id);
     await assertCategoryScope(client, organization.id, params[1]);
     const oldProduct = await fetchProduct(client, req.params.id, organization.id);
     const oldResult = await client.query(
@@ -672,21 +417,44 @@ router.put('/:id', requireAuth, requireRole(['super_admin', 'owner', 'admin']), 
     );
     const result = await client.query(
       `update products set
-        name=$1, category_id=$2, price=$3, sale_price=$4, stock=$5, status=$6,
-        colors=$7, sizes=$8, images=$9, details=$10, tags=$11, description=$12, product_story=$13, emoji=coalesce($14, emoji),
-        featured_in_category=$15,
+        name=$1, category_id=$2, price=$3, sale_price=$4, status=$5,
+        colors=$6, sizes=$7, images=$8, details=$9, tags=$10, description=$11, product_story=$12, emoji=coalesce($13, emoji),
+        featured_in_category=$14,
         updated_at=now()
-       where id=$16 and organization_id=$17
-       returning *`,
-      [...params, req.params.id, organization.id]
+       where id=$15 and organization_id=$16
+      returning *`,
+      [...canonicalParams, req.params.id, organization.id]
     );
-
     if (!result.rows[0]) {
       await client.query('rollback');
       return res.status(404).json({ error: 'Urun bulunamadi' });
     }
-    await syncProductVariants(client, organization.id, req.params.id, variants);
+    await synchronizeProductRelations(client, {
+      organizationId: organization.id,
+      productId: req.params.id,
+      variants,
+      defaultStock: requestedStock,
+      productStatus: params[5],
+      autoGenerateSku: req.body.auto_generate_sku === true,
+      tenantPrefix: organization.slug,
+      productName: params[0],
+      actorId: req.auth?.sub || req.auth?.userId || null,
+      images: JSON.parse(params[8]),
+      altText: params[0],
+    });
     const product = await fetchProduct(client, req.params.id, organization.id);
+    // A23: a genuine drop in the server-authoritative effective price notifies price
+    // alarm + wishlist subscribers, atomically within this update transaction.
+    const previous = oldResult.rows[0];
+    if (previous) {
+      const oldEffective = Number(previous.sale_price ?? previous.price);
+      const newEffective = Number(result.rows[0].sale_price ?? result.rows[0].price);
+      if (Number.isFinite(newEffective) && newEffective < oldEffective) {
+        await notifications.triggerEffectivePriceChange(client, {
+          organizationId: organization.id, productId: Number(req.params.id), newPrice: newEffective,
+        });
+      }
+    }
     await auditLog(req, {
       action: 'UPDATE',
       resourceType: 'product',
@@ -742,6 +510,7 @@ router.put('/category/:categoryId/featured', requireAuth, requireRole(['super_ad
     const featuredIds = normalizeProductIds(req.body.product_ids || req.body.productIds || req.body.ids);
 
     await client.query('begin');
+    await db.setTenantContext(client, organization.id);
     await assertCategoryScope(client, organization.id, categoryId);
 
     const previous = await client.query(
@@ -797,6 +566,13 @@ router.delete('/:id', requireAuth, requireRole(['super_admin', 'owner']), async 
       'delete from products where id = $1 and organization_id = $2',
       [req.params.id, organization.id]
     );
+    await syncMediaReferences(db, {
+      organizationId: organization.id,
+      resourceType: 'product',
+      resourceId: req.params.id,
+      fieldName: 'images',
+      values: [],
+    });
     await auditLog(req, {
       action: 'DELETE',
       resourceType: 'product',

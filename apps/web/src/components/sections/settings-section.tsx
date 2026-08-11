@@ -13,6 +13,7 @@ import {
   updateOrganizationSettings,
 } from "@/lib/api";
 import { MetricGrid } from "@/components/page-kit";
+import { queryKeys } from "@/lib/query-keys";
 import {
   ActivityPanel,
   DataCell,
@@ -58,8 +59,8 @@ export function SettingsSection({
         tone: "success",
       });
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["summary"] }),
-        queryClient.invalidateQueries({ queryKey: ["me"] }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.summary.all }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.session.all }),
       ]);
     },
   });
@@ -73,7 +74,7 @@ export function SettingsSection({
         tone: "success",
       });
       setEmailFormKey((k) => k + 1);
-      void queryClient.invalidateQueries({ queryKey: ["summary"] });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.summary.all });
     },
   });
 
@@ -87,8 +88,8 @@ export function SettingsSection({
         tone: "success",
       });
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["summary"] }),
-        queryClient.invalidateQueries({ queryKey: ["me"] }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.summary.all }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.session.all }),
       ]);
     },
   });
@@ -182,6 +183,7 @@ export function SettingsSection({
       <div className="grid gap-5 xl:grid-cols-[1.2fr_0.8fr]">
         <Panel title="Mağaza özeti" description="Plan, abonelik ve erişim">
           <DataGrid
+            caption="Mağaza özeti"
             columns={["Alan", "Değer", "Durum", "Güncelleme"]}
             emptyMessage="Mağaza bilgisi bulunamadı."
             rows={tableRows}
@@ -316,7 +318,7 @@ export function SettingsSection({
             <div className="rounded-lg border border-line bg-zinc-50 p-4">
               <div className="mb-4">
                 <p className="text-sm font-semibold text-ink">İletişim ve Ödeme Bilgileri</p>
-                <p className="mt-1 text-xs text-zinc-500">
+                <p className="mt-1 text-xs text-zinc-600">
                   Müşteriler vitrin WhatsApp butonundan bu numarayla iletişime geçer; IBAN bilgisi havale/EFT ödeme adımında gösterilir.
                 </p>
               </div>
@@ -380,7 +382,7 @@ export function SettingsSection({
             <div className="rounded-lg border border-line bg-zinc-50 p-4">
               <div className="mb-4">
                 <p className="text-sm font-semibold text-ink">Alışveriş Notları</p>
-                <p className="mt-1 text-xs text-zinc-500">
+                <p className="mt-1 text-xs text-zinc-600">
                   Ürün detayındaki hızlı bilgilendirme kartları bu ayarlardan oluşturulur.
                 </p>
               </div>
@@ -760,7 +762,7 @@ function UserEmailChangeForm() {
 function InfoBox({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-lg border border-line bg-white px-4 py-3">
-      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">{label}</p>
+      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-600">{label}</p>
       <p className="mt-2 break-all text-sm font-semibold text-ink">{value}</p>
     </div>
   );

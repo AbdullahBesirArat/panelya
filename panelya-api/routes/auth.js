@@ -8,10 +8,15 @@ const {
   buildSessionPayload,
   createAdminAccessToken,
   createAppAccessToken,
+  findRefreshTokenRow,
   getRefreshSession,
   issueRefreshToken,
   revokeRefreshToken,
 } = require('../services/authTokens');
+const sessionService = require('../modules/security/sessions');
+const securityEvents = require('../modules/security/events');
+const mfa = require('../modules/security/mfa');
+const webauthn = require('../modules/security/webauthn');
 const crypto = require('crypto');
 const {
   sendWelcomeEmail,
@@ -22,6 +27,11 @@ const { slugify } = require('../services/tenant');
 const { logger } = require('../services/logger');
 
 const EMAIL_VERIFICATION_TTL_HOURS = Math.max(1, Number(process.env.EMAIL_VERIFICATION_TTL_HOURS || 24));
+// The platform console has no refresh token, so its session should not outlive a working
+// day and linger in the device list as something the admin can neither use nor recognise.
+const ADMIN_SESSION_TTL_DAYS = Math.max(
+  0.02, Number(process.env.ADMIN_SESSION_TTL_HOURS || 12) / 24
+);
 
 function sha256(value) {
   return crypto.createHash('sha256').update(String(value || '')).digest('hex');
@@ -142,23 +152,40 @@ function pickMembership(memberships, organizationSlug) {
   return memberships.find((membership) => membership.organization.slug === organizationSlug) || null;
 }
 
-async function issueAppSession(client, req, user, memberships, currentMembership) {
+/**
+ * A30: every app session is now backed by an auth_sessions row.
+ *
+ * `existingSession` is passed on refresh so rotation CONTINUES the device session instead
+ * of creating a second one — otherwise every fifteen minutes would add a row to the user's
+ * device list and "log out my other devices" would log out the user's own past selves.
+ */
+async function issueAppSession(client, req, user, memberships, currentMembership, { existingSession = null } = {}) {
+  const session = existingSession || await sessionService.createSession(client, {
+    actorType: 'app',
+    ownerId: user.id,
+    req,
+  });
   const accessToken = createAppAccessToken({
     user,
     membership: currentMembership,
+    sessionId: session.id,
   });
   const refreshToken = await issueRefreshToken(client, {
     userId: user.id,
     req,
+    sessionId: session.id,
   });
 
-  return buildSessionPayload({
-    accessToken,
-    refreshToken,
-    user,
-    memberships,
-    currentMembership,
-  });
+  return {
+    session,
+    payload: buildSessionPayload({
+      accessToken,
+      refreshToken,
+      user,
+      memberships,
+      currentMembership,
+    }),
+  };
 }
 
 function legacyAdminDisabled(res) {
@@ -170,6 +197,137 @@ function legacyAdminDisabled(res) {
 
 router.post('/login', loginLimiter, async (req, res) => legacyAdminDisabled(res));
 router.post('/admin/login', loginLimiter, async (req, res) => legacyAdminDisabled(res));
+
+// Discoverable passkey login. The options intentionally contain no allowCredentials list:
+// the authenticator chooses a resident credential, and the credential id maps to the
+// account on the server. No client-supplied user id or email participates in that decision.
+router.post('/passkey/options', loginLimiter, async (req, res, next) => {
+  const client = await db.getSystemPool().connect();
+  try {
+    const options = await webauthn.authenticationOptions();
+    const result = await client.query(
+      `insert into webauthn_challenges (purpose, challenge, expires_at)
+       values ('authentication',$1, now() + make_interval(secs => $2))
+       returning id`,
+      [options.challenge, webauthn.CHALLENGE_TTL_SECONDS]
+    );
+    res.set('Cache-Control', 'no-store');
+    res.set('Pragma', 'no-cache');
+    res.json({ options, challengeId: result.rows[0].id });
+  } catch (error) { next(error); } finally { client.release(); }
+});
+
+router.post('/passkey/verify', loginLimiter, async (req, res, next) => {
+  const response = req.body?.response;
+  const challengeId = String(req.body?.challengeId || '').trim();
+  if (!response || typeof response !== 'object' || !challengeId) {
+    return res.status(400).json({ error: 'Passkey yaniti eksik', code: 'WEBAUTHN_RESPONSE_REQUIRED' });
+  }
+
+  const client = await db.getSystemPool().connect();
+  try {
+    await client.query('begin');
+    const challenge = await client.query(
+      `update webauthn_challenges set used_at = now()
+        where id = $1 and purpose = 'authentication'
+          and actor_type is null and user_id is null and admin_id is null
+          and session_id is null and used_at is null and expires_at > now()
+       returning challenge`,
+      [challengeId]
+    );
+    if (!challenge.rows[0]) {
+      throw webauthn.webauthnError(
+        'Passkey oturumu gecersiz veya suresi dolmus', 'WEBAUTHN_CHALLENGE_INVALID', 400
+      );
+    }
+
+    const credential = await client.query(
+      `select * from webauthn_credentials
+        where credential_id = $1 and revoked_at is null limit 1 for update`,
+      [String(response.id || '')]
+    );
+    const stored = credential.rows[0];
+    if (!stored) {
+      throw webauthn.webauthnError('Passkey bulunamadi', 'WEBAUTHN_NOT_FOUND', 404);
+    }
+    const ownerId = stored.actor_type === 'admin' ? stored.admin_id : stored.user_id;
+    const suppliedHandle = response.response?.userHandle;
+    if (suppliedHandle) {
+      const parsed = webauthn.parseUserHandle(suppliedHandle);
+      if (!parsed || parsed.actorType !== stored.actor_type || parsed.ownerId !== String(ownerId)) {
+        throw webauthn.webauthnError('Passkey hesap eslesmesi gecersiz', 'WEBAUTHN_USER_HANDLE_INVALID', 400);
+      }
+    }
+
+    const verified = await webauthn.verifyAuthentication({
+      response,
+      expectedChallenge: challenge.rows[0].challenge,
+      credential: stored,
+    });
+    await client.query(
+      `update webauthn_credentials
+          set counter = $2, last_used_at = now(), backed_up = $3,
+              device_type = coalesce($4, device_type)
+        where id = $1`,
+      [stored.id, verified.newCounter, verified.backedUp, verified.deviceType]
+    );
+
+    const session = await sessionService.createSession(client, {
+      actorType: stored.actor_type,
+      ownerId,
+      req,
+      mfaLevel: 'mfa',
+      createdAuthMethod: 'webauthn',
+      ttlDays: stored.actor_type === 'admin' ? ADMIN_SESSION_TTL_DAYS : undefined,
+    });
+    await sessionService.markMfaVerified(client, { sessionId: session.id, method: 'webauthn' });
+
+    let payload;
+    if (stored.actor_type === 'admin') {
+      const adminResult = await client.query(
+        'select id, username, role from admins where id = $1 and role = $2 limit 1',
+        [ownerId, 'super_admin']
+      );
+      const admin = adminResult.rows[0];
+      if (!admin) throw webauthn.webauthnError('Hesap kullanilamiyor', 'WEBAUTHN_ACCOUNT_UNAVAILABLE', 403);
+      payload = {
+        actorType: 'admin',
+        accessToken: createAdminAccessToken(admin, { sessionId: session.id }),
+        role: admin.role,
+        admin,
+      };
+    } else {
+      const userResult = await client.query(
+        `select id, name, email, email_verified_at, created_at
+           from app_users where id = $1 limit 1`,
+        [ownerId]
+      );
+      const user = userResult.rows[0];
+      if (!user) throw webauthn.webauthnError('Hesap kullanilamiyor', 'WEBAUTHN_ACCOUNT_UNAVAILABLE', 403);
+      const memberships = await appMemberships(client, ownerId);
+      const currentMembership = pickMembership(memberships, req.body?.organizationSlug);
+      if (!currentMembership) throw webauthn.webauthnError('Aktif workspace bulunamadi', 'WEBAUTHN_ACCOUNT_UNAVAILABLE', 403);
+      const issued = await issueAppSession(client, req, user, memberships, currentMembership, {
+        existingSession: session,
+      });
+      payload = issued.payload;
+    }
+    await client.query('commit');
+    req.auth = { actorType: stored.actor_type, sub: String(ownerId) };
+    await securityEvents.record(req, {
+      action: securityEvents.EVENTS.NEW_DEVICE,
+      resourceId: session.id,
+      payload: { device: session.user_agent_summary, auth_method: 'webauthn' },
+    });
+    res.set('Cache-Control', 'no-store');
+    return res.json(payload);
+  } catch (error) {
+    await client.query('rollback').catch(() => {});
+    return next(error);
+  } finally {
+    client.release();
+  }
+});
 
 router.post('/admin/session/login', loginLimiter, async (req, res, next) => {
   try {
@@ -226,9 +384,37 @@ router.post('/admin/session/login', loginLimiter, async (req, res, next) => {
       actorAdminId: admin.id,
     });
 
+    // A30: the platform console gets a real, revocable session too. Its assurance starts at
+    // `password`; because super-admin MFA is mandatory, the session exists but cannot reach
+    // any platform route until a factor is enrolled and proved. That is the bootstrap: the
+    // admin is not locked out, they are routed to enrolment.
+    const client = await db.pool.connect();
+    let session;
+    let knownDevices = [];
+    try {
+      knownDevices = await sessionService.knownDeviceHashes(client, {
+        actorType: 'admin', ownerId: admin.id,
+      });
+      session = await sessionService.createSession(client, {
+        actorType: 'admin',
+        ownerId: admin.id,
+        req,
+        ttlDays: ADMIN_SESSION_TTL_DAYS,
+      });
+    } finally {
+      client.release();
+    }
+    if (session.user_agent_hash && !knownDevices.includes(session.user_agent_hash)) {
+      await securityEvents.record(req, {
+        action: securityEvents.EVENTS.NEW_DEVICE,
+        resourceId: session.id,
+        payload: { device: session.user_agent_summary, ip_prefix: session.ip_prefix },
+      });
+    }
+
     res.json({
       actorType: 'admin',
-      accessToken: createAdminAccessToken(admin),
+      accessToken: createAdminAccessToken(admin, { sessionId: session.id }),
       role: admin.role,
       admin: {
         id: admin.id,
@@ -350,9 +536,21 @@ router.post('/register', registerLimiter, async (req, res, next) => {
       [organizationResult.rows[0].id, organizationPlan]
     );
 
+    // A28: every store starts with a published theme, so the storefront always has a
+    // resolvable appearance and the editor always has something to base a draft on.
+    // theme_versions is FORCE RLS and this transaction runs as the runtime role, which is
+    // not an RLS-bypass member. The organization only exists as of the statement above, so
+    // the tenant context is established here, on this same client, before the theme write.
+    // set_config is transaction-local (A08 primitive), so it dies with this transaction and
+    // cannot leak to the next tenant that borrows this pooled connection.
+    await db.setTenantContext(client, organizationResult.rows[0].id);
+    await require('../modules/themes/service').ensurePublishedTheme(client, {
+      organizationId: organizationResult.rows[0].id,
+    });
+
     const memberships = await appMemberships(client, userResult.rows[0].id);
     const currentMembership = pickMembership(memberships, organizationSlug);
-    const session = await issueAppSession(client, req, userResult.rows[0], memberships, currentMembership);
+    const { payload: session } = await issueAppSession(client, req, userResult.rows[0], memberships, currentMembership);
 
     req.auth = {
       userId: userResult.rows[0].id,
@@ -492,13 +690,27 @@ router.post('/session/login', loginLimiter, async (req, res, next) => {
       [user.id]
     );
 
-    const session = await issueAppSession(client, req, user, memberships, currentMembership);
+    // A new device is worth telling the user about, so the known-device set is read BEFORE
+    // this login adds itself to it.
+    const knownDevices = await sessionService.knownDeviceHashes(client, {
+      actorType: 'app', ownerId: user.id,
+    });
+    const { session, payload } = await issueAppSession(client, req, user, memberships, currentMembership);
     req.auth = {
       userId: user.id,
       organizationId: currentMembership.organization.id,
       organizationSlug: currentMembership.organization.slug,
       actorType: 'app',
     };
+    if (session.user_agent_hash && !knownDevices.includes(session.user_agent_hash)) {
+      await securityEvents.record(req, {
+        action: securityEvents.EVENTS.NEW_DEVICE,
+        resourceId: session.id,
+        organizationId: currentMembership.organization.id,
+        // Only the privacy-safe summary the session already holds.
+        payload: { device: session.user_agent_summary, ip_prefix: session.ip_prefix },
+      });
+    }
 
     await auditLog(req, {
       action: 'LOGIN',
@@ -511,7 +723,7 @@ router.post('/session/login', loginLimiter, async (req, res, next) => {
     });
 
     await client.query('commit');
-    res.json(session);
+    res.json(payload);
   } catch (err) {
     await client.query('rollback');
     next(err);
@@ -561,7 +773,31 @@ router.post('/session/refresh', async (req, res, next) => {
     await client.query('begin');
     const refreshSession = await getRefreshSession(client, refreshToken, { forUpdate: true });
     if (!refreshSession) {
-      await client.query('rollback');
+      // A30 replay detection. The token is not usable — but WHY matters: if the row exists
+      // and is already revoked, this is a second use of a token we rotated away, which
+      // means either a buggy client or a stolen copy. The only safe reading is the second,
+      // so the whole session family goes and the user re-authenticates.
+      const replayed = await findRefreshTokenRow(client, refreshToken);
+      if (replayed && replayed.session_id) {
+        const family = await client.query(
+          'select session_family_id, actor_type, user_id from auth_sessions where id = $1',
+          [replayed.session_id]
+        );
+        if (family.rows[0]) {
+          const revoked = await sessionService.revokeSessionFamily(client, {
+            sessionFamilyId: family.rows[0].session_family_id,
+            reason: 'refresh_reuse',
+          });
+          req.auth = { userId: family.rows[0].user_id, actorType: 'app' };
+          await securityEvents.record(req, {
+            action: securityEvents.EVENTS.REFRESH_REUSE,
+            resourceId: replayed.session_id,
+            payload: { revoked_sessions: revoked.length },
+            success: false,
+          });
+        }
+      }
+      await client.query('commit');
       return res.status(401).json({ error: 'Refresh token gecersiz' });
     }
 
@@ -583,9 +819,29 @@ router.post('/session/refresh', async (req, res, next) => {
     }
 
     await revokeRefreshToken(client, refreshToken);
-    const session = await issueAppSession(client, req, user, memberships, currentMembership);
+
+    // Rotation continues the SAME device session. A pre-A30 token has no session_id, so it
+    // gets one here rather than being rejected — that is how existing logins migrate
+    // without anybody being signed out.
+    let existingSession = null;
+    if (refreshSession.session_id) {
+      existingSession = await sessionService.loadActiveSession(client, {
+        sessionId: refreshSession.session_id,
+        actorType: 'app',
+        ownerId: user.id,
+      });
+      if (!existingSession) {
+        // The session was revoked while this token was still unexpired. Refreshing must not
+        // resurrect it, or "log out this device" would be undone by the device itself.
+        await client.query('commit');
+        return res.status(401).json({ error: 'Oturum sonlandirilmis', code: 'SESSION_REVOKED' });
+      }
+    }
+    const { payload } = await issueAppSession(client, req, user, memberships, currentMembership, {
+      existingSession,
+    });
     await client.query('commit');
-    res.json(session);
+    res.json(payload);
   } catch (err) {
     await client.query('rollback');
     next(err);
@@ -630,7 +886,18 @@ router.post('/session/logout', async (req, res, next) => {
 
     await client.query('begin');
     if (refreshToken) {
+      // A30: logging out must end the SESSION, not just the refresh token. Revoking only
+      // the token would leave the access token working until it expired, and the device
+      // still listed as active.
+      const row = await findRefreshTokenRow(client, refreshToken);
       await revokeRefreshToken(client, refreshToken);
+      if (row?.session_id) {
+        await client.query(
+          `update auth_sessions set revoked_at = now(), revoke_reason = 'logout', updated_at = now()
+            where id = $1 and revoked_at is null`,
+          [row.session_id]
+        );
+      }
     }
     await client.query('commit');
     res.json({ ok: true });
@@ -656,9 +923,12 @@ router.post('/session/switch-organization', requireAuth, requireActorType(['app'
       [req.auth.userId]
     );
     const user = userResult.rows[0];
+    // Switching workspace is not a new login: the same device session (and therefore the
+    // same assurance level and step-up recency) carries over.
     const accessToken = createAppAccessToken({
       user,
       membership: currentMembership,
+      sessionId: req.auth.sid || null,
     });
 
     res.json({

@@ -1,0 +1,12 @@
+drop trigger if exists trg_shipment_events_append_only on shipment_events;
+drop function if exists panelya_block_shipment_event_mutation();
+drop table if exists carrier_webhook_events;
+drop table if exists shipping_labels;
+drop table if exists shipment_events;
+drop table if exists shipment_items;
+drop table if exists shipments;
+drop table if exists product_shipping_attributes;
+drop table if exists shipping_rates;
+drop table if exists shipping_zone_rules;
+drop table if exists shipping_zones;
+drop table if exists shipping_profiles;

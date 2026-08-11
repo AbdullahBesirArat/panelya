@@ -3,6 +3,7 @@ const db = require('../db');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { auditLog } = require('../services/audit');
 const { resolveOrganization } = require('../services/tenant');
+const { syncMediaReferences } = require('../services/mediaAssets');
 
 const router = express.Router();
 const managerOnly = [requireAuth, requireRole(['super_admin', 'owner', 'admin'])];
@@ -132,6 +133,13 @@ router.post('/', ...managerOnly, async (req, res, next) => {
        returning *`,
       [organization.id, payload.tag, payload.title, payload.sub, payload.btn, payload.image_url, payload.active, payload.sort_order]
     );
+    await syncMediaReferences(db, {
+      organizationId: organization.id,
+      resourceType: 'slider_item',
+      resourceId: result.rows[0].id,
+      values: payload.image_url,
+      altText: payload.title,
+    });
     await auditLog(req, {
       action: 'CREATE',
       resourceType: 'slider',
@@ -203,6 +211,13 @@ router.put('/:id', ...managerOnly, async (req, res, next) => {
       [payload.tag, payload.title, payload.sub, payload.btn, payload.image_url, payload.active, payload.sort_order, req.params.id, organization.id]
     );
     if (!result.rows[0]) return res.status(404).json({ error: 'Slayt bulunamadi' });
+    await syncMediaReferences(db, {
+      organizationId: organization.id,
+      resourceType: 'slider_item',
+      resourceId: req.params.id,
+      values: payload.image_url,
+      altText: payload.title,
+    });
     await auditLog(req, {
       action: 'UPDATE',
       resourceType: 'slider',
@@ -227,6 +242,12 @@ router.delete('/:id', requireAuth, requireRole(['super_admin', 'owner']), async 
       'delete from slider_items where id = $1 and organization_id = $2',
       [req.params.id, organization.id]
     );
+    await syncMediaReferences(db, {
+      organizationId: organization.id,
+      resourceType: 'slider_item',
+      resourceId: req.params.id,
+      values: [],
+    });
     await auditLog(req, {
       action: 'DELETE',
       resourceType: 'slider',

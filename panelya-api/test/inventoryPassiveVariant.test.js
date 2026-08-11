@@ -1,53 +1,35 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 
-const { restoreStock, syncProductStock } = require('../services/inventory');
+const inventorySource = fs.readFileSync(path.join(__dirname, '..', 'services', 'inventory.js'), 'utf8');
 
-function recordingClient() {
-  const queries = [];
-  return {
-    queries,
-    async query(text, params) {
-      queries.push({ text, params });
-      return { rows: [] };
-    },
-    find(re) { return this.queries.find((q) => re.test(q.text)); },
-    all(re) { return this.queries.filter((q) => re.test(q.text)); },
-  };
-}
-
-test('6) pasif varyanta stok iadesi: variant UPDATE id ile yazar, is_active filtrelemez', async () => {
-  const client = recordingClient();
-
-  await restoreStock(client, [{ product_id: 7, variant_id: 5, quantity: 2 }], { organizationId: 'org-1' });
-
-  const variantUpdate = client.find(/update product_variants pv[\s\S]*stock = pv\.stock \+ requested\.quantity/);
-  assert.ok(variantUpdate, 'varyant stok iadesi calismali');
-  // Iade ilgili varyanta id uzerinden yazilir; pasif olsa bile yazilabilmeli.
-  assert.match(variantUpdate.text, /pv\.id = requested\.variant_id/);
-  assert.doesNotMatch(variantUpdate.text, /is_active/);
-  assert.match(variantUpdate.text, /pv\.organization_id = \$2/);
+test('inactive variants remain addressable for return and cancellation movements', () => {
+  const restoreSection = inventorySource.slice(
+    inventorySource.indexOf('async function restoreStock'),
+    inventorySource.indexOf('async function setInventoryBalance')
+  );
+  assert.match(restoreSection, /activeOnly: false/);
+  assert.match(restoreSection, /movementType: 'cancellation'/);
+  assert.match(restoreSection, /onHandDelta: item\.quantity/);
 });
 
-test('syncProductStock urun toplamina yalnizca aktif varyantlari katar', async () => {
-  const client = recordingClient();
-
-  await syncProductStock(client, [7], { organizationId: 'org-1' });
-
-  const aggregate = client.find(/sum\(stock\)::int as total_stock/);
-  assert.ok(aggregate, 'urun stok toplami hesaplanmali');
-  assert.match(aggregate.text, /is_active/);
-  assert.match(aggregate.text, /organization_id = \$2/);
+test('product stock is only a read model of active variant available balances', () => {
+  const syncSection = inventorySource.slice(
+    inventorySource.indexOf('async function syncProductStock'),
+    inventorySource.indexOf('async function lockVariant')
+  );
+  assert.match(syncSection, /sum\(v\.available\) filter \(where v\.is_active\)/);
+  assert.match(syncSection, /v\.organization_id/);
+  assert.match(syncSection, /set stock = totals\.available/);
 });
 
-test('7) variant_id NULL ise mevcut urun-seviyesi fallback bozulmaz', async () => {
-  const client = recordingClient();
-
-  await restoreStock(client, [{ product_id: 7, variant_id: null, quantity: 2 }], { organizationId: 'org-1' });
-
-  const productUpdate = client.find(/update products p[\s\S]*stock = p\.stock \+ requested\.quantity/);
-  assert.ok(productUpdate, 'urun seviyesi iade calismali');
-  assert.match(productUpdate.text, /p\.organization_id = \$2/);
-  // Varyant yolu tetiklenmemeli.
-  assert.equal(client.all(/update product_variants pv/).length, 0);
+test('variant-less items resolve through is_default instead of product stock fallback', () => {
+  const resolveSection = inventorySource.slice(
+    inventorySource.indexOf('async function resolveInventoryItems'),
+    inventorySource.indexOf('async function assertStockAvailable')
+  );
+  assert.match(resolveSection, /pv\.is_default/);
+  assert.doesNotMatch(resolveSection, /from products[^\n]*for update/);
 });

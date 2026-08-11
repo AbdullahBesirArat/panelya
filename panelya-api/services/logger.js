@@ -35,6 +35,9 @@ const logger = pino({
     env: process.env.NODE_ENV || 'development',
   },
   redact: {
+    // A25: phone/address are PII and must never reach logs. Our code does not log them,
+    // but these paths defend against accidental object logging (top level + one level
+    // deep, e.g. a serialized address/customer payload).
     paths: [
       'password',
       'passwordHash',
@@ -43,6 +46,46 @@ const logger = pino({
       'authorization',
       'headers.authorization',
       'req.headers.authorization',
+      'phone',
+      'recipient',
+      'address',
+      'address_line1',
+      'address_line2',
+      'neighborhood',
+      'postal_code',
+      'tckn',
+      '*.phone',
+      '*.recipient',
+      '*.address',
+      '*.address_line1',
+      '*.address_line2',
+      '*.neighborhood',
+      '*.postal_code',
+      '*.tckn',
+      // A29 integration secrets. None of these are logged by our code, but an accidental
+      // object log — a request body, a service result, an error with a `meta` — must not be
+      // the way an API key or a webhook signing secret reaches disk. The signature and the
+      // idempotency key are here too: the first is a credential-equivalent proof, the
+      // second is caller-chosen and may carry meaning we have no business retaining.
+      'secret',
+      'apiKey',
+      'api_key',
+      'signingSecret',
+      'signing_secret',
+      'ciphertext',
+      'signature',
+      'idempotencyKey',
+      'headers["x-panelya-signature"]',
+      'req.headers["x-panelya-signature"]',
+      'req.headers["idempotency-key"]',
+      '*.secret',
+      '*.apiKey',
+      '*.api_key',
+      '*.signingSecret',
+      '*.signing_secret',
+      '*.ciphertext',
+      '*.signature',
+      '*.idempotencyKey',
     ],
     censor: '[Redacted]',
   },

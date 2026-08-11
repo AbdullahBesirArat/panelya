@@ -112,6 +112,14 @@ function makeHarness({ event, order }) {
     staleMinutes: 10,
   };
 
+  const callbackToken = event?.payload?.token;
+  const tokenMatches = callbackToken
+    ? orders.filter((row) => row.payment_token === callbackToken)
+    : [];
+  if (tokenMatches.length === 1) {
+    deps.verifiedOrganizationId = tokenMatches[0].organization_id;
+  }
+
   return { calls, deps, event, order };
 }
 
@@ -169,11 +177,11 @@ test('resolveTerminalGuardedStatus terminal durumu geri almaz (out-of-order)', (
 test('claim SQL stale processing kurtarir; processed/taze processing haric', async () => {
   let captured;
   const client = { async query(text, params) { captured = { text, params }; return { rows: [] }; } };
-  const out = await claimPaymentCallbackEvent(client, 7, 15);
+  const out = await claimPaymentCallbackEvent(client, 7, 'org-1', 15);
   assert.equal(out, null);
   assert.match(captured.text, /processing_status in \('pending', 'failed'\)/);
-  assert.match(captured.text, /processing_status = 'processing' and updated_at < now\(\) - \(\$2 \|\| ' minutes'\)::interval/);
-  assert.deepEqual(captured.params, [7, '15']);
+  assert.match(captured.text, /processing_status = 'processing' and updated_at < now\(\) - \(\$3 \|\| ' minutes'\)::interval/);
+  assert.deepEqual(captured.params, [7, 'org-1', '15']);
 });
 
 test('iki worker ayni stale eventi claim etmeye calisirsa yalniz biri basarili olur', async () => {
@@ -188,8 +196,8 @@ test('iki worker ayni stale eventi claim etmeye calisirsa yalniz biri basarili o
       return { rows: [] };
     },
   };
-  const a = await claimPaymentCallbackEvent(client, 1, 10);
-  const b = await claimPaymentCallbackEvent(client, 1, 10);
+  const a = await claimPaymentCallbackEvent(client, 1, 'org-1', 10);
+  const b = await claimPaymentCallbackEvent(client, 1, 'org-1', 10);
   assert.ok(a, 'ilk worker claim eder');
   assert.equal(b, null, 'ikinci worker claim edemez');
 });
@@ -205,7 +213,7 @@ test('taze processing event claim edilmez', async () => {
     },
   };
 
-  const out = await claimPaymentCallbackEvent(client, 1, 10);
+  const out = await claimPaymentCallbackEvent(client, 1, 'org-1', 10);
   assert.equal(out, null);
 });
 
@@ -220,7 +228,7 @@ test('stale processing event tekrar claim edilir', async () => {
     },
   };
 
-  const out = await claimPaymentCallbackEvent(client, 1, 10);
+  const out = await claimPaymentCallbackEvent(client, 1, 'org-1', 10);
   assert.equal(out.id, 1);
   assert.equal(out.processing_status, 'processing');
 });
@@ -347,18 +355,15 @@ test('processed event tekrar geldiginde guvenli no-op (replay) olur', async () =
   assert.ok(h.calls.queries.some((call) => /from orders where id = \$1 and organization_id = \$2/i.test(call.text)));
 });
 
-test('processed replay tenant context cozulmezse order detayi donmez', async () => {
+test('processed replay tenant context olmadan varsayilan olarak reddedilir', async () => {
   const event = { id: 1, processing_status: 'processed', processed_order_id: 10, result_status: 'paid', payload: {} };
   const order = { id: 10, order_code: '#1', status: 'paid', organization_id: 'org-1', customer_id: 1 };
   const h = makeHarness({ event, order });
 
-  const res = await processPaymentCallbackEvent(req, 1, h.deps);
+  await assert.rejects(processPaymentCallbackEvent(req, 1, h.deps), /kimligi dogrulanamadi/);
   assert.equal(h.calls.syncStock.length, 0);
   assert.equal(h.calls.orderUpdates.length, 0);
   assert.equal(h.calls.audit, 0);
-  assert.equal(res.idempotentReplay, true);
-  assert.equal(res.ok, true);
-  assert.equal(res.order, undefined);
 });
 
 test('basarisiz odeme icin stok iadesi tekrar eden callback\'te iki kez gerceklesmez', async () => {
@@ -560,7 +565,7 @@ test('guvenilir payment token dogru tenant siparisini isler', async () => {
   assert.deepEqual(h.calls.syncStock[0], { orderId: 10, prev: 'payment_pending', next: 'paid', opts: { organizationId: 'org-1' } });
 });
 
-test('ayni payment token birden fazla tenantta varsa islem guvenli bicimde durur', async () => {
+test('ayni payment token birden fazla tenantta dogrulanmis context olmadan islenmez', async () => {
   const event = { id: 1, processing_status: 'pending', payload: { provider: 'mock', status: 'paid', token: 'tok_shared' } };
   const orders = [
     { id: 10, order_code: '#1', payment_token: 'tok_shared', status: 'payment_pending', organization_id: 'org-A', customer_id: 1 },
@@ -568,7 +573,7 @@ test('ayni payment token birden fazla tenantta varsa islem guvenli bicimde durur
   ];
   const h = makeHarness({ event, order: orders });
 
-  await assert.rejects(processPaymentCallbackEvent(req, 1, h.deps), /Siparis bulunamadi/);
+  await assert.rejects(processPaymentCallbackEvent(req, 1, h.deps), /kimligi dogrulanamadi/);
   assert.equal(h.calls.syncStock.length, 0);
   assert.equal(h.calls.orderUpdates.length, 0);
 });

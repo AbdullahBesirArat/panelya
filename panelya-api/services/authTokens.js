@@ -28,16 +28,20 @@ function createAccessToken(payload, audience) {
   });
 }
 
-function createAdminAccessToken(admin) {
+// A30: `sid` binds an access token to a server-side session, so revoking a device takes
+// effect immediately instead of when the token happens to expire. It is a claim inside the
+// token only — the browser never receives it separately, and never needs to.
+function createAdminAccessToken(admin, { sessionId = null } = {}) {
   return createAccessToken({
     sub: admin.id,
     username: admin.username,
     role: admin.role,
     actorType: 'admin',
+    ...(sessionId ? { sid: sessionId } : {}),
   }, ADMIN_AUDIENCE);
 }
 
-function createAppAccessToken({ user, membership }) {
+function createAppAccessToken({ user, membership, sessionId = null }) {
   return createAccessToken({
     sub: user.id,
     userId: user.id,
@@ -47,6 +51,7 @@ function createAppAccessToken({ user, membership }) {
     organizationId: membership.organization.id,
     organizationSlug: membership.organization.slug,
     actorType: 'app',
+    ...(sessionId ? { sid: sessionId } : {}),
   }, APP_AUDIENCE);
 }
 
@@ -77,23 +82,44 @@ function createImpersonationToken({ adminId, ownerUserId = null, organization, r
   );
 }
 
-async function issueRefreshToken(client, { userId, req }) {
+// A30: `sessionId` ties this token to a device session. Rotation passes the SAME session id,
+// so a refresh continues the session rather than starting a new one — which is what makes
+// "log out this device" mean one row instead of a guess about which token is current.
+async function issueRefreshToken(client, { userId, req, sessionId = null }) {
   const rawToken = randomToken(48);
   const expiresAt = new Date(Date.now() + refreshTokenExpiresDays() * 24 * 60 * 60 * 1000);
 
   await client.query(
-    `insert into refresh_tokens (user_id, token_hash, expires_at, user_agent, ip_address)
-     values ($1, $2, $3, $4, $5)`,
+    `insert into refresh_tokens (user_id, token_hash, expires_at, user_agent, ip_address, session_id)
+     values ($1, $2, $3, $4, $5, $6)`,
     [
       userId,
       refreshTokenHash(rawToken),
       expiresAt.toISOString(),
       String(req.get('user-agent') || '').slice(0, 500),
       req.ip || null,
+      sessionId,
     ]
   );
 
   return rawToken;
+}
+
+/**
+ * Looks up a refresh token WITHOUT the "still valid" filter.
+ *
+ * `getRefreshSession` deliberately hides revoked and expired rows, which is right for
+ * refreshing but wrong for detecting a REPLAY: a presented token that exists but is already
+ * revoked is the signal that somebody is using a stolen copy, and filtering it out turns
+ * that signal into an ordinary "invalid token".
+ */
+async function findRefreshTokenRow(client, rawToken) {
+  if (!rawToken) return null;
+  const result = await client.query(
+    'select * from refresh_tokens where token_hash = $1 limit 1',
+    [refreshTokenHash(rawToken)]
+  );
+  return result.rows[0] || null;
 }
 
 async function getRefreshSession(client, rawToken, { forUpdate = false } = {}) {
@@ -157,6 +183,7 @@ module.exports = {
   createAdminAccessToken,
   createAppAccessToken,
   createImpersonationToken,
+  findRefreshTokenRow,
   getRefreshSession,
   issueRefreshToken,
   markRefreshTokenUsed,

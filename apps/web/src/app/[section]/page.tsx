@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { AppShell } from "@/components/app-shell";
 import { OperationsContent } from "@/components/operations-content";
 import { SectionHeader } from "@/components/page-kit";
+import { StepUpProvider } from "@/components/security/step-up-provider";
 import { sectionKeys, sectionMeta } from "@/lib/demo-data";
 
 type PageProps = {
@@ -21,13 +22,15 @@ export default async function OperationsPage({ params }: PageProps) {
 
   return (
     <AppShell activeSection={sectionKey}>
-      <SectionHeader
-        kicker={section.kicker}
-        title={section.title}
-        description={section.description}
-        image={section.image}
-      />
-      <OperationsContent sectionKey={sectionKey} />
+      <StepUpProvider>
+        <SectionHeader
+          kicker={section.kicker}
+          title={section.title}
+          description={section.description}
+          image={section.image}
+        />
+        <OperationsContent sectionKey={sectionKey} />
+      </StepUpProvider>
     </AppShell>
   );
 }

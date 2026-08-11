@@ -522,6 +522,7 @@ router.post('/current/invites', requireAuth, requireRole(['owner', 'admin', 'sup
 
     await client.query('begin');
     const organization = await resolveOrganization(req, client);
+    await db.setTenantContext(client, organization.id);
     await assertPlanCapacity(client, organization.id, 'members');
 
     const existingMember = await client.query(
@@ -957,12 +958,31 @@ router.post('/', requireAuth, requireRole(['super_admin']), async (req, res, nex
 
     if (!name || !slug) return res.status(400).json({ error: 'Organizasyon adi zorunlu' });
 
-    const result = await db.query(
-      `insert into organizations (name, slug, plan, status)
-       values ($1, $2, $3, 'active')
-       returning id, name, slug, plan, status, created_at`,
-      [name, slug, plan]
-    );
+    // A28: the third production create path. Every store must start with a published
+    // theme, or its storefront has no resolvable appearance and the editor has nothing to
+    // base a draft on. The organization row and its theme are one unit of work: if the
+    // theme write fails the organization must not survive, so both run on one client in
+    // one transaction rather than as two autocommit statements.
+    const client = await db.getSystemPool().connect();
+    let result;
+    try {
+      await client.query('begin');
+      result = await client.query(
+        `insert into organizations (name, slug, plan, status)
+         values ($1, $2, $3, 'active')
+         returning id, name, slug, plan, status, created_at`,
+        [name, slug, plan]
+      );
+      await require('../modules/themes/service').ensurePublishedTheme(client, {
+        organizationId: result.rows[0].id,
+      });
+      await client.query('commit');
+    } catch (error) {
+      await client.query('rollback').catch(() => {});
+      throw error;
+    } finally {
+      client.release();
+    }
 
     await auditLog(req, {
       action: 'CREATE',

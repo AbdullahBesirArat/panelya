@@ -28,6 +28,15 @@ const options = {
       { name: 'Content', description: 'Tenant bazli vitrin slaytlari ve kampanyalar' },
       { name: 'Organizations', description: 'Workspace ve dashboard ozeti' },
       { name: 'Payment', description: 'Odeme baslatma ve callback akislari' },
+      {
+        name: 'External API',
+        description:
+          'A29 versiyonlanmis dis API (/v1). Oturum degil, API anahtari ile kimlik dogrulanir: '
+          + 'Authorization: Bearer pk_<prefix>.<secret>. Anahtar yalnizca bu baslikta kabul edilir; '
+          + 'query string ile gonderilen anahtar 400 API_KEY_IN_QUERY ile reddedilir. '
+          + 'Islem yapan tenant anahtardan cozulur, istekten degil. '
+          + 'Durum degistiren POST istekleri Idempotency-Key basligi ister.',
+      },
     ],
     components: {
       securitySchemes: {
@@ -36,6 +45,17 @@ const options = {
           scheme: 'bearer',
           bearerFormat: 'JWT',
         },
+        // A29. Presented the same way as the session bearer but it is NOT a JWT and NOT a
+        // session: it carries scopes, not a role, and it can never satisfy an admin route.
+        apiKeyAuth: {
+          type: 'http',
+          scheme: 'bearer',
+          bearerFormat: 'pk_<prefix>.<secret>',
+          description:
+            'A29 dis API anahtari. Yalnizca Authorization basliginda kabul edilir. '
+            + 'Gizli deger yalnizca olusturma/dondurme yanitinda bir kez gosterilir ve '
+            + 'sunucuda yalnizca sha256 ozeti saklanir.',
+        },
       },
       schemas: {
         Error: {
@@ -43,6 +63,23 @@ const options = {
           properties: {
             error: { type: 'string', example: 'Oturum gerekli' },
             requestId: { type: 'string', example: 'req_abc123' },
+          },
+        },
+        ExternalApiError: {
+          type: 'object',
+          properties: {
+            error: {
+              type: 'object',
+              properties: {
+                // Machine-readable and stable. Clients branch on this, never on `message`.
+                code: { type: 'string', example: 'API_SCOPE_FORBIDDEN' },
+                message: { type: 'string', example: 'Bu islem icin products:write yetkisi gerekli' },
+                // The same value as the X-Request-Id response header, for correlating a
+                // report with our logs. Never a stack trace and never a SQL message.
+                request_id: { type: 'string', example: 'req_abc123' },
+                fields: { type: 'object', nullable: true },
+              },
+            },
           },
         },
         Organization: {
@@ -244,6 +281,17 @@ const options = {
           content: {
             'application/json': {
               schema: { $ref: '#/components/schemas/Error' },
+            },
+          },
+        },
+        // The external contract has ONE error shape. It is intentionally different from the
+        // internal `Error` above: an integration written against /v1 parses `error.code`,
+        // and that has to stay stable across releases.
+        ExternalError: {
+          description: 'Dis API hata sozlesmesi',
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/ExternalApiError' },
             },
           },
         },

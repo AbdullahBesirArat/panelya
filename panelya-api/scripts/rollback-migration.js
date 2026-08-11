@@ -34,7 +34,7 @@ async function lastAppliedMigration(client) {
 // Down migration SQL, schema_migrations satir silme ve commit/rollback ayni
 // client'ta yurutulur. Bagimliliklar enjekte edilebilir (fake pool ile test).
 async function runRollback({
-  pool = db.pool,
+  pool = db.getMigrationPool(),
   target: targetArg = process.argv[2],
   downMigrationExists = defaultDownMigrationExists,
   readDownMigration = defaultReadDownMigration,
@@ -84,10 +84,11 @@ async function runRollback({
 }
 
 async function main() {
+  const pool = db.getMigrationPool();
   try {
-    await runRollback();
+    await runRollback({ pool });
   } finally {
-    await db.pool.end();
+    await pool.end();
   }
 }
 

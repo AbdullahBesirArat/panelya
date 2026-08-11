@@ -2,7 +2,8 @@ const db = require('../db');
 const { auditLog } = require('./audit');
 const { providerName, retrievePayment, successUrl, failureUrl } = require('./paymentProviders');
 const { sendOrderStatusEmail } = require('./email');
-const { syncStockForStatusChange } = require('./inventory');
+const { transitionOrderInventory } = require('./inventoryReservations');
+const { transitionOrderPromotion } = require('./promotionEngine');
 
 const TERMINAL_STATUSES = ['paid', 'cancelled'];
 
@@ -146,8 +147,11 @@ function resolveTerminalGuardedStatus(currentStatus, proposedStatus) {
 async function enqueuePaymentCallbackEvent(req, payload, store = db, options = {}) {
   const eventKey = buildEventKey(payload, options);
   if (!eventKey) throw callbackIdentityError();
+  const organizationId = verifiedOrganizationId(options);
+  if (!organizationId) throw callbackIdentityError();
 
   const params = [
+    organizationId,
     payload.provider,
     payload.orderCode || null,
     payload.token || null,
@@ -160,8 +164,8 @@ async function enqueuePaymentCallbackEvent(req, payload, store = db, options = {
 
   const inserted = await store.query(
     `insert into payment_callback_events
-     (provider, order_code, payment_token, requested_status, payload, source_ip, user_agent, event_key, next_retry_at)
-     values ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, now())
+     (organization_id, provider, order_code, payment_token, requested_status, payload, source_ip, user_agent, event_key, next_retry_at)
+     values ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, now())
      on conflict (event_key) where event_key is not null
      do nothing
      returning *`,
@@ -172,8 +176,8 @@ async function enqueuePaymentCallbackEvent(req, payload, store = db, options = {
 
   // Cakisma: ayni event daha once kaydedilmis; mevcut satiri dondur.
   const existing = await store.query(
-    'select * from payment_callback_events where event_key = $1 order by id desc limit 1',
-    [eventKey]
+    'select * from payment_callback_events where event_key = $1 and organization_id = $2 order by id desc limit 1',
+    [eventKey, organizationId]
   );
   return existing.rows[0] || null;
 }
@@ -183,25 +187,26 @@ async function enqueuePaymentCallbackEvent(req, payload, store = db, options = {
 //   - pending/failed ve retry zamani gelmis, VEYA
 //   - stale 'processing' (esik suresini asmis).
 // 'processed' ve TAZE 'processing' event'ler asla claim edilmez.
-async function claimPaymentCallbackEvent(client, eventId, staleMinutes = staleClaimMinutes()) {
+async function claimPaymentCallbackEvent(client, eventId, organizationId, staleMinutes = staleClaimMinutes()) {
   const result = await client.query(
     `update payment_callback_events
      set processing_status = 'processing',
          attempts = attempts + 1,
          updated_at = now()
      where id = $1
+       and organization_id = $2
        and (
          (processing_status in ('pending', 'failed') and coalesce(next_retry_at, now()) <= now())
-         or (processing_status = 'processing' and updated_at < now() - ($2 || ' minutes')::interval)
+         or (processing_status = 'processing' and updated_at < now() - ($3 || ' minutes')::interval)
        )
      returning *`,
-    [eventId, String(staleMinutes)]
+    [eventId, organizationId, String(staleMinutes)]
   );
 
   return result.rows[0] || null;
 }
 
-async function finalizeEvent(client, eventId, values) {
+async function finalizeEvent(client, eventId, values, organizationId) {
   const fields = [];
   const params = [];
 
@@ -211,10 +216,12 @@ async function finalizeEvent(client, eventId, values) {
   });
 
   params.push(eventId);
+  params.push(organizationId);
   const result = await client.query(
     `update payment_callback_events
      set ${fields.join(', ')}, updated_at = now()
-     where id = $${params.length}
+     where id = $${params.length - 1}
+       and organization_id = $${params.length}
      returning *`,
     params
   );
@@ -223,9 +230,9 @@ async function finalizeEvent(client, eventId, values) {
 
 async function processPaymentCallbackEvent(req, eventId, deps = {}) {
   const {
-    pool = db.pool,
-    query = (text, params) => db.query(text, params),
-    syncStock = syncStockForStatusChange,
+    pool = db.getSystemPool(),
+    query = (text, params) => db.systemQuery(text, params),
+    syncStock = transitionOrderInventory,
     retrieve = retrievePayment,
     sendEmail = sendOrderStatusEmail,
     audit = auditLog,
@@ -235,19 +242,24 @@ async function processPaymentCallbackEvent(req, eventId, deps = {}) {
     staleMinutes = staleClaimMinutes(),
     verifiedOrganizationId: explicitVerifiedOrganizationId = null,
   } = deps;
+  const syncPromotion = deps.syncPromotion
+    || (deps.syncStock ? async () => ({ changed: false }) : transitionOrderPromotion);
 
+  const organizationId = verifiedOrganizationId({ verifiedOrganizationId: explicitVerifiedOrganizationId });
+  if (!organizationId) throw callbackIdentityError();
   const client = await pool.connect();
   let claimedEvent = null;
   try {
     await client.query('begin');
-    const event = await claimPaymentCallbackEvent(client, eventId, staleMinutes);
+    await db.setTenantContext(client, organizationId);
+    const event = await claimPaymentCallbackEvent(client, eventId, organizationId, staleMinutes);
     claimedEvent = event;
 
     if (!event) {
       // Claim edilemedi: zaten islenmis / taze processing / retry beklemede.
       const existing = await client.query(
-        'select * from payment_callback_events where id = $1 limit 1',
-        [eventId]
+        'select * from payment_callback_events where id = $1 and organization_id = $2 limit 1',
+        [eventId, organizationId]
       );
       const row = existing.rows[0] || null;
       let replay = row;
@@ -280,7 +292,7 @@ async function processPaymentCallbackEvent(req, eventId, deps = {}) {
     }
 
     const payload = event.payload || {};
-    const eventVerifiedOrganizationId = explicitVerifiedOrganizationId || contextFromEventKey(event.event_key);
+    const eventVerifiedOrganizationId = organizationId || contextFromEventKey(event.event_key);
     const callbackContext = { verifiedOrganizationId: eventVerifiedOrganizationId };
     if (!buildEventKey(payload, callbackContext)) throw callbackIdentityError();
 
@@ -315,10 +327,12 @@ async function processPaymentCallbackEvent(req, eventId, deps = {}) {
       paymentError = paymentError || `Final durum korunuyor: ${currentStatus}`;
     }
 
-    // Stok hareketi yalnizca gercek bir durum gecisinde (aynen onceki davranis:
-    // syncStockForStatusChange previousStatus===nextStatus'ta erken doner) ve
-    // event tek kez islendigi icin (idempotency) iki kez calismaz.
+    // Reservation transition is itself idempotent. Duplicate callbacks cannot
+    // consume or release inventory more than once.
     await syncStock(client, currentOrder.id, currentStatus, nextStatus, {
+      organizationId: currentOrder.organization_id,
+    });
+    await syncPromotion(client, currentOrder.id, currentStatus, nextStatus, {
       organizationId: currentOrder.organization_id,
     });
 
@@ -341,7 +355,7 @@ async function processPaymentCallbackEvent(req, eventId, deps = {}) {
       last_error: paymentError,
       last_processed_at: new Date().toISOString(),
       next_retry_at: null,
-    });
+    }, organizationId);
 
     await audit(req, {
       action: 'PAYMENT_CALLBACK',
@@ -387,7 +401,7 @@ async function processPaymentCallbackEvent(req, eventId, deps = {}) {
       last_error: String(error.message || error).slice(0, 1000),
       last_processed_at: new Date().toISOString(),
       next_retry_at: new Date(Date.now() + retryDelayMs(claimedEvent?.attempts)).toISOString(),
-    }).catch(() => {});
+    }, organizationId).catch(() => {});
 
     throw error;
   } finally {
@@ -396,10 +410,10 @@ async function processPaymentCallbackEvent(req, eventId, deps = {}) {
 }
 
 async function processPendingPaymentCallbackEvents(limit = 20, deps = {}) {
-  const { query = (text, params) => db.query(text, params), staleMinutes = staleClaimMinutes() } = deps;
+  const { query = (text, params) => db.systemQuery(text, params), staleMinutes = staleClaimMinutes() } = deps;
 
   const result = await query(
-    `select id
+    `select id, organization_id
      from payment_callback_events
      where (processing_status in ('pending', 'failed') and coalesce(next_retry_at, now()) <= now())
         or (processing_status = 'processing' and updated_at < now() - ($2 || ' minutes')::interval)
@@ -418,7 +432,10 @@ async function processPendingPaymentCallbackEvents(limit = 20, deps = {}) {
         admin: null,
         is() { return false; },
       };
-      const outcome = await processPaymentCallbackEvent(fakeReq, row.id, deps);
+      const outcome = await processPaymentCallbackEvent(fakeReq, row.id, {
+        ...deps,
+        verifiedOrganizationId: row.organization_id,
+      });
       processed.push({ id: row.id, status: outcome?.processing_status || 'unknown' });
     } catch (error) {
       processed.push({ id: row.id, status: 'failed', error: error.message });

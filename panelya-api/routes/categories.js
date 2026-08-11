@@ -3,6 +3,7 @@ const db = require('../db');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { auditLog } = require('../services/audit');
 const { resolveOrganization, slugify } = require('../services/tenant');
+const { syncMediaReferences } = require('../services/mediaAssets');
 
 const router = express.Router();
 
@@ -85,6 +86,13 @@ router.post('/', requireAuth, requireRole(['super_admin', 'owner', 'admin']), as
        returning id, name, slug, image_url`,
       [organization.id, name, slug, imageUrl]
     );
+    await syncMediaReferences(db, {
+      organizationId: organization.id,
+      resourceType: 'category',
+      resourceId: result.rows[0].id,
+      values: imageUrl,
+      altText: name,
+    });
 
     await auditLog(req, {
       action: 'CREATE',
@@ -118,6 +126,13 @@ router.put('/:id', requireAuth, requireRole(['super_admin', 'owner', 'admin']), 
       [name, slug, imageUrl, req.params.id, organization.id]
     );
     if (!result.rows[0]) return res.status(404).json({ error: 'Kategori bulunamadi' });
+    await syncMediaReferences(db, {
+      organizationId: organization.id,
+      resourceType: 'category',
+      resourceId: req.params.id,
+      values: imageUrl,
+      altText: name,
+    });
 
     await auditLog(req, {
       action: 'UPDATE',
@@ -143,6 +158,12 @@ router.delete('/:id', requireAuth, requireRole(['super_admin', 'owner']), async 
       'delete from categories where id = $1 and organization_id = $2',
       [req.params.id, organization.id]
     );
+    await syncMediaReferences(db, {
+      organizationId: organization.id,
+      resourceType: 'category',
+      resourceId: req.params.id,
+      values: [],
+    });
     await auditLog(req, {
       action: 'DELETE',
       resourceType: 'category',
@@ -230,6 +251,7 @@ router.put('/:id/featured-products', requireAuth, requireRole(['super_admin', 'o
     const client = await db.pool.connect();
     try {
       await client.query('begin');
+      await db.setTenantContext(client, organization.id);
       await client.query(
         `update products set featured_in_category = false
          where category_id = $1 and organization_id = $2`,

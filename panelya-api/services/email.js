@@ -390,6 +390,48 @@ async function sendNewOrderSellerNotification({ order, organization, sellerEmail
   });
 }
 
+// A25: emailed to the order's ON-FILE address so a signed-in customer can prove they
+// control it before a guest order is linked to their account. The link carries only the
+// single-use claim token; no order details or PII are placed in the URL.
+// A27: the base comes from the central resolver, which prefers the tenant's ACTIVE
+// canonical custom domain and falls back to the platform URL. An unverified or disabled
+// domain is never used, and the Host header is never consulted.
+function buildOrderClaimUrl(token, base) {
+  const { buildCustomerUrl } = require('./tenantUrls');
+  if (!token) return '';
+  return buildCustomerUrl(base, '/hesabim.html', { claim_token: String(token) });
+}
+
+async function sendGuestOrderClaimEmail({ to, token, orderCode, organization, client = null }) {
+  if (!to) return { skipped: true };
+  const { storefrontBaseUrl } = require('./tenantUrls');
+  const base = await storefrontBaseUrl(client, organization?.id || null);
+  const url = buildOrderClaimUrl(token, base);
+  if (!url) return { skipped: true };
+  const brand = organization?.name || 'Suvera';
+
+  return sendEmail({
+    account: 'suvera',
+    to,
+    subject: `${brand} - Siparisinizi hesabiniza baglayin`,
+    text: [
+      'Merhaba,',
+      `${orderCode || ''} numarali siparisi bir ${brand} hesabina baglama talebi olusturuldu.`.trim(),
+      'Onaylamak icin asagidaki baglantiya tiklayin:',
+      url,
+      'Baglanti kisa sure gecerlidir ve yalnizca bir kez kullanilabilir. Bu talebi siz olusturmadiysaniz bu e-postayi dikkate almayin.',
+    ].filter(Boolean).join('\n'),
+    html: [
+      '<div style="font-family:Arial,sans-serif;line-height:1.5;color:#0f172a;">',
+      '<p>Merhaba,</p>',
+      `<p><strong>${escapeHtml(brand)}</strong> hesabina <strong>${escapeHtml(orderCode || '')}</strong> numarali siparisi baglama talebi olusturuldu.</p>`,
+      `<p style="margin:20px 0;"><a href="${escapeHtml(url)}" style="display:inline-block;background:#0f172a;color:#ffffff;text-decoration:none;padding:10px 16px;border-radius:6px;">Siparisi hesabima bagla</a></p>`,
+      '<p style="color:#64748b;">Baglanti kisa sure gecerlidir ve yalnizca bir kez kullanilabilir. Bu talebi siz olusturmadiysaniz bu e-postayi dikkate almayin.</p>',
+      '</div>',
+    ].join(''),
+  });
+}
+
 module.exports = {
   sendEmail,
   sendCustomerPasswordResetEmail,
@@ -399,4 +441,5 @@ module.exports = {
   sendEmailVerificationMagicLink,
   sendEmailChangeConfirmation,
   sendNewOrderSellerNotification,
+  sendGuestOrderClaimEmail,
 };

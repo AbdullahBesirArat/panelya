@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { MetricGrid } from "@/components/page-kit";
 import { fetchCustomers } from "@/lib/api";
 import { useDebouncedValue } from "@/lib/use-debounced-value";
+import { queryKeys } from "@/lib/query-keys";
+import { useUrlFilterState } from "@/lib/use-url-filter-state";
 import {
   ActivityPanel,
   DataCell,
@@ -20,12 +21,12 @@ import {
 
 export function CustomersSection({ organizationSlug }: { organizationSlug: string }) {
   const summaryQuery = useSummaryQuery(organizationSlug);
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useUrlFilterState<string>("q", "");
   const debouncedSearch = useDebouncedValue(search);
 
   const customersQuery = useQuery({
-    queryKey: ["customers", organizationSlug, debouncedSearch],
-    queryFn: () => fetchCustomers({ q: debouncedSearch, limit: 50 }),
+    queryKey: queryKeys.customers.list(organizationSlug, debouncedSearch),
+    queryFn: ({ signal }) => fetchCustomers({ q: debouncedSearch, limit: 50 }, signal),
     staleTime: 15_000,
     placeholderData: keepPreviousData,
   });
@@ -67,13 +68,14 @@ export function CustomersSection({ organizationSlug }: { organizationSlug: strin
           actions={(
             <div className="flex flex-wrap gap-2">
               <input
+                aria-label="Müşteri ara"
                 className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
                 onChange={(event) => setSearch(event.target.value)}
                 placeholder="İsim, e-posta veya telefon ara"
                 value={search}
               />
               {customersQuery.isFetching ? (
-                <span className="inline-flex h-10 items-center rounded-lg border border-line px-3 text-xs font-semibold text-zinc-500">
+                <span className="inline-flex h-10 items-center rounded-lg border border-line px-3 text-xs font-semibold text-zinc-600">
                   Güncelleniyor
                 </span>
               ) : null}
@@ -81,6 +83,7 @@ export function CustomersSection({ organizationSlug }: { organizationSlug: strin
           )}
         >
           <DataGrid
+            caption="Müşteriler"
             columns={["Ad", "E-posta", "Sipariş", "Toplam"]}
             emptyMessage="Müşteri bulunamadı."
             rows={customers}

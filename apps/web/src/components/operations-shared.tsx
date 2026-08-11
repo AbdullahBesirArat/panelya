@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { queryKeys } from "@/lib/query-keys";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { fetchOrganizationSummary, type ApiCategory, type OrganizationSummary } from "@/lib/api";
@@ -41,7 +42,7 @@ export const productStatusLabels = {
 
 export function useSummaryQuery(organizationSlug: string) {
   return useQuery({
-    queryKey: ["summary", organizationSlug],
+    queryKey: queryKeys.summary.detail(organizationSlug),
     queryFn: fetchOrganizationSummary,
     staleTime: 30_000,
   });
@@ -72,29 +73,71 @@ export function Panel({
   );
 }
 
+export type DataGridSort = {
+  /** Column label currently sorted on. */
+  column: string;
+  direction: "ascending" | "descending";
+  onSort: (column: string) => void;
+  /** Column labels that can be sorted; others render as plain headers. */
+  sortable: string[];
+};
+
+// A31. One table primitive for every admin list, so the semantics are fixed here rather
+// than per screen: a caption names the table, every header declares the column it labels,
+// and a sortable header is a real button whose aria-sort states the current order.
 export function DataGrid<T>({
+  caption,
   columns,
   rows,
   renderRow,
   emptyMessage,
+  sort,
 }: {
+  caption: string;
   columns: string[];
   rows: T[];
   renderRow: (row: T) => ReactNode;
   emptyMessage: string;
+  sort?: DataGridSort;
 }) {
   if (rows.length === 0) {
     return <EmptyText>{emptyMessage}</EmptyText>;
   }
 
   return (
-    <div className="overflow-x-auto">
+    // A31: the wrapper scrolls horizontally on narrow viewports, so it must be reachable
+    // by keyboard or a keyboard user cannot see the columns that overflow. tabIndex makes
+    // it focusable and the group role gives that stop a name instead of an anonymous box.
+    <div aria-label={caption} className="overflow-x-auto" role="group" tabIndex={0}>
       <table className="min-w-[680px] w-full table-fixed text-left text-sm">
-        <thead className="bg-zinc-50 text-xs uppercase text-zinc-500">
+        <caption className="sr-only">{caption}</caption>
+        <thead className="bg-zinc-50 text-xs uppercase text-zinc-600">
           <tr>
-            {columns.map((column) => (
-              <th className="px-4 py-3 font-semibold" key={column}>{column}</th>
-            ))}
+            {columns.map((column) => {
+              const sortable = sort?.sortable.includes(column) ?? false;
+              const active = sortable && sort?.column === column;
+              return (
+                <th
+                  aria-sort={active ? sort?.direction : sortable ? "none" : undefined}
+                  className="px-4 py-3 font-semibold"
+                  key={column}
+                  scope="col"
+                >
+                  {sortable ? (
+                    <button
+                      className="inline-flex items-center gap-1 uppercase hover:text-zinc-900"
+                      onClick={() => sort?.onSort(column)}
+                      type="button"
+                    >
+                      {column}
+                      <span aria-hidden="true">{active ? (sort?.direction === "ascending" ? "↑" : "↓") : "↕"}</span>
+                    </button>
+                  ) : (
+                    column
+                  )}
+                </th>
+              );
+            })}
           </tr>
         </thead>
         <tbody className="divide-y divide-line">
@@ -145,15 +188,17 @@ export function FieldLabel({
 }
 
 export function InlineHint({ children }: { children: ReactNode }) {
-  return <p className="text-xs text-zinc-500">{children}</p>;
+  return <p className="text-xs text-zinc-600">{children}</p>;
 }
 
-export function InlineError({ message }: { message: string }) {
-  return <p className="rounded-lg border border-coral/30 bg-coral/10 px-3 py-2 text-sm text-coral">{message}</p>;
+// A31: an id lets a field point at this message with aria-describedby, and role=alert
+// makes a validation failure announced rather than silently rendered.
+export function InlineError({ message, id }: { message: string; id?: string }) {
+  return <p className="rounded-lg border border-coral/30 bg-coral/10 px-3 py-2 text-sm text-coral" id={id} role="alert">{message}</p>;
 }
 
 export function EmptyText({ children }: { children: ReactNode }) {
-  return <p className="rounded-lg border border-dashed border-line px-4 py-6 text-sm text-zinc-500">{children}</p>;
+  return <p className="rounded-lg border border-dashed border-line px-4 py-6 text-sm text-zinc-600">{children}</p>;
 }
 
 export function SectionLoading() {

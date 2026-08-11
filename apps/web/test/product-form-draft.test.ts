@@ -5,6 +5,7 @@ import {
   createEmptyProductForm,
   isProductFormEmpty,
   readProductFormDraft,
+  shouldWarnUnsavedProductChanges,
   writeProductFormDraft,
 } from "../src/lib/product-form-draft";
 
@@ -43,6 +44,13 @@ test("fabric info survives draft round-trip (turkce karakterler korunur)", () =>
 
 test("empty product form (with fabric field) is still detected as empty for reset", () => {
   assert.equal(isProductFormEmpty(createEmptyProductForm()), true);
+});
+
+test("unsaved changes guard warns only for a non-empty form that is not saving", () => {
+  const dirty = { ...createEmptyProductForm(), name: "Kaydedilmemiş ürün" };
+  assert.equal(shouldWarnUnsavedProductChanges(dirty), true);
+  assert.equal(shouldWarnUnsavedProductChanges(dirty, true), false);
+  assert.equal(shouldWarnUnsavedProductChanges(createEmptyProductForm()), false);
 });
 
 test("empty quick product form is not persisted", () => {

@@ -450,9 +450,10 @@ async function seedOrders(client, organizationId, customerIds, productIds) {
 
     for (const item of order.items) {
       await client.query(
-        `insert into order_items (order_id, product_id, product_name, quantity, unit_price, created_at)
-         values ($1, $2, $3, $4, $5, $6)`,
+        `insert into order_items (organization_id, order_id, product_id, product_name, quantity, unit_price, created_at)
+         values ($1, $2, $3, $4, $5, $6, $7)`,
         [
+          organizationId,
           orderResult.rows[0].id,
           productIds.get(item.productName) || null,
           item.productName,
@@ -531,6 +532,7 @@ async function main() {
 
     const organization = await upsertOrganization(client);
     const user = await upsertUser(client, passwordHash);
+    await db.setTenantContext(client, organization.id);
 
     await seedMembership(client, organization.id, user.id);
     await seedSubscription(client, organization.id);

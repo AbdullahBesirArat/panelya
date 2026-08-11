@@ -17,6 +17,7 @@ const {
   confirmEmailChange,
   resetCustomerPassword,
 } = require('../services/customerAuthFlows');
+const { autoLinkVerifiedGuestOrders } = require('../services/orderClaims');
 
 const EMAIL_VERIFICATION_TTL_HOURS = Math.max(1, Number(process.env.EMAIL_VERIFICATION_TTL_HOURS || 24));
 
@@ -128,6 +129,9 @@ async function requireCustomerAccount(req, client = db) {
   }
 
   const organization = await resolveOrganization(req, client, { allowPublic: true });
+  if (client !== db) {
+    await db.setTenantContext(client, organization.id);
+  }
   const result = await client.query(
     `select id, organization_id, customer_id, email, name, phone, last_login_at, email_verified_at
      from customer_accounts
@@ -144,8 +148,8 @@ async function requireCustomerAccount(req, client = db) {
   return { organization, account: result.rows[0] };
 }
 
-async function accountOrders(client, organizationId, customerId) {
-  if (!customerId) return [];
+async function accountOrders(client, organizationId, customerId, customerAccountId = null) {
+  if (!customerId && !customerAccountId) return [];
   const result = await client.query(
     `select
        o.id,
@@ -163,11 +167,29 @@ async function accountOrders(client, organizationId, customerId) {
        o.shipped_at,
        o.created_at,
        o.updated_at,
+       o.order_status,
+       o.payment_status,
+       o.fulfillment_status,
+       coalesce((
+         select json_agg(json_build_object(
+           'id', s.id, 'status', s.status, 'carrier_name', s.carrier_name,
+           'service_name', s.service_name, 'tracking_number', s.tracking_number,
+           'tracking_url', s.tracking_url, 'estimated_delivery_at', s.estimated_delivery_at,
+           'shipped_at', s.shipped_at, 'delivered_at', s.delivered_at,
+           'is_return', s.return_of_shipment_id is not null
+         ) order by s.created_at, s.id)
+           from shipments s where s.organization_id = o.organization_id and s.order_id = o.id
+       ), '[]'::json) as shipments,
        coalesce(
          json_agg(
            json_build_object(
+             'order_item_id', oi.id,
              'product_id', oi.product_id,
+             'variant_id', oi.variant_id,
              'name', oi.product_name,
+             'selected_color', oi.selected_color,
+             'selected_size', oi.selected_size,
+             'sku', oi.sku,
              'quantity', oi.quantity,
              'unit_price', oi.unit_price
            )
@@ -177,11 +199,15 @@ async function accountOrders(client, organizationId, customerId) {
        ) as items
      from orders o
      left join order_items oi on oi.order_id = o.id
-     where o.organization_id = $1 and o.customer_id = $2
+     where o.organization_id = $1
+       and (
+         ($2::bigint is not null and o.customer_id = $2)
+         or ($3::bigint is not null and o.customer_account_id = $3)
+       )
      group by o.id
      order by o.created_at desc
      limit 50`,
-    [organizationId, customerId]
+    [organizationId, customerId, customerAccountId]
   );
   return result.rows;
 }
@@ -230,6 +256,7 @@ router.post('/register', authLimiter, async (req, res, next) => {
 
     await client.query('begin');
     const organization = await resolveOrganization(req, client, { allowPublic: true });
+    await db.setTenantContext(client, organization.id);
     const existingAccount = await client.query(
       `select id
        from customer_accounts
@@ -327,8 +354,10 @@ router.post('/verify-email', authLimiter, async (req, res, next) => {
     }
 
     const client = await db.pool.connect();
+    let autoLinked = 0;
     try {
       await client.query('begin');
+      await db.setTenantContext(client, row.organization_id);
       await client.query(
         `update customer_accounts
             set email_verified_at = now(), updated_at = now()
@@ -341,12 +370,30 @@ router.post('/verify-email', authLimiter, async (req, res, next) => {
           where id = $1 and consumed_at is null`,
         [row.id]
       );
+      // A25 auto-link policy: with the email now verified, attach any guest orders on
+      // the same address to this account (proven ownership, so no per-order token).
+      const linkResult = await autoLinkVerifiedGuestOrders(client, {
+        organizationId: row.organization_id,
+        customerAccountId: row.subject_id,
+      });
+      autoLinked = linkResult.linked;
       await client.query('commit');
     } catch (err) {
       await client.query('rollback');
       throw err;
     } finally {
       client.release();
+    }
+
+    if (autoLinked > 0) {
+      await auditLog(req, {
+        action: 'CUSTOMER_ORDERS_AUTO_LINKED',
+        resourceType: 'customer_account',
+        resourceId: row.subject_id,
+        actorType: 'app',
+        organizationId: row.organization_id,
+        newValue: { linked_orders: autoLinked },
+      });
     }
 
     res.json({ ok: true });
@@ -404,10 +451,14 @@ router.post('/resend-verification', authLimiter, async (req, res, next) => {
 router.post('/email-change/request', authLimiter, async (req, res, next) => {
   const client = await db.pool.connect();
   try {
+    await client.query('begin');
     const { organization, account } = await requireCustomerAccount(req, client);
     const newEmail = cleanEmail(req.body.new_email);
     const password = String(req.body.password || '');
-    if (!password) return res.status(400).json({ error: 'Mevcut parola zorunlu' });
+    if (!password) {
+      await client.query('rollback');
+      return res.status(400).json({ error: 'Mevcut parola zorunlu' });
+    }
 
     const accountRow = await client.query(
       'select password_hash, name from customer_accounts where id = $1 limit 1',
@@ -416,10 +467,10 @@ router.post('/email-change/request', authLimiter, async (req, res, next) => {
     const passwordHash = accountRow.rows[0]?.password_hash || DUMMY_PASSWORD_HASH;
     const valid = await bcrypt.compare(password, passwordHash);
     if (!accountRow.rows[0] || !valid) {
+      await client.query('rollback');
       return res.status(401).json({ error: 'Parola hatali' });
     }
 
-    await client.query('begin');
     const result = await requestEmailChange(client, {
       organizationId: organization.id,
       account,
@@ -466,7 +517,10 @@ router.post('/email-change/confirm', authLimiter, async (req, res, next) => {
     const tokenHash = sha256(token);
 
     await client.query('begin');
-    const result = await confirmEmailChange(client, { tokenHash });
+    const result = await confirmEmailChange(client, {
+      tokenHash,
+      setTenantContext: db.setTenantContext,
+    });
     if (result.outcome !== 'changed') {
       await client.query('rollback');
       // Cakisma da dahil generic yanit: hesap varligi sizdirilmaz.
@@ -511,7 +565,9 @@ router.post('/login', authLimiter, async (req, res, next) => {
   try {
     const email = cleanEmail(req.body.email);
     const password = String(req.body.password || '');
+    await client.query('begin');
     const organization = await resolveOrganization(req, client, { allowPublic: true });
+    await db.setTenantContext(client, organization.id);
     const result = await client.query(
       `select id, password_hash
        from customer_accounts
@@ -522,11 +578,16 @@ router.post('/login', authLimiter, async (req, res, next) => {
     const account = result.rows[0];
     const passwordHashToCompare = account?.password_hash || DUMMY_PASSWORD_HASH;
     const valid = await bcrypt.compare(password, passwordHashToCompare);
-    if (!account || !account.password_hash || !valid) return res.status(401).json({ error: 'Giris bilgileri hatali' });
+    if (!account || !account.password_hash || !valid) {
+      await client.query('rollback');
+      return res.status(401).json({ error: 'Giris bilgileri hatali' });
+    }
 
     const session = await issueSession(client, account.id);
+    await client.query('commit');
     res.json(session);
   } catch (err) {
+    await client.query('rollback').catch(() => {});
     next(err);
   } finally {
     client.release();
@@ -536,7 +597,7 @@ router.post('/login', authLimiter, async (req, res, next) => {
 router.get('/me', authLimiter, async (req, res, next) => {
   try {
     const { organization, account } = await requireCustomerAccount(req);
-    const orders = await accountOrders(db, organization.id, account.customer_id);
+    const orders = await accountOrders(db, organization.id, account.customer_id, account.id);
     res.json({ account: publicAccount(account), orders });
   } catch (err) {
     next(err);

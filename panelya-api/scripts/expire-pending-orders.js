@@ -4,9 +4,8 @@ const db = require('../db');
 const { expirePendingOrders } = require('../services/pendingOrders');
 
 async function main() {
-  const olderThanMinutes = Number(process.env.PAYMENT_PENDING_TIMEOUT_MINUTES || 30);
-  const limit = Number(process.env.PAYMENT_PENDING_EXPIRE_LIMIT || 100);
-  const expired = await expirePendingOrders({ olderThanMinutes, limit });
+  const limit = Number(process.env.INVENTORY_RESERVATION_EXPIRE_LIMIT || process.env.PAYMENT_PENDING_EXPIRE_LIMIT || 100);
+  const expired = await expirePendingOrders({ limit });
 
   console.log(JSON.stringify({
     ok: true,
@@ -20,4 +19,6 @@ main()
     console.error(err);
     process.exitCode = 1;
   })
-  .finally(() => db.pool.end());
+  .finally(async () => {
+    await Promise.allSettled([db.pool.end(), db.getSystemPool().end()]);
+  });

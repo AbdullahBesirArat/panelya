@@ -28,6 +28,7 @@ import {
 } from "@/lib/api";
 import { useSessionStore } from "@/store/session";
 import { useToastStore } from "@/store/toast";
+import { queryKeys } from "@/lib/query-keys";
 
 type EditableRole = "admin" | "member" | "viewer";
 
@@ -48,14 +49,14 @@ export function TeamSection({
   const canManageTeam = currentRole === "owner" || currentRole === "admin";
 
   const membersQuery = useQuery({
-    queryKey: ["team-members", organizationSlug],
+    queryKey: queryKeys.team.members(organizationSlug),
     queryFn: fetchTeamMembers,
     staleTime: 30_000,
     placeholderData: keepPreviousData,
   });
 
   const invitesQuery = useQuery({
-    queryKey: ["organization-invites", organizationSlug],
+    queryKey: queryKeys.team.invites(organizationSlug),
     queryFn: fetchOrganizationInvites,
     enabled: canManageTeam,
     staleTime: 30_000,
@@ -72,8 +73,8 @@ export function TeamSection({
         tone: "success",
       });
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["organization-invites", organizationSlug] }),
-        queryClient.invalidateQueries({ queryKey: ["summary", organizationSlug] }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.team.invites(organizationSlug) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.summary.detail(organizationSlug) }),
       ]);
     },
   });
@@ -86,7 +87,7 @@ export function TeamSection({
         description: "Ekip üyesinin yetkisi kaydedildi.",
         tone: "success",
       });
-      await queryClient.invalidateQueries({ queryKey: ["team-members", organizationSlug] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.team.members(organizationSlug) });
     },
   });
 
@@ -99,8 +100,8 @@ export function TeamSection({
         tone: "info",
       });
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["team-members", organizationSlug] }),
-        queryClient.invalidateQueries({ queryKey: ["summary", organizationSlug] }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.team.members(organizationSlug) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.summary.detail(organizationSlug) }),
       ]);
     },
   });
@@ -142,12 +143,13 @@ export function TeamSection({
           title="Ekip üyeleri"
           description="Aktif kullanıcılar ve mağaza yetkileri"
           actions={membersQuery.isFetching ? (
-            <span className="inline-flex h-10 items-center rounded-lg border border-line px-3 text-xs font-semibold text-zinc-500">
+            <span className="inline-flex h-10 items-center rounded-lg border border-line px-3 text-xs font-semibold text-zinc-600">
               Güncelleniyor
             </span>
           ) : null}
         >
           <DataGrid
+            caption="Ekip üyeleri"
             columns={["Üye", "Rol", "Son giriş", "Eklenme", "Aksiyon"]}
             emptyMessage="Henüz ekip üyesi yok."
             rows={members}
@@ -203,7 +205,7 @@ export function TeamSection({
             {inviteMutation.isError ? <InlineError message={inviteMutation.error.message} /> : null}
             {inviteToken ? (
               <div className="rounded-lg border border-line bg-zinc-50 p-3">
-                <p className="text-xs font-semibold uppercase text-zinc-500">Davet token</p>
+                <p className="text-xs font-semibold uppercase text-zinc-600">Davet token</p>
                 <p className="mt-2 break-all font-mono text-xs text-zinc-700">{inviteToken}</p>
               </div>
             ) : null}
@@ -214,6 +216,7 @@ export function TeamSection({
       <Panel title="Bekleyen davetler" description="Son oluşturulan ekip davetleri">
         {canManageTeam && invitesQuery.isError ? <InlineError message={invitesQuery.error.message} /> : null}
         <DataGrid
+          caption="Bekleyen davetler"
           columns={["E-posta", "Rol", "Durum", "Oluşturma", "Geçerlilik"]}
           emptyMessage={canManageTeam ? "Bekleyen davet yok." : "Davetleri görüntülemek için sahip veya yönetici rolü gerekir."}
           rows={canManageTeam ? invites : []}
@@ -247,7 +250,7 @@ function MemberRow({
     <tr>
       <DataCell>
         <p className="font-semibold text-ink">{member.name || member.email}</p>
-        <p className="text-xs text-zinc-500">{member.email}</p>
+        <p className="text-xs text-zinc-600">{member.email}</p>
       </DataCell>
       <DataCell>
         {member.role === "owner" ? (

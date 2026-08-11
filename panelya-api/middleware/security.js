@@ -92,10 +92,43 @@ function ensureProductionReady() {
     throw new Error('JWT_SECRET_APP ve JWT_SECRET_ADMIN farkli olmali');
   }
 
-  requireConfiguredEnv('DATABASE_URL', { minLength: 20 });
+  const runtimeDatabaseEnv = envValue('RUNTIME_DATABASE_URL')
+    ? 'RUNTIME_DATABASE_URL'
+    : 'DATABASE_URL';
+  const runtimeDatabaseUrl = requireConfiguredEnv(runtimeDatabaseEnv, { minLength: 20 });
+  const systemDatabaseUrl = requireConfiguredEnv('SYSTEM_DATABASE_URL', { minLength: 20 });
+  if (runtimeDatabaseUrl === systemDatabaseUrl) {
+    throw new Error('Runtime ve system database rolleri farkli olmali');
+  }
+  const migrationDatabaseUrl = envValue('MIGRATION_DATABASE_URL');
+  if (migrationDatabaseUrl && migrationDatabaseUrl === runtimeDatabaseUrl) {
+    throw new Error('Runtime ve migration database rolleri farkli olmali');
+  }
   requireConfiguredEnv('CORS_ORIGIN', { minLength: 8 });
   requireConfiguredEnv('PUBLIC_SITE_URL', { minLength: 8 });
   requireConfiguredEnv('PUBLIC_API_URL', { minLength: 8 });
+
+  const storageProvider = envValue('OBJECT_STORAGE_PROVIDER').toLowerCase();
+  if (storageProvider !== 's3') {
+    throw new Error('Production icin OBJECT_STORAGE_PROVIDER=s3 zorunlu');
+  }
+  requireConfiguredEnv('OBJECT_STORAGE_BUCKET', { minLength: 3 });
+  requireConfiguredEnv('OBJECT_STORAGE_ACCESS_KEY_ID', { minLength: 8 });
+  requireConfiguredEnv('OBJECT_STORAGE_SECRET_ACCESS_KEY', { minLength: 16 });
+  const invoiceEncryptionKey = requireConfiguredEnv('INVOICE_IDENTITY_ENCRYPTION_KEY', { minLength: 43 });
+  let invoiceKeyBytes = Buffer.alloc(0);
+  if (/^[0-9a-f]{64}$/i.test(invoiceEncryptionKey)) invoiceKeyBytes = Buffer.from(invoiceEncryptionKey, 'hex');
+  else {
+    try { invoiceKeyBytes = Buffer.from(invoiceEncryptionKey, 'base64'); } catch { invoiceKeyBytes = Buffer.alloc(0); }
+  }
+  if (invoiceKeyBytes.length !== 32) {
+    throw new Error('INVOICE_IDENTITY_ENCRYPTION_KEY tam 32 byte hex veya base64 olmali');
+  }
+
+  const shippingWebhookSecret = envValue('SHIPPING_WEBHOOK_SECRET');
+  if (shippingWebhookSecret && (shippingWebhookSecret.length < 32 || hasWeakMarker(shippingWebhookSecret))) {
+    throw new Error('SHIPPING_WEBHOOK_SECRET en az 32 karakterlik random deger olmali');
+  }
 
   const paymentProvider = envValue('PAYMENT_PROVIDER').toLowerCase();
   if (!paymentProvider) {

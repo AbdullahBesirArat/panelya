@@ -69,7 +69,7 @@ async function requestEmailChange(client, { organizationId, account, newEmailRaw
 // ve TUM aktif musteri oturumu (session_token_hash) iptal edilir.
 //
 // Donen `outcome`: 'invalid' | 'conflict' | 'changed'
-async function confirmEmailChange(client, { tokenHash }) {
+async function confirmEmailChange(client, { tokenHash, setTenantContext = null }) {
   const tokenResult = await client.query(
     `select id, organization_id, subject_id, new_email
        from email_magic_link_tokens
@@ -90,6 +90,10 @@ async function confirmEmailChange(client, { tokenHash }) {
   const newEmail = normalizeEmail(row.new_email);
   const organizationId = row.organization_id;
   const subjectId = row.subject_id;
+
+  if (setTenantContext) {
+    await setTenantContext(client, organizationId);
+  }
 
   // Yaris kosulu: onay aninda e-posta baska hesaba gecmis olabilir.
   const conflict = await client.query(
