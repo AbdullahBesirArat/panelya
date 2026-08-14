@@ -14,7 +14,10 @@ language sql
 immutable
 parallel safe
 as $$
-  select unaccent('unaccent', lower(translate(coalesce(value, ''), 'Iİı', 'iii')))
+  select public.unaccent(
+    'public.unaccent'::regdictionary,
+    lower(translate(coalesce(value, ''), 'Iİı', 'iii'))
+  )
 $$;
 
 create index if not exists idx_products_catalog_scope_created
