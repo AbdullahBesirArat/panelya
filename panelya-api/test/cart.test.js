@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const {
   generateToken, hashToken, verifyToken, isValidTokenFormat, safeEqualHex,
 } = require('../modules/cart/token');
-const { normalizeQuantity, serializeCart } = require('../modules/cart/service');
+const { normalizeCartSnapshotText, normalizeQuantity, serializeCart } = require('../modules/cart/service');
 const { abandonSettings, expireStaleCarts } = require('../modules/cart/abandoned');
 const { roundMoney, emptyTotals } = require('../modules/cart/pricing');
 
@@ -38,6 +38,12 @@ test('quantity normalization enforces 1..99 integer bounds', () => {
   for (const bad of [0, -1, 100, 1.5, 'abc', NaN]) {
     assert.throws(() => normalizeQuantity(bad), (error) => error.code === 'INVALID_QUANTITY');
   }
+});
+
+test('cart snapshot text normalizes nullable legacy variant metadata', () => {
+  assert.equal(normalizeCartSnapshotText(null), '');
+  assert.equal(normalizeCartSnapshotText(undefined), '');
+  assert.equal(normalizeCartSnapshotText('SKU-1'), 'SKU-1');
 });
 
 test('serializeCart exposes version/totals and never leaks the guest token hash', () => {

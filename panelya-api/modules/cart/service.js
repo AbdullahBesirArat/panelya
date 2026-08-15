@@ -14,6 +14,10 @@ function normalizeQuantity(value) {
   return quantity;
 }
 
+function normalizeCartSnapshotText(value) {
+  return value == null ? '' : String(value);
+}
+
 function assertVersion(cart, expectedVersion) {
   if (expectedVersion == null) return;
   if (Number(expectedVersion) !== Number(cart.version)) {
@@ -149,7 +153,8 @@ async function persistPricedCart(client, { organizationId, cart, rawItems, coupo
          line_total_snapshot, product_name_snapshot, sku_snapshot, color_snapshot, size_snapshot)
        values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
       [organizationId, cart.id, item.product_id, item.variant_id, item.quantity, item.unit_price,
-        lineTotal, item.name, item.sku, item.selected_color, item.selected_size]
+        lineTotal, normalizeCartSnapshotText(item.name), normalizeCartSnapshotText(item.sku),
+        normalizeCartSnapshotText(item.selected_color), normalizeCartSnapshotText(item.selected_size)]
     );
   }
 
@@ -650,5 +655,6 @@ module.exports = {
   loadGiftForDisplay,
   mergeGuestIntoCustomer,
   logCartEvent,
+  normalizeCartSnapshotText,
   normalizeQuantity,
 };
