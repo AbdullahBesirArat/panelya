@@ -76,6 +76,7 @@ const domainOperationsRoutes = require('./routes/domainOperations');
 const themeRoutes = require('./routes/themes');
 const storefrontThemeRoutes = require('./routes/storefrontTheme');
 const integrationRoutes = require('./routes/integrations');
+const instagramImportRoutes = require('./routes/instagramImports');
 const securityRoutes = require('./routes/security');
 const webVitalsRoutes = require('./routes/webVitals');
 const v1Routes = require('./routes/v1');
@@ -84,6 +85,7 @@ const { startImportWorker } = require('./modules/imports/worker');
 const { startAbandonedCartWorker } = require('./modules/cart/abandoned');
 const { startNotificationOutboxWorker } = require('./modules/notifications/worker');
 const { startSubscriptionLifecycleWorker } = require('./services/subscriptionWorker');
+const { startInstagramWorker } = require('./modules/instagram/worker');
 
 const app = express();
 const port = Number(process.env.PORT || 3000);
@@ -368,6 +370,7 @@ app.use('/api/platform', platformRoutes);
   app.use('/api/themes', themeRoutes);
   app.use('/api/storefront-theme', storefrontThemeRoutes);
   app.use('/api/integrations', integrationRoutes);
+  app.use('/api/instagram-imports', instagramImportRoutes);
   // A29: the public, versioned external API. Mounted at its own prefix, with its own
   // authentication (API key, not session) and its own stable error contract, so an
   // integration written against it is not coupled to the dashboard's internal routes.
@@ -440,3 +443,4 @@ startAbandonedCartWorker();
 startNotificationOutboxWorker();
 startSubscriptionLifecycleWorker();
 startWebhookWorker();
+startInstagramWorker();

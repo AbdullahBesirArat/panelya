@@ -297,6 +297,64 @@ if (!ADMIN_URL) {
     assert.deepEqual(owners.rows.map((row) => row.tableowner), ['panelya_migrator']);
   });
 
+  test('A34 Instagram staging graph is FORCE-RLS isolated across all five tables', async () => {
+    const actor = await admin.query(
+      "insert into app_users (email, name) values ($1,'A34 Operator') returning id",
+      [`a34-${Date.now()}@example.test`]
+    );
+    async function graph(organizationId, suffix, assetId) {
+      const connection = await admin.query(
+        `insert into instagram_connections (organization_id, external_account_id, username, account_type, created_by)
+         values ($1,$2,$3,'Business',$4) returning id`,
+        [organizationId, `ig-${suffix}`, `shop-${suffix}`, actor.rows[0].id]
+      );
+      await admin.query(
+        `insert into instagram_oauth_states (organization_id, actor_id, state_hash, expires_at)
+         values ($1,$2,$3,now()+interval '12 minutes')`,
+        [organizationId, actor.rows[0].id, crypto.createHash('sha256').update(`state-${suffix}`).digest('hex')]
+      );
+      const media = await admin.query(
+        `insert into instagram_media_items
+         (organization_id,connection_id,external_media_id,caption_hash,media_type,source_metadata)
+         values ($1,$2,$3,$4,'IMAGE',$5::jsonb) returning id`,
+        [organizationId, connection.rows[0].id, `media-${suffix}`,
+          crypto.createHash('sha256').update(`caption-${suffix}`).digest('hex'), JSON.stringify({ children: [] })]
+      );
+      const draft = await admin.query(
+        `insert into instagram_product_drafts (organization_id,media_item_id,status,product_name,price,price_explicit)
+         values ($1,$2,'ready',$3,100,true) returning id`,
+        [organizationId, media.rows[0].id, `Product ${suffix}`]
+      );
+      await admin.query(
+        `insert into instagram_product_draft_images
+         (organization_id,draft_id,external_media_id,position,asset_id,detail_url,card_url,thumbnail_url)
+         values ($1,$2,$3,0,$4,$5,$6,$7)`,
+        [organizationId, draft.rows[0].id, `child-${suffix}`, assetId,
+          `/api/media/${assetId}/detail`, `/api/media/${assetId}/card`, `/api/media/${assetId}/thumbnail`]
+      );
+      return { connectionId: connection.rows[0].id };
+    }
+    const first = await graph(orgA, 'a', fixtures.a.assetId);
+    await graph(orgB, 'b', fixtures.b.assetId);
+    await asTenant(runtimePool, orgA, async (client) => {
+      for (const table of ['instagram_connections', 'instagram_oauth_states', 'instagram_media_items', 'instagram_product_drafts', 'instagram_product_draft_images']) {
+        const result = await client.query(`select organization_id from ${table}`);
+        assert.ok(result.rows.length > 0, `${table} fixture is visible`);
+        assert.ok(result.rows.every((row) => row.organization_id === orgA), `${table} cannot leak tenant B`);
+      }
+      await client.query('savepoint a34_move');
+      await assert.rejects(
+        client.query('update instagram_connections set organization_id=$1 where organization_id=$2 and id=$3', [orgB, orgA, first.connectionId]),
+        /row-level security/i,
+      );
+      await client.query('rollback to savepoint a34_move');
+      await assert.rejects(client.query(
+        `insert into instagram_connections (organization_id,external_account_id,username,account_type)
+         values ($1,'cross-tenant','cross','Business')`, [orgB]
+      ), /row-level security/i);
+    });
+  });
+
   test('migration runner is idempotent after the complete 001-048 chain', async () => {
     await runMigrations({ pool: migratorPool, logger: { log() {}, warn() {} } });
     const applied = await admin.query("select filename from schema_migrations where filename in ('038_tenant_composite_fk_rls.sql','039_object_storage_media.sql','040_public_catalog_search.sql','041_inventory_ledger.sql','042_inventory_reservations.sql','043_coupon_promotion_engine.sql','044_order_operations_timeline.sql','045_returns_refunds.sql','046_shipping_fulfillment.sql','047_invoicing_tax.sql','048_catalog_import_export.sql') order by filename");
@@ -5641,6 +5699,8 @@ const integrationService = require('../../modules/integrations/service');
   });
 
   test('safe rollback retains tenant columns; cross-tenant corruption blocks reapply', async () => {
+    // A34's five FORCE-RLS policies also depend on the helper introduced in 038.
+    await runRollback({ pool: migratorPool, target: '072_instagram_ai_catalog_ingestion.sql', logger: { log() {}, warn() {} } });
     // A30's tenant policy depends on the RLS helper introduced in 038, so additive A30
     // objects must be rolled back before the historical chain is unwound beneath them.
     // A32's customer trigram index depends on the normalization function from 040 and

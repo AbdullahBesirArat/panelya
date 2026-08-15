@@ -2,6 +2,7 @@
 
 import type { FormEvent } from "react";
 import Image from "next/image";
+import dynamic from "next/dynamic";
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -122,11 +123,14 @@ const productSizePresets = [
   ...Array.from({ length: 27 }, (_, index) => String(34 + index)),
 ];
 
-type ProductsTab = "products" | "create" | "categories" | "colors" | "sizes";
+const InstagramImportPanel = dynamic(() => import("@/features/instagram-import/instagram-import-panel").then((module) => module.InstagramImportPanel));
+
+type ProductsTab = "products" | "create" | "instagram" | "categories" | "colors" | "sizes";
 
 const productTabs: Array<{ key: ProductsTab; label: string; description: string }> = [
   { key: "products", label: "Ürünler", description: "Katalog listesi ve filtreler" },
   { key: "create", label: "Ürün Oluştur", description: "Yeni ürün / düzenleme formu" },
+  { key: "instagram", label: "Instagram + AI", description: "Gönderilerden ürün taslağı" },
   { key: "categories", label: "Kategoriler", description: "Kategori yönetimi" },
   { key: "colors", label: "Renkler", description: "Özel renk önerileri" },
   { key: "sizes", label: "Bedenler", description: "Özel beden önerileri" },
@@ -183,7 +187,7 @@ export function ProductsSection({
   const [customSizeColor, setCustomSizeColor] = useState<string | null>(null);
   const [customSizeInput, setCustomSizeInput] = useState("");
   // Sekmeli yapi + merkezi renk/beden yonetim sekmesi input state.
-  const [activeProductsTab, setActiveProductsTab] = useState<ProductsTab>("products");
+  const [activeProductsTab, setActiveProductsTab] = useUrlFilterState<ProductsTab>("tab", "products");
   const [manageColorName, setManageColorName] = useState("");
   const [manageColorHex, setManageColorHex] = useState("#d8c3a5");
   const [manageSizeInput, setManageSizeInput] = useState("");
@@ -784,8 +788,8 @@ export function ProductsSection({
         ]}
       />
       <div className="rounded-2xl border border-line bg-white p-2 shadow-sm">
-        <div className="grid gap-2 md:grid-cols-5">
-          {productTabs.map((tab) => {
+        <div className="grid gap-2 md:grid-cols-3 xl:grid-cols-6">
+          {productTabs.filter((tab) => tab.key !== "instagram" || canManageCatalog).map((tab) => {
             const active = activeProductsTab === tab.key;
             return (
               <button
@@ -863,6 +867,10 @@ export function ProductsSection({
           items={pickActivity(summary, ["product", "category"], categories)}
         />
       </div>
+      ) : null}
+
+      {activeProductsTab === "instagram" && canManageCatalog ? (
+        <InstagramImportPanel organizationSlug={organizationSlug} />
       ) : null}
 
       {activeProductsTab === "create" ? (

@@ -131,6 +131,10 @@ async function handle(req: NextRequest, ctx: { params: Promise<{ path?: string[]
   if (contentType) headers.set("content-type", contentType);
   const accept = req.headers.get("accept");
   if (accept) headers.set("accept", accept);
+  const idempotencyKey = req.headers.get("idempotency-key");
+  if (idempotencyKey && /^[A-Za-z0-9][A-Za-z0-9._:-]{7,199}$/.test(idempotencyKey)) {
+    headers.set("idempotency-key", idempotencyKey);
+  }
   const accessToken = req.cookies.get(ACCESS_COOKIE)?.value;
   if (accessToken) headers.set("authorization", `Bearer ${accessToken}`);
 
@@ -191,6 +195,10 @@ async function handle(req: NextRequest, ctx: { params: Promise<{ path?: string[]
     res.headers.set("content-type", respContentType || "application/octet-stream");
     const contentDisposition = upstream.headers.get("content-disposition");
     if (contentDisposition) res.headers.set("content-disposition", contentDisposition);
+    const location = upstream.headers.get("location");
+    // OAuth callbacks may return to a dashboard page, but the upstream can only choose
+    // an absolute-path location on this origin. Never turn the BFF into an open redirect.
+    if (location?.startsWith("/") && !location.startsWith("//")) res.headers.set("location", location);
     res.headers.set("x-content-type-options", "nosniff");
     if (isLogoutPath(joined)) clearAuthCookies(res);
     return res;

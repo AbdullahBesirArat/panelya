@@ -159,6 +159,12 @@ export const queryKeys = {
     deliveries: (organizationSlug: string, filterKey: string) =>
       ["integrations", organizationSlug, "deliveries", filterKey] as const,
   },
+  instagramImport: {
+    all: (organizationSlug: string) => ["instagram-import", organizationSlug] as const,
+    connections: (organizationSlug: string) => ["instagram-import", organizationSlug, "connections"] as const,
+    media: (organizationSlug: string, status: string) => ["instagram-import", organizationSlug, "media", status] as const,
+    draft: (organizationSlug: string, draftId?: string | null) => ["instagram-import", organizationSlug, "draft", draftId ?? null] as const,
+  },
   sizeGuides: {
     all: (organizationSlug: string) => ["size-guides", organizationSlug] as const,
     forProduct: (organizationSlug: string, productId: string) => ["size-guide-product", organizationSlug, productId] as const,

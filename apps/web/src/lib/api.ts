@@ -14,3 +14,4 @@ export * from "./api/coupons";
 export * from "./api/organizations";
 export * from "./api/platform";
 export * from "./api/subscriptions";
+export * from "./api/instagram-import";

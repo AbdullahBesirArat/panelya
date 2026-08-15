@@ -11,6 +11,8 @@ async function synchronizeProductRelations(client, {
   tenantPrefix = '',
   productName = '',
   actorId = null,
+  actorType = 'admin',
+  inventoryReason = 'Product form inventory adjustment',
   images,
   altText,
 }) {
@@ -27,6 +29,8 @@ async function synchronizeProductRelations(client, {
     tenantPrefix,
     productName,
     actorId,
+    actorType,
+    inventoryReason,
   });
   await syncMediaReferences(client, {
     organizationId,

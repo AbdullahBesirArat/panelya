@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { NextRequest } from "next/server";
 
-import { POST, upstreamFailureReason } from "../src/app/api/bff/[...path]/route";
+import { GET, POST, upstreamFailureReason } from "../src/app/api/bff/[...path]/route";
 import { needsRefreshCookieInjection } from "../src/lib/bff-config";
 
 // Regression guard for A20 catalog import upload: the BFF must forward a
@@ -83,4 +83,38 @@ test("BFF forwards multipart import uploads byte-for-byte without JSON conversio
   } finally {
     global.fetch = originalFetch;
   }
+});
+
+test("BFF forwards only same-origin OAuth callback locations", async () => {
+  const originalFetch = global.fetch;
+  try {
+    global.fetch = (async () => new Response(null, { status: 303, headers: { location: "/products?tab=instagram" } })) as typeof global.fetch;
+    const safe = await GET(new NextRequest("http://localhost:3000/api/bff/instagram-imports/oauth/callback?code=x&state=y", {
+      headers: { "sec-fetch-site": "same-origin" },
+    }), { params: Promise.resolve({ path: ["instagram-imports", "oauth", "callback"] }) });
+    assert.equal(safe.headers.get("location"), "/products?tab=instagram");
+
+    global.fetch = (async () => new Response(null, { status: 303, headers: { location: "https://evil.example/steal" } })) as typeof global.fetch;
+    const unsafe = await GET(new NextRequest("http://localhost:3000/api/bff/instagram-imports/oauth/callback?code=x&state=y", {
+      headers: { "sec-fetch-site": "same-origin" },
+    }), { params: Promise.resolve({ path: ["instagram-imports", "oauth", "callback"] }) });
+    assert.equal(unsafe.headers.get("location"), null);
+  } finally { global.fetch = originalFetch; }
+});
+
+test("BFF forwards only well-formed idempotency keys", async () => {
+  const originalFetch = global.fetch;
+  const seen: Array<string | null> = [];
+  global.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    seen.push(new Headers(init?.headers).get("idempotency-key"));
+    return new Response(JSON.stringify({ id: 1 }), { status: 201, headers: { "content-type": "application/json" } });
+  }) as typeof global.fetch;
+  try {
+    for (const key of ["instagram-ui:12345678", "bad key with spaces"]) {
+      await POST(new NextRequest("http://localhost:3000/api/bff/instagram-imports/drafts/d1/apply", {
+        method: "POST", headers: { "content-type": "application/json", "idempotency-key": key, "sec-fetch-site": "same-origin" }, body: "{}",
+      }), { params: Promise.resolve({ path: ["instagram-imports", "drafts", "d1", "apply"] }) });
+    }
+    assert.deepEqual(seen, ["instagram-ui:12345678", null]);
+  } finally { global.fetch = originalFetch; }
 });

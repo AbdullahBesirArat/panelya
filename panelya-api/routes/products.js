@@ -3,7 +3,6 @@ const db = require('../db');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { auditLog } = require('../services/audit');
 const { resolveOrganization } = require('../services/tenant');
-const { assertPlanCapacity } = require('../services/planLimits');
 const { setInventoryBalances } = require('../services/inventory');
 const { syncMediaReferences } = require('../services/mediaAssets');
 const notifications = require('../modules/notifications/service');
@@ -19,6 +18,7 @@ const {
 const { isAdminManagementRequest } = require('../modules/catalog/policy');
 const { assertCategoryScope, productSelect, fetchProduct } = require('../modules/catalog/repository');
 const { synchronizeProductRelations } = require('../modules/catalog/service');
+const { createProduct } = require('../modules/catalog/productWriter');
 const { listProducts, getProduct } = require('../modules/catalog/controller');
 
 /**
@@ -127,36 +127,13 @@ router.post('/', requireAuth, requireRole(['super_admin', 'owner', 'admin']), as
 
   try {
     const organization = await resolveOrganization(req, client);
-    const variants = normalizeVariants(req.body.variants);
-    const params = productParams(req.body);
-    const requestedStock = params[4];
-    const canonicalParams = [...params.slice(0, 4), ...params.slice(5)];
-
     await client.query('begin');
     await db.setTenantContext(client, organization.id);
-    await assertPlanCapacity(client, organization.id, 'products');
-    await assertCategoryScope(client, organization.id, params[1]);
-    const result = await client.query(
-      `insert into products
-       (organization_id, name, category_id, price, sale_price, stock, status, colors, sizes, images, details, tags, description, product_story, emoji, featured_in_category)
-       values ($1,$2,$3,$4,$5,0,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
-       returning *`,
-      [organization.id, ...canonicalParams]
-    );
-    await synchronizeProductRelations(client, {
-      organizationId: organization.id,
-      productId: result.rows[0].id,
-      variants,
-      defaultStock: requestedStock,
-      productStatus: params[5],
-      autoGenerateSku: req.body.auto_generate_sku === true,
-      tenantPrefix: organization.slug,
-      productName: params[0],
+    const product = await createProduct(client, {
+      organization,
+      input: req.body,
       actorId: req.auth?.sub || req.auth?.userId || null,
-      images: JSON.parse(params[8]),
-      altText: params[0],
     });
-    const product = await fetchProduct(client, result.rows[0].id, organization.id);
 
     await auditLog(req, {
       action: 'CREATE',
