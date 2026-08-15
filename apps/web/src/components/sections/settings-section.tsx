@@ -5,7 +5,7 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import {
-  API_BASE,
+  STOREFRONT_API_BASE,
   changeTenantPassword,
   changeOrganizationEmail,
   regeneratePublicAccessToken,
@@ -105,7 +105,7 @@ export function SettingsSection({
   const currentEmailHint = storeSettings.contactEmail || user?.email || "";
   const publicAccessToken = latestPublicToken || currentOrganization?.publicAccessToken || "-";
   const storefrontSnippet = [
-    `window.SUVERA_API_BASE = "${API_BASE}";`,
+    `window.SUVERA_API_BASE = "${STOREFRONT_API_BASE}";`,
     `window.SUVERA_ORGANIZATION_SLUG = "${summary.organization.slug}";`,
     `window.SUVERA_PUBLIC_ACCESS_TOKEN = "${publicAccessToken === "-" ? "PUBLIC_ACCESS_TOKEN" : publicAccessToken}";`,
   ].join("\n");
@@ -516,7 +516,7 @@ export function SettingsSection({
         >
           <div className="space-y-4">
             <div className="grid gap-3 sm:grid-cols-3">
-              <InfoBox label="API Adresi" value={API_BASE} />
+              <InfoBox label="API Adresi" value={STOREFRONT_API_BASE} />
               <InfoBox label="Mağaza Kısa Adı" value={summary.organization.slug} />
               <InfoBox label="Genel Erişim Anahtarı" value={publicAccessToken} />
             </div>

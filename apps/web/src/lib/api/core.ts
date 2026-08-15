@@ -1,8 +1,10 @@
 import { useSessionStore } from "@/store/session";
 import { ApiError, type SessionResponse } from "./types";
 
-// Real upstream origin is used only for public asset URLs/config snippets.
+// Real upstream origin is used only for public asset URLs.
 export const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:3000/api";
+// Storefront browser traffic must stay on the storefront's same-origin Vercel proxy.
+export const STOREFRONT_API_BASE = "/api";
 const REQUEST_BASE = "/api/bff";
 
 async function parseResponse<T>(response: Response): Promise<T> {

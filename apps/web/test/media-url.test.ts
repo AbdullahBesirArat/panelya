@@ -1,8 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { STOREFRONT_API_BASE } from "../src/lib/api/core";
 import { resolveApiAssetUrl } from "../src/lib/api/media";
 
 const API_BASE = "https://api.example.test/api";
+
+test("storefront configuration keeps browser API traffic on the same origin", () => {
+  assert.equal(STOREFRONT_API_BASE, "/api");
+});
 
 test("media URL resolver keeps absolute HTTP assets unchanged", () => {
   assert.equal(
