@@ -213,6 +213,22 @@ function createS3Storage(env = process.env) {
   };
 }
 
+const LOCAL_DB_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
+
+/**
+ * Whether the process is pointed at a local database. An unparseable or remote target
+ * counts as non-local so the storage guard below fails closed.
+ */
+function isLocalDatabaseTarget(env) {
+  const url = String(env.RUNTIME_DATABASE_URL || env.DATABASE_URL || '').trim();
+  if (!url) return true;
+  try {
+    return LOCAL_DB_HOSTS.has(new URL(url).hostname.toLowerCase());
+  } catch (_) {
+    return false;
+  }
+}
+
 function createObjectStorage({ env = process.env } = {}) {
   const provider = normalizeProvider(env.OBJECT_STORAGE_PROVIDER);
   if (provider === 's3') return createS3Storage(env);
@@ -221,6 +237,18 @@ function createObjectStorage({ env = process.env } = {}) {
   }
   if (String(env.NODE_ENV || '').toLowerCase() === 'production') {
     throw new Error('Production ortaminda OBJECT_STORAGE_PROVIDER=s3 zorunlu');
+  }
+  // NODE_ENV alone is not a sufficient gate: sibling Railway service envs (e.g.
+  // `railway run -s Postgres`) carry the production DATABASE_URL but neither NODE_ENV
+  // nor the S3 variables. A trusted ingestion path run that way used to fall back to
+  // filesystem silently, writing derivatives to local disk while persisting
+  // storage_provider='filesystem' rows against the production database — which then made
+  // routes/media.js answer 503 for every affected asset. Refuse instead of degrading.
+  if (!isLocalDatabaseTarget(env)) {
+    throw Object.assign(
+      new Error('PRODUCTION_OBJECT_STORAGE_NOT_CONFIGURED: uzak veritabani hedefiyle filesystem storage kullanilamaz'),
+      { code: 'PRODUCTION_OBJECT_STORAGE_NOT_CONFIGURED' }
+    );
   }
   return createFilesystemStorage({ root: env.OBJECT_STORAGE_LOCAL_DIR });
 }
@@ -274,4 +302,5 @@ module.exports = {
   createFilesystemStorage,
   createS3Storage,
   createMemoryStorage,
+  isLocalDatabaseTarget,
 };

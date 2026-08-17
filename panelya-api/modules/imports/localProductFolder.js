@@ -1,4 +1,5 @@
 const { createProduct } = require('../catalog/productWriter');
+const { isLocalDatabaseTarget } = require('../../services/objectStorage');
 
 const DEFAULT_VARIANT_STOCK = 5;
 const PLACEHOLDER_PRICE = 1;
@@ -88,15 +89,34 @@ function buildLocalProductFolderPlan(input = {}) {
   return { productWriterInput, receipt };
 }
 
+/**
+ * A local-folder import persists media rows that record which backend holds the bytes.
+ * If the caller assembled a filesystem storage while writing to a non-local database, the
+ * bytes land on the operator's disk and every derivative answers 503 in production. The
+ * media URLs in `input.images` are already produced by then, so the check has to run
+ * before the product row is written, not after.
+ */
+function assertIngestionStorage(storage, env = process.env) {
+  if (!storage) return;
+  if (storage.provider === 's3') return;
+  if (isLocalDatabaseTarget(env) && String(env.NODE_ENV || '').toLowerCase() !== 'production') return;
+  throw Object.assign(
+    new Error(`PRODUCTION_OBJECT_STORAGE_NOT_CONFIGURED: '${storage.provider}' storage ile production import yapilamaz`),
+    { code: 'PRODUCTION_OBJECT_STORAGE_NOT_CONFIGURED' }
+  );
+}
+
 async function executeLocalProductFolderImport(client, {
   organization,
   input,
   actorId = null,
   actorType = 'import',
+  storage = null,
 } = {}) {
   if (!organization || !organization.id) {
     throw Object.assign(new Error('organization zorunlu'), { code: 'LOCAL_FOLDER_FIELD_REQUIRED' });
   }
+  assertIngestionStorage(storage);
   const plan = buildLocalProductFolderPlan(input);
   const product = await createProduct(client, {
     organization,
@@ -114,6 +134,7 @@ async function executeLocalProductFolderImport(client, {
 module.exports = {
   DEFAULT_VARIANT_STOCK,
   PLACEHOLDER_PRICE,
+  assertIngestionStorage,
   buildLocalProductFolderPlan,
   executeLocalProductFolderImport,
 };
