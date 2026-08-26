@@ -8,6 +8,8 @@ import {
   REFRESH_COOKIE_MAX_AGE,
   RESTORE_COOKIE_MAX_AGE,
   upstreamApiOrigin,
+  upstreamAssetOrigin,
+  isLegacyUploadPath,
   isSameOriginRequest,
   stripTokens,
   isImpersonationStart,
@@ -124,7 +126,10 @@ async function handle(req: NextRequest, ctx: { params: Promise<{ path?: string[]
   }
 
   const url = new URL(req.url);
-  const upstreamUrl = `${upstreamApiOrigin()}/${joined}${url.search}`;
+  // Legacy `/uploads/<file>` assets sit at the API root rather than under `/api`.
+  const legacyUpload = isLegacyUploadPath(req.method, joined);
+  const upstreamBase = legacyUpload ? upstreamAssetOrigin() : upstreamApiOrigin();
+  const upstreamUrl = `${upstreamBase}/${joined}${url.search}`;
 
   const headers = new Headers();
   const contentType = req.headers.get("content-type");
@@ -136,7 +141,8 @@ async function handle(req: NextRequest, ctx: { params: Promise<{ path?: string[]
     headers.set("idempotency-key", idempotencyKey);
   }
   const accessToken = req.cookies.get(ACCESS_COOKIE)?.value;
-  if (accessToken) headers.set("authorization", `Bearer ${accessToken}`);
+  // Legacy uploads are public static bytes; the session token has no business there.
+  if (accessToken && !legacyUpload) headers.set("authorization", `Bearer ${accessToken}`);
 
   const method = req.method.toUpperCase();
   const hasBody = !["GET", "HEAD"].includes(method);

@@ -1,4 +1,5 @@
 import { authenticatedRequest, buildQuery } from "./core";
+import { toBffAssetPath } from "./media";
 import { getApiErrorCode } from "./types";
 
 export type InstagramConnection = {
@@ -52,8 +53,10 @@ export const skipInstagramDraft = (id: string) => authenticatedRequest<void>(`/i
 export const skipInstagramDraftsBulk = (ids: string[]) => authenticatedRequest<void>(`/instagram-imports/drafts/skip-bulk`, { method: "POST", body: JSON.stringify({ ids }) });
 export const discardInstagramDraft = (id: string) => authenticatedRequest<void>(`/instagram-imports/drafts/${id}`, { method: "DELETE" });
 
+// Draft previews share the catalogue's proxy mapping so the two cannot drift apart;
+// anything the proxy does not own (an absolute permalink) is handed back untouched.
 export function dashboardMediaUrl(url: string) {
-  return url.startsWith("/api/") ? `/api/bff/${url.slice(5)}` : url;
+  return toBffAssetPath(url) || url;
 }
 
 export function instagramImportErrorMessage(error: unknown) {

@@ -3,7 +3,7 @@ import test from "node:test";
 import { NextRequest } from "next/server";
 
 import { GET, POST, upstreamFailureReason } from "../src/app/api/bff/[...path]/route";
-import { needsRefreshCookieInjection } from "../src/lib/bff-config";
+import { ACCESS_COOKIE, needsRefreshCookieInjection } from "../src/lib/bff-config";
 
 // Regression guard for A20 catalog import upload: the BFF must forward a
 // multipart/form-data body to the upstream API byte-for-byte and must never
@@ -117,4 +117,48 @@ test("BFF forwards only well-formed idempotency keys", async () => {
     }
     assert.deepEqual(seen, ["instagram-ui:12345678", null]);
   } finally { global.fetch = originalFetch; }
+});
+
+// Media previews on the production dashboard used to be built against a client-side
+// upstream origin that defaulted to localhost. They now travel this proxy, so the two
+// upstream shapes it has to reach are pinned here: `/api/...` under the API prefix, and
+// the legacy `/uploads/<file>` assets that sit beside it at the API root.
+test("BFF proxies media previews to the API and legacy uploads to the API root", async () => {
+  const originalFetch = global.fetch;
+  const seen: Array<{ url: string; authorization: string | null }> = [];
+  global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    seen.push({ url: String(input), authorization: new Headers(init?.headers).get("authorization") });
+    return new Response(Buffer.from("RIFFWEBP"), { status: 200, headers: { "content-type": "image/webp" } });
+  }) as typeof global.fetch;
+
+  try {
+    const cookie = `${ACCESS_COOKIE}=token-value`;
+    const media = await GET(
+      new NextRequest("http://localhost:3001/api/bff/media/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/detail", {
+        headers: { "sec-fetch-site": "same-origin", cookie },
+      }),
+      { params: Promise.resolve({ path: ["media", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "detail"] }) },
+    );
+    assert.equal(media.status, 200);
+    assert.equal(media.headers.get("content-type"), "image/webp");
+
+    const legacy = await GET(
+      new NextRequest("http://localhost:3001/api/bff/uploads/item.webp", {
+        headers: { "sec-fetch-site": "same-origin", cookie },
+      }),
+      { params: Promise.resolve({ path: ["uploads", "item.webp"] }) },
+    );
+    assert.equal(legacy.status, 200);
+
+    assert.deepEqual(seen, [
+      {
+        url: "http://localhost:3000/api/media/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/detail",
+        authorization: "Bearer token-value",
+      },
+      // API root, and no session token on a public static asset.
+      { url: "http://localhost:3000/uploads/item.webp", authorization: null },
+    ]);
+  } finally {
+    global.fetch = originalFetch;
+  }
 });

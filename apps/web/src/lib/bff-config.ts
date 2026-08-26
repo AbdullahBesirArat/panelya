@@ -26,6 +26,23 @@ export function upstreamApiOrigin(): string {
   return raw.replace(/\/+$/, "");
 }
 
+// Legacy catalogue rows still carry API-root `/uploads/<file>` image paths, which are
+// mounted beside `/api`, not under it. Exactly that one shape is proxied — a single
+// safe filename, read-only — so the dashboard can render those previews without ever
+// putting the upstream origin in the browser. Nothing else at the API root is reachable.
+const LEGACY_UPLOAD_PATH = /^uploads\/[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+export function isLegacyUploadPath(method: string, joinedPath: string): boolean {
+  if (!["GET", "HEAD"].includes(String(method || "").toUpperCase())) return false;
+  if (joinedPath.includes("..")) return false;
+  return LEGACY_UPLOAD_PATH.test(joinedPath);
+}
+
+// The API root, i.e. the upstream base without its `/api` prefix.
+export function upstreamAssetOrigin(): string {
+  return upstreamApiOrigin().replace(/\/api$/, "");
+}
+
 // CSRF defence: only accept state-changing requests that are provably same-site.
 export function isSameOriginRequest(method: string, headers: Headers, selfOrigin: string): boolean {
   const m = String(method || "GET").toUpperCase();
