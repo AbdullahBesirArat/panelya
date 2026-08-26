@@ -36,6 +36,31 @@ test('local-folder imports assign exactly five units to every color-size variant
   assert.equal(plan.receipt.totalStock, 20);
 });
 
+test('local-folder imports preserve explicit per-color size combinations', () => {
+  const plan = buildLocalProductFolderPlan(baseInput({
+    colors: ['Siyah', 'Vizon'],
+    sizes: ['S', 'M', 'L'],
+    variants: [
+      { color: 'Siyah', size: 'M', stock: 99 },
+      { color: 'Siyah', size: 'L', stock: 99 },
+      { color: 'Vizon', size: 'S', stock: 99 },
+      { color: 'Vizon', size: 'M', stock: 99 },
+    ],
+    sourceFolder: '046-puane-32468-takim',
+    sourceCaptionChecksum: 'abc123',
+  }));
+
+  assert.deepEqual(plan.productWriterInput.variants.map(({ color, size, stock }) => ({ color, size, stock })), [
+    { color: 'Siyah', size: 'M', stock: 5 },
+    { color: 'Siyah', size: 'L', stock: 5 },
+    { color: 'Vizon', size: 'S', stock: 5 },
+    { color: 'Vizon', size: 'M', stock: 5 },
+  ]);
+  assert.equal(plan.productWriterInput.stock, 20);
+  assert.equal(plan.productWriterInput.details.source_folder, '046-puane-32468-takim');
+  assert.equal(plan.productWriterInput.details.source_caption_checksum, 'abc123');
+});
+
 test('local-folder content fields never copy product story into unknown facts', () => {
   const plan = buildLocalProductFolderPlan(baseInput({
     measurements: undefined,

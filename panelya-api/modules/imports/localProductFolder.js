@@ -26,13 +26,38 @@ function captionPrice(input) {
   return { price: PLACEHOLDER_PRICE, priceSource: 'placeholder', priceNeedsReview: true };
 }
 
+function explicitVariants(input, colors, sizes) {
+  if (!Array.isArray(input.variants) || !input.variants.length) return null;
+  const allowedColors = new Set(colors.map((value) => value.toLocaleLowerCase('tr-TR')));
+  const allowedSizes = new Set(sizes.map((value) => value.toLocaleLowerCase('tr-TR')));
+  const seen = new Set();
+  const variants = [];
+  for (const raw of input.variants) {
+    const color = cleanText(raw?.color);
+    const size = cleanText(raw?.size);
+    const key = `${color.toLocaleLowerCase('tr-TR')}::${size.toLocaleLowerCase('tr-TR')}`;
+    if (!color || !size || seen.has(key)) continue;
+    if (!allowedColors.has(color.toLocaleLowerCase('tr-TR')) || !allowedSizes.has(size.toLocaleLowerCase('tr-TR'))) {
+      throw Object.assign(new Error('variant color/size urun seceneklerinde bulunmali'), {
+        code: 'LOCAL_FOLDER_VARIANT_INVALID',
+      });
+    }
+    seen.add(key);
+    variants.push({ color, size, stock: DEFAULT_VARIANT_STOCK, status: 'active' });
+  }
+  if (!variants.length) {
+    throw Object.assign(new Error('En az bir gecerli variant zorunlu'), { code: 'LOCAL_FOLDER_VARIANT_INVALID' });
+  }
+  return variants;
+}
+
 function buildLocalProductFolderPlan(input = {}) {
   const name = cleanText(input.name);
   if (!name) throw Object.assign(new Error('name zorunlu'), { code: 'LOCAL_FOLDER_FIELD_REQUIRED' });
   const colors = uniqueValues(input.colors, 'colors');
   const sizes = uniqueValues(input.sizes, 'sizes');
   const price = captionPrice(input);
-  const variants = colors.flatMap((color) => sizes.map((size) => ({
+  const variants = explicitVariants(input, colors, sizes) || colors.flatMap((color) => sizes.map((size) => ({
     color,
     size,
     stock: DEFAULT_VARIANT_STOCK,
@@ -50,6 +75,8 @@ function buildLocalProductFolderPlan(input = {}) {
     fabric_info: cleanText(input.fabricInfo),
     delivery_note: cleanText(input.deliveryNote),
     source: 'local_folder_import',
+    source_folder: cleanText(input.sourceFolder),
+    source_caption_checksum: cleanText(input.sourceCaptionChecksum),
     price_source: price.priceSource,
     price_needs_review: price.priceNeedsReview,
     import_warnings: [...new Set(warnings)],
