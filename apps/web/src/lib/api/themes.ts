@@ -14,7 +14,9 @@ export type ThemeGridSort = "recommended" | "newest" | "price_asc" | "price_desc
 export type ThemeTrustIcon =
   | "shield" | "truck" | "refresh" | "lock" | "star" | "gift" | "headset";
 export type ThemeSectionType =
-  | "hero" | "product-grid" | "collection-blocks" | "trust-features" | "newsletter";
+  | "hero" | "product-grid" | "product-carousel" | "collection-blocks"
+  | "collection-showcase" | "category-slider" | "editorial" | "promo-banner"
+  | "trust-features" | "newsletter";
 
 /** Internal reference only — a theme can never point at an arbitrary href. */
 export type ThemeLink =
@@ -23,7 +25,7 @@ export type ThemeLink =
   | { type: "collection"; id: number }
   | { type: "category"; id: number }
   | { type: "product"; id: number }
-  | { type: "page"; id: string };
+  | { type: "page"; page: string };
 
 export type ThemeColors = {
   background: string;
@@ -65,9 +67,45 @@ export type ThemeSectionSettings = {
     columns: number;
     sort: ThemeGridSort;
   };
+  "product-carousel": {
+    title: string;
+    description: string;
+    source: ThemeLink;
+    limit: number;
+    sort: ThemeGridSort;
+    ctaLabel: string;
+  };
   "collection-blocks": {
     title: string;
     blocks: Array<{ title: string; mediaId: string | null; target: ThemeLink }>;
+  };
+  "collection-showcase": {
+    title: string;
+    description: string;
+    collectionIds: number[];
+    limit: number;
+  };
+  "category-slider": {
+    title: string;
+    description: string;
+    categoryIds: number[];
+    limit: number;
+  };
+  editorial: {
+    eyebrow: string;
+    title: string;
+    description: string;
+    mediaId: string | null;
+    ctaLabel: string;
+    ctaTarget: ThemeLink;
+    alignment: ThemeAlignment;
+  };
+  "promo-banner": {
+    title: string;
+    description: string;
+    mediaId: string | null;
+    ctaLabel: string;
+    ctaTarget: ThemeLink;
   };
   "trust-features": {
     title: string;

@@ -29,6 +29,24 @@ export function resolveApiAssetUrl(url: string | null | undefined) {
   return value.startsWith("/") ? value : `${BFF_BASE}/uploads/${value}`;
 }
 
+export type MediaAsset = {
+  id: string;
+  url: string;
+  original_filename: string;
+  byte_size: number;
+  content_type: string;
+  width: number | null;
+  height: number | null;
+  status: string;
+  created_at: string;
+  variants: Record<string, { url: string; width: number; height: number; byte_size: number }>;
+  reference_count: number;
+};
+
+export async function fetchMediaAssets() {
+  return authenticatedRequest<MediaAsset[]>("/media");
+}
+
 export async function uploadProductImages(files: File[]) {
   const formData = new FormData();
   files.forEach((file) => formData.append("images", file));

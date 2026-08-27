@@ -15,9 +15,14 @@ const { CURRENT_SCHEMA_VERSION, themeError, validateThemeConfig } = require('./s
 // Each step upgrades from key N to N+1 and must be pure and deterministic: the same input
 // always yields the same output, with no clock, randomness or I/O.
 const MIGRATIONS = Object.freeze({
-  // No historical schema versions exist yet (A28 ships v1). The first real entry will be
-  // `1: (config) => ({ ...config, schemaVersion: 2, ... })`. The chain below already walks
-  // this table, so adding one is the only change required.
+  // v2 adds optional homepage-builder section types. A read migration must not silently
+  // add enabled content to an already-published storefront, so legacy sections are copied
+  // without changing their meaning. Merchants opt into new sections through a draft.
+  1: (config) => ({
+    ...config,
+    schemaVersion: 2,
+    sections: Array.isArray(config.sections) ? config.sections.slice() : [],
+  }),
 });
 
 function migrateThemeConfig(input) {

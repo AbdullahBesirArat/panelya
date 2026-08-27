@@ -4,7 +4,8 @@ import fs from "node:fs";
 import path from "node:path";
 
 import {
-  COLOR_FIELDS, FONT_OPTIONS, NUMERIC_BOUNDS, TRUST_ICON_OPTIONS, canPublish, clampToBounds,
+  COLOR_FIELDS, FONT_OPTIONS, NUMERIC_BOUNDS, SECTION_OPTIONS, TRUST_ICON_OPTIONS, canPublish, clampToBounds,
+  createSection,
   draftDiffersFromPublished, moveSection, normalizeHex, previewUrl, saveStateLabel,
   sectionLabel, sectionSummary, themeErrorMessage, toggleSection, versionLabel,
   withSections, withTokens, type SaveState,
@@ -13,8 +14,12 @@ import type {
   ThemeConfig, ThemeSection, ThemeSectionType, ThemeValidationReport,
 } from "../src/lib/api/themes";
 
-const SECTION_TYPES: ThemeSectionType[] = [
+const BASE_SECTION_TYPES: ThemeSectionType[] = [
   "hero", "product-grid", "collection-blocks", "trust-features", "newsletter",
+];
+const ALL_SECTION_TYPES: ThemeSectionType[] = [
+  "hero", "product-grid", "product-carousel", "collection-blocks", "collection-showcase",
+  "category-slider", "editorial", "promo-banner", "trust-features", "newsletter",
 ];
 
 function section(type: ThemeSectionType, order: number, enabled = true): ThemeSection {
@@ -33,8 +38,18 @@ function section(type: ThemeSectionType, order: number, enabled = true): ThemeSe
         ...base, type,
         settings: { title: "Ürünler", source: { type: "products" }, limit: 8, columns: 4, sort: "recommended" },
       };
+    case "product-carousel":
+      return { ...base, type, settings: { title: "Yeni", description: "", source: { type: "products" }, limit: 8, sort: "newest", ctaLabel: "" } };
     case "collection-blocks":
       return { ...base, type, settings: { title: "Koleksiyonlar", blocks: [] } };
+    case "collection-showcase":
+      return { ...base, type, settings: { title: "Koleksiyonlar", description: "", collectionIds: [], limit: 4 } };
+    case "category-slider":
+      return { ...base, type, settings: { title: "Kategoriler", description: "", categoryIds: [], limit: 8 } };
+    case "editorial":
+      return { ...base, type, settings: { eyebrow: "", title: "Hikaye", description: "", mediaId: null, ctaLabel: "", ctaTarget: { type: "products" }, alignment: "left" } };
+    case "promo-banner":
+      return { ...base, type, settings: { title: "Kampanya", description: "", mediaId: null, ctaLabel: "", ctaTarget: { type: "products" } } };
     case "trust-features":
       return {
         ...base, type,
@@ -47,7 +62,7 @@ function section(type: ThemeSectionType, order: number, enabled = true): ThemeSe
 
 function config(): ThemeConfig {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     tokens: {
       colors: {
         background: "#ffffff", surface: "#ffffff", text: "#111111", mutedText: "#666666",
@@ -62,7 +77,7 @@ function config(): ThemeConfig {
     header: { logoMediaId: null, showSearch: true, showAccount: true, showCart: true, sticky: true },
     footer: { text: "Suvera", showPaymentIcons: true, social: [] },
     announcement: { enabled: true, text: "Kargo bedava", link: { type: "none" } },
-    sections: SECTION_TYPES.map((type, index) => section(type, index)),
+    sections: BASE_SECTION_TYPES.map((type, index) => section(type, index)),
     seo: { titleTemplate: "%s | Suvera", defaultDescription: "", socialImageMediaId: null },
   };
 }
@@ -151,7 +166,7 @@ test("numeric tokens are clamped to the schema bounds before they leave the edit
 test("every colour field and section type is labelled for the editor", () => {
   assert.equal(COLOR_FIELDS.length, Object.keys(config().tokens.colors).length);
   for (const field of COLOR_FIELDS) assert.ok(field.label.length > 0);
-  for (const type of SECTION_TYPES) {
+  for (const type of ALL_SECTION_TYPES) {
     assert.ok(sectionLabel(type).length > 0);
     assert.notEqual(sectionLabel(type), type, `${type} needs a human label`);
   }
@@ -168,7 +183,17 @@ test("moving a section reorders it and renumbers order densely", () => {
   assert.equal(moveSection(sections, 0, -1), sections);
   assert.equal(moveSection(sections, sections.length - 1, 1), sections);
   assert.notEqual(moved, sections, "the input array is never mutated");
-  assert.deepEqual(sections.map((item) => item.type), SECTION_TYPES);
+  assert.deepEqual(sections.map((item) => item.type), BASE_SECTION_TYPES);
+});
+
+test("every homepage builder type can be added with a schema-shaped default", () => {
+  assert.deepEqual(SECTION_OPTIONS.map((option) => option.value).sort(), ALL_SECTION_TYPES.filter((type) => type !== "collection-blocks").sort());
+  ALL_SECTION_TYPES.forEach((type, order) => {
+    const created = createSection(type, order);
+    assert.equal(created.type, type);
+    assert.equal(created.order, order);
+    assert.equal(created.enabled, true);
+  });
 });
 
 test("toggling a section flips exactly one entry", () => {
@@ -241,6 +266,19 @@ test("the editor offers no control that could carry raw CSS, HTML or a URL", () 
   // Publishing is a server decision; the client may only add a gate, never remove one.
   assert.match(source, /publishAllowed/);
   assert.match(source, /THEME_VERSION_CONFLICT/);
+});
+
+test("homepage media is selected from the tenant media library, never entered as a UUID", () => {
+  const root = path.join(__dirname, "..", "src");
+  const editor = fs.readFileSync(
+    path.join(root, "components", "sections", "theme-section.tsx"),
+    "utf8"
+  );
+  const mediaClient = fs.readFileSync(path.join(root, "lib", "api", "media.ts"), "utf8");
+  assert.match(editor, /fetchMediaAssets/);
+  assert.match(editor, /MediaAssetSelect/);
+  assert.doesNotMatch(editor, /upload_assets UUID|Yönetilen görsel ID/);
+  assert.match(mediaClient, /authenticatedRequest<MediaAsset\[\]>\("\/media"\)/);
 });
 
 test("the preview token is held in render state only and never persisted", () => {

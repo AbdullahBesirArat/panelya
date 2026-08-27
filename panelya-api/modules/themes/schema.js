@@ -12,7 +12,7 @@
 // customHtml, customJs, rawCss, script, style, className, href. There is no field in this
 // schema whose value reaches the page as markup or as a stylesheet fragment.
 
-const CURRENT_SCHEMA_VERSION = 1;
+const CURRENT_SCHEMA_VERSION = 2;
 
 function themeError(message, code, status = 400, meta = undefined) {
   return Object.assign(new Error(message), { code, status, meta });
@@ -189,11 +189,29 @@ function parseTokens(input = {}) {
 // --- sections -----------------------------------------------------------------------------
 
 const SECTION_TYPES = Object.freeze([
-  'hero', 'product-grid', 'collection-blocks', 'trust-features', 'newsletter',
+  'hero', 'product-grid', 'product-carousel', 'collection-blocks', 'collection-showcase',
+  'category-slider', 'editorial', 'promo-banner', 'trust-features', 'newsletter',
 ]);
 const TRUST_ICONS = Object.freeze(['shield', 'truck', 'refresh', 'lock', 'star', 'gift', 'headset']);
 const ALIGNMENTS = Object.freeze(['left', 'center', 'right']);
 const GRID_SORTS = Object.freeze(['recommended', 'newest', 'price_asc', 'price_desc']);
+
+function parseIdList(value, field, max = 12) {
+  const values = Array.isArray(value) ? value.slice(0, max) : [];
+  const unique = [];
+  for (let index = 0; index < values.length; index += 1) {
+    const id = parseIntInRange(values[index], { field: `${field}[${index}]`, min: 1, max: 2147483647 });
+    if (!unique.includes(id)) unique.push(id);
+  }
+  return unique;
+}
+
+function parseContentHeading(settings, path) {
+  return {
+    title: parseText(settings.title, { field: `${path}.title`, max: 120 }),
+    description: parseText(settings.description, { field: `${path}.description`, max: 240 }),
+  };
+}
 
 const SECTION_VALIDATORS = Object.freeze({
   hero(settings, path) {
@@ -215,6 +233,15 @@ const SECTION_VALIDATORS = Object.freeze({
       sort: parseEnum(settings.sort ?? 'recommended', GRID_SORTS, `${path}.sort`),
     };
   },
+  'product-carousel'(settings, path) {
+    return {
+      ...parseContentHeading(settings, path),
+      source: parseLink(settings.source ?? { type: 'products' }, `${path}.source`),
+      limit: parseIntInRange(settings.limit, { field: `${path}.limit`, min: 2, max: 16, fallback: 8 }),
+      sort: parseEnum(settings.sort ?? 'newest', GRID_SORTS, `${path}.sort`),
+      ctaLabel: parseText(settings.ctaLabel, { field: `${path}.ctaLabel`, max: 40 }),
+    };
+  },
   'collection-blocks'(settings, path) {
     const blocksIn = Array.isArray(settings.blocks) ? settings.blocks.slice(0, 6) : [];
     const blocks = blocksIn.map((block, index) => ({
@@ -225,6 +252,38 @@ const SECTION_VALIDATORS = Object.freeze({
     return {
       title: parseText(settings.title, { field: `${path}.title`, max: 120 }),
       blocks,
+    };
+  },
+  'collection-showcase'(settings, path) {
+    return {
+      ...parseContentHeading(settings, path),
+      collectionIds: parseIdList(settings.collectionIds, `${path}.collectionIds`, 8),
+      limit: parseIntInRange(settings.limit, { field: `${path}.limit`, min: 1, max: 8, fallback: 4 }),
+    };
+  },
+  'category-slider'(settings, path) {
+    return {
+      ...parseContentHeading(settings, path),
+      categoryIds: parseIdList(settings.categoryIds, `${path}.categoryIds`, 12),
+      limit: parseIntInRange(settings.limit, { field: `${path}.limit`, min: 2, max: 12, fallback: 8 }),
+    };
+  },
+  editorial(settings, path) {
+    return {
+      eyebrow: parseText(settings.eyebrow, { field: `${path}.eyebrow`, max: 60 }),
+      ...parseContentHeading(settings, path),
+      mediaId: parseMediaId(settings.mediaId, `${path}.mediaId`),
+      ctaLabel: parseText(settings.ctaLabel, { field: `${path}.ctaLabel`, max: 40 }),
+      ctaTarget: parseLink(settings.ctaTarget, `${path}.ctaTarget`),
+      alignment: parseEnum(settings.alignment ?? 'left', ALIGNMENTS, `${path}.alignment`),
+    };
+  },
+  'promo-banner'(settings, path) {
+    return {
+      ...parseContentHeading(settings, path),
+      mediaId: parseMediaId(settings.mediaId, `${path}.mediaId`),
+      ctaLabel: parseText(settings.ctaLabel, { field: `${path}.ctaLabel`, max: 40 }),
+      ctaTarget: parseLink(settings.ctaTarget, `${path}.ctaTarget`),
     };
   },
   'trust-features'(settings, path) {
@@ -373,8 +432,10 @@ function defaultThemeConfig() {
     announcement: parseAnnouncement({}),
     sections: parseSections([
       { id: 'hero', type: 'hero', enabled: true, order: 0, settings: {} },
-      { id: 'featured', type: 'product-grid', enabled: true, order: 1, settings: {} },
-      { id: 'trust', type: 'trust-features', enabled: true, order: 2, settings: {} },
+      { id: 'categories', type: 'category-slider', enabled: true, order: 1, settings: {} },
+      { id: 'featured', type: 'product-carousel', enabled: true, order: 2, settings: {} },
+      { id: 'collections', type: 'collection-showcase', enabled: true, order: 3, settings: {} },
+      { id: 'trust', type: 'trust-features', enabled: true, order: 4, settings: {} },
     ]),
     seo: parseSeo({}),
   };
@@ -457,6 +518,7 @@ module.exports = {
   parseText,
   parseMediaId,
   parseLink,
+  parseIdList,
   parseTokens,
   parseSections,
   defaultThemeConfig,

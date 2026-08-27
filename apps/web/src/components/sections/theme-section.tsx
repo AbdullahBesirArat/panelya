@@ -11,13 +11,17 @@ import {
   createThemeDraft, createThemePreviewToken, fetchPublishedTheme, fetchThemeDraft,
   fetchThemeVersions, publishThemeDraft, rollbackTheme, saveThemeDraft, validateThemeConfig,
   type ThemeColorKey, type ThemeConfig, type ThemeFontStack, type ThemeSection,
-  type ThemeTrustIcon, type ThemeValidationReport, type ThemeVersion,
+  type ThemeSectionType, type ThemeTrustIcon, type ThemeValidationReport, type ThemeVersion,
 } from "@/lib/api/themes";
+import { fetchCategories } from "@/lib/api/catalog";
+import { fetchCollections } from "@/lib/api/content";
 import { fetchDomains } from "@/lib/api/domains";
+import { fetchMediaAssets, resolveApiAssetUrl, type MediaAsset } from "@/lib/api/media";
 import { getApiErrorCode } from "@/lib/api/types";
 import { queryKeys } from "@/lib/query-keys";
 import {
-  COLOR_FIELDS, FONT_OPTIONS, NUMERIC_BOUNDS, TRUST_ICON_OPTIONS, canPublish, clampToBounds,
+  COLOR_FIELDS, FONT_OPTIONS, NUMERIC_BOUNDS, SECTION_OPTIONS, TRUST_ICON_OPTIONS, canPublish, clampToBounds,
+  createSection,
   draftDiffersFromPublished, moveSection, normalizeHex, previewUrl, saveStateLabel,
   sectionLabel, sectionSummary, themeErrorMessage, toggleSection, versionLabel,
   withSections, withTokens, type SaveState,
@@ -27,9 +31,75 @@ const inputClass =
   "focus-ring h-9 w-full rounded-lg border border-line bg-white px-3 text-sm text-zinc-800";
 const AUTOSAVE_DELAY_MS = 1200;
 const MANAGE_ROLES = ["super_admin", "owner", "admin"];
+const SINGLETON_SECTION_TYPES = new Set<ThemeSectionType>(["hero", "newsletter"]);
 
 function errorText(error: unknown) {
   return themeErrorMessage(getApiErrorCode(error), error instanceof Error ? error.message : "");
+}
+
+function sourceValue(source: { type: string; id?: number | string }) {
+  return (source.type === "category" || source.type === "collection") && Number.isInteger(Number(source.id))
+    ? `${source.type}:${source.id}`
+    : "products";
+}
+
+function sourceFromValue(value: string) {
+  const [type, rawId] = value.split(":");
+  const id = Number(rawId);
+  if ((type === "category" || type === "collection") && Number.isInteger(id) && id > 0) {
+    return { type, id } as const;
+  }
+  return { type: "products" } as const;
+}
+
+function MediaAssetSelect({
+  assets, disabled, id, label, loading, value, onChange,
+}: {
+  assets: MediaAsset[];
+  disabled: boolean;
+  id: string;
+  label: string;
+  loading: boolean;
+  value: string | null;
+  onChange: (mediaId: string | null) => void;
+}) {
+  const selectable = assets.filter((asset) => asset.status === "ready");
+  const selected = selectable.find((asset) => asset.id === value) ?? null;
+  const previewUrl = selected
+    ? resolveApiAssetUrl(selected.variants.thumbnail?.url || selected.variants.card?.url || selected.url)
+    : "";
+  const selectedMissing = Boolean(value && !selected);
+
+  return (
+    <div>
+      <FieldLabel htmlFor={id}>{label}</FieldLabel>
+      <select
+        className={inputClass}
+        disabled={disabled || loading}
+        id={id}
+        onChange={(event) => onChange(event.target.value || null)}
+        value={value ?? ""}
+      >
+        <option value="">{loading ? "Görseller yükleniyor…" : "Görsel seçilmedi"}</option>
+        {selectedMissing ? <option value={value ?? ""}>Mevcut seçili görsel</option> : null}
+        {selectable.map((asset) => (
+          <option key={asset.id} value={asset.id}>
+            {asset.original_filename || "İsimsiz görsel"}
+            {asset.width && asset.height ? ` · ${asset.width}×${asset.height}` : ""}
+          </option>
+        ))}
+      </select>
+      {previewUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element -- URLs may be tenant CDN or same-origin BFF assets.
+        <img
+          alt={selected?.original_filename || "Seçili görsel önizlemesi"}
+          className="mt-2 h-28 w-full rounded-lg border border-line object-cover"
+          loading="lazy"
+          src={previewUrl}
+        />
+      ) : null}
+    </div>
+  );
 }
 
 export function ThemeSection({ organizationSlug, currentRole }: { organizationSlug: string; currentRole: string }) {
@@ -49,6 +119,7 @@ export function ThemeSection({ organizationSlug, currentRole }: { organizationSl
   // URL fragment (never sent to a server, never logged) and is not stored anywhere else.
   const [previewSrc, setPreviewSrc] = useState("");
   const [previewWidth, setPreviewWidth] = useState<"desktop" | "mobile">("desktop");
+  const [newSectionType, setNewSectionType] = useState<ThemeSectionType>("product-carousel");
   const autosaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const publishedQuery = useQuery({
@@ -68,6 +139,19 @@ export function ThemeSection({ organizationSlug, currentRole }: { organizationSl
   const domainsQuery = useQuery({
     queryKey: queryKeys.domains.tenant(organizationSlug),
     queryFn: fetchDomains,
+  });
+  const categoriesQuery = useQuery({
+    queryKey: queryKeys.catalog.categories(organizationSlug),
+    queryFn: fetchCategories,
+  });
+  const collectionsQuery = useQuery({
+    queryKey: queryKeys.content.collections(organizationSlug),
+    queryFn: fetchCollections,
+  });
+  const mediaQuery = useQuery({
+    enabled: canManage,
+    queryKey: ["media-assets", organizationSlug],
+    queryFn: fetchMediaAssets,
   });
 
   const draft = draftQuery.data?.draft ?? null;
@@ -217,6 +301,10 @@ export function ThemeSection({ organizationSlug, currentRole }: { organizationSl
   const publications = versionsQuery.data?.publications ?? [];
   const hasChanges = draftDiffersFromPublished(expectedHash, published?.hash ?? null);
   const publishAllowed = canManage && hasChanges && canPublish(report ?? draft?.validation_result ?? null);
+  const newSectionUnavailable = Boolean(
+    config && SINGLETON_SECTION_TYPES.has(newSectionType)
+    && config.sections.some((section) => section.type === newSectionType)
+  );
 
   function setColor(key: ThemeColorKey, value: string) {
     if (!config) return;
@@ -259,6 +347,18 @@ export function ThemeSection({ organizationSlug, currentRole }: { organizationSl
   function toggle(index: number) {
     if (!config) return;
     update(withSections(config, toggleSection(config.sections, index)));
+  }
+
+  function addSection() {
+    if (!config || config.sections.length >= 20 || newSectionUnavailable) return;
+    update(withSections(config, [...config.sections, createSection(newSectionType, config.sections.length)]));
+  }
+
+  function removeSection(index: number) {
+    if (!config) return;
+    update(withSections(config, config.sections
+      .filter((_, position) => position !== index)
+      .map((section, order) => ({ ...section, order }))));
   }
 
   function resetToDefaults() {
@@ -447,8 +547,34 @@ export function ThemeSection({ organizationSlug, currentRole }: { organizationSl
 
           <Panel
             title="Bölümler"
-            description="Ana sayfa bölümlerinin sırasını ve içeriğini düzenleyin. Bölüm türleri sabittir."
+            description="Gerçek katalog verisiyle çalışan ana sayfa bloklarını ekleyin, sıralayın ve yayınlayın."
           >
+            <div className="mb-4 flex flex-wrap items-end gap-2 rounded-lg border border-line bg-zinc-50 p-3">
+              <div className="min-w-64 flex-1">
+                <FieldLabel htmlFor="theme-new-section">Yeni bölüm tipi</FieldLabel>
+                <select
+                  className={inputClass}
+                  disabled={!canManage || config.sections.length >= 20}
+                  id="theme-new-section"
+                  onChange={(event) => setNewSectionType(event.target.value as ThemeSectionType)}
+                  value={newSectionType}
+                >
+                  {SECTION_OPTIONS.map((option) => (
+                    <option
+                      disabled={SINGLETON_SECTION_TYPES.has(option.value)
+                        && config.sections.some((section) => section.type === option.value)}
+                      key={option.value}
+                      value={option.value}
+                    >
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <Button disabled={!canManage || config.sections.length >= 20 || newSectionUnavailable} onClick={addSection}>
+                Bölüm ekle
+              </Button>
+            </div>
             <ul className="grid gap-3">
               {config.sections.map((section, index) => (
                 <li className="rounded-lg border border-line p-4" key={section.id}>
@@ -484,6 +610,14 @@ export function ThemeSection({ organizationSlug, currentRole }: { organizationSl
                         />
                         Görünür
                       </label>
+                      <Button
+                        aria-label={`${sectionLabel(section.type)} bölümünü sil`}
+                        disabled={!canManage}
+                        onClick={() => removeSection(index)}
+                        variant="outline"
+                      >
+                        Sil
+                      </Button>
                     </div>
                   </div>
 
@@ -515,6 +649,40 @@ export function ThemeSection({ organizationSlug, currentRole }: { organizationSl
                             })}
                             value={section.settings.subtitle}
                           />
+                        </div>
+                        <MediaAssetSelect
+                          assets={mediaQuery.data ?? []}
+                          disabled={!canManage}
+                          id={`section-${section.id}-hero-media`}
+                          label="Hero görseli"
+                          loading={mediaQuery.isLoading}
+                          onChange={(mediaId) => replaceSection(index, {
+                            ...section, settings: { ...section.settings, mediaId },
+                          })}
+                          value={section.settings.mediaId}
+                        />
+                        <div>
+                          <FieldLabel htmlFor={`section-${section.id}-hero-cta`}>CTA metni</FieldLabel>
+                          <input
+                            className={inputClass}
+                            disabled={!canManage}
+                            id={`section-${section.id}-hero-cta`}
+                            maxLength={40}
+                            onChange={(event) => replaceSection(index, {
+                              ...section, settings: { ...section.settings, ctaLabel: event.target.value },
+                            })}
+                            value={section.settings.ctaLabel}
+                          />
+                        </div>
+                        <div>
+                          <FieldLabel htmlFor={`section-${section.id}-hero-target`}>CTA hedefi</FieldLabel>
+                          <select className={inputClass} disabled={!canManage} id={`section-${section.id}-hero-target`}
+                            value={sourceValue(section.settings.ctaTarget)}
+                            onChange={(event) => replaceSection(index, { ...section, settings: { ...section.settings, ctaTarget: sourceFromValue(event.target.value) } })}>
+                            <option value="products">Tüm ürünler</option>
+                            {(categoriesQuery.data ?? []).map((category) => <option key={`category-${category.id}`} value={`category:${category.id}`}>Kategori: {category.name}</option>)}
+                            {(collectionsQuery.data ?? []).map((collection) => <option key={`collection-${collection.id}`} value={`collection:${collection.id}`}>Koleksiyon: {collection.title}</option>)}
+                          </select>
                         </div>
                       </>
                     ) : null}
@@ -558,6 +726,59 @@ export function ThemeSection({ organizationSlug, currentRole }: { organizationSl
                             type="number"
                             value={section.settings.columns}
                           />
+                        </div>
+                        <div className="sm:col-span-2">
+                          <FieldLabel htmlFor={`section-${section.id}-source`}>Ürün kaynağı</FieldLabel>
+                          <select
+                            className={inputClass}
+                            disabled={!canManage}
+                            id={`section-${section.id}-source`}
+                            onChange={(event) => replaceSection(index, {
+                              ...section, settings: { ...section.settings, source: sourceFromValue(event.target.value) },
+                            })}
+                            value={sourceValue(section.settings.source)}
+                          >
+                            <option value="products">Tüm aktif ürünler</option>
+                            {(categoriesQuery.data ?? []).map((category) => (
+                              <option key={`category-${category.id}`} value={`category:${category.id}`}>Kategori: {category.name}</option>
+                            ))}
+                            {(collectionsQuery.data ?? []).map((collection) => (
+                              <option key={`collection-${collection.id}`} value={`collection:${collection.id}`}>Koleksiyon: {collection.title}</option>
+                            ))}
+                          </select>
+                        </div>
+                      </>
+                    ) : null}
+
+                    {section.type === "product-carousel" ? (
+                      <>
+                        <div>
+                          <FieldLabel htmlFor={`section-${section.id}-title`}>Başlık</FieldLabel>
+                          <input className={inputClass} disabled={!canManage} id={`section-${section.id}-title`}
+                            maxLength={120} value={section.settings.title}
+                            onChange={(event) => replaceSection(index, { ...section, settings: { ...section.settings, title: event.target.value } })} />
+                        </div>
+                        <div>
+                          <FieldLabel htmlFor={`section-${section.id}-limit`}>Ürün sayısı</FieldLabel>
+                          <input className={inputClass} disabled={!canManage} id={`section-${section.id}-limit`}
+                            min={2} max={16} type="number" value={section.settings.limit}
+                            onChange={(event) => replaceSection(index, { ...section, settings: { ...section.settings, limit: Math.min(16, Math.max(2, Number(event.target.value) || 2)) } })} />
+                        </div>
+                        <div className="sm:col-span-2">
+                          <FieldLabel htmlFor={`section-${section.id}-description`}>Açıklama</FieldLabel>
+                          <input className={inputClass} disabled={!canManage} id={`section-${section.id}-description`}
+                            maxLength={240} value={section.settings.description}
+                            onChange={(event) => replaceSection(index, { ...section, settings: { ...section.settings, description: event.target.value } })} />
+                        </div>
+                        <div className="sm:col-span-2">
+                          <FieldLabel htmlFor={`section-${section.id}-source`}>Ürün kaynağı</FieldLabel>
+                          <select className={inputClass} disabled={!canManage} id={`section-${section.id}-source`}
+                            value={sourceValue(section.settings.source)}
+                            onChange={(event) => replaceSection(index, { ...section, settings: { ...section.settings, source: sourceFromValue(event.target.value) } })}>
+                            <option value="products">Tüm aktif ürünler</option>
+                            {(categoriesQuery.data ?? []).map((category) => <option key={`category-${category.id}`} value={`category:${category.id}`}>Kategori: {category.name}</option>)}
+                            {(collectionsQuery.data ?? []).map((collection) => <option key={`collection-${collection.id}`} value={`collection:${collection.id}`}>Koleksiyon: {collection.title}</option>)}
+                          </select>
                         </div>
                       </>
                     ) : null}
@@ -667,6 +888,134 @@ export function ThemeSection({ organizationSlug, currentRole }: { organizationSl
                           value={section.settings.title}
                         />
                       </div>
+                    ) : null}
+
+                    {section.type === "category-slider" ? (
+                      <>
+                        <div>
+                          <FieldLabel htmlFor={`section-${section.id}-title`}>Başlık</FieldLabel>
+                          <input className={inputClass} disabled={!canManage} id={`section-${section.id}-title`}
+                            maxLength={120} value={section.settings.title}
+                            onChange={(event) => replaceSection(index, { ...section, settings: { ...section.settings, title: event.target.value } })} />
+                        </div>
+                        <div>
+                          <FieldLabel htmlFor={`section-${section.id}-limit`}>Gösterim limiti</FieldLabel>
+                          <input className={inputClass} disabled={!canManage} id={`section-${section.id}-limit`}
+                            min={2} max={12} type="number" value={section.settings.limit}
+                            onChange={(event) => replaceSection(index, { ...section, settings: { ...section.settings, limit: Math.min(12, Math.max(2, Number(event.target.value) || 2)) } })} />
+                        </div>
+                        <div className="sm:col-span-2">
+                          <FieldLabel htmlFor={`section-${section.id}-description`}>Açıklama</FieldLabel>
+                          <input className={inputClass} disabled={!canManage} id={`section-${section.id}-description`}
+                            maxLength={240} value={section.settings.description}
+                            onChange={(event) => replaceSection(index, { ...section, settings: { ...section.settings, description: event.target.value } })} />
+                        </div>
+                        <div className="sm:col-span-2">
+                          <p className="text-sm font-medium text-zinc-700">Kategoriler (seçilmezse aktif kategoriler sırasıyla gelir)</p>
+                          <div className="mt-1 grid gap-2 rounded-lg border border-line p-3 sm:grid-cols-2">
+                            {(categoriesQuery.data ?? []).map((category) => {
+                              const id = Number(category.id);
+                              const checked = section.settings.categoryIds.includes(id);
+                              return <label className="flex items-center gap-2 text-sm" key={category.id}>
+                                <input type="checkbox" checked={checked} disabled={!canManage}
+                                  onChange={() => replaceSection(index, { ...section, settings: { ...section.settings,
+                                    categoryIds: checked ? section.settings.categoryIds.filter((value) => value !== id) : [...section.settings.categoryIds, id],
+                                  } })} />
+                                {category.name}
+                              </label>;
+                            })}
+                          </div>
+                        </div>
+                      </>
+                    ) : null}
+
+                    {section.type === "collection-showcase" ? (
+                      <>
+                        <div>
+                          <FieldLabel htmlFor={`section-${section.id}-title`}>Başlık</FieldLabel>
+                          <input className={inputClass} disabled={!canManage} id={`section-${section.id}-title`}
+                            maxLength={120} value={section.settings.title}
+                            onChange={(event) => replaceSection(index, { ...section, settings: { ...section.settings, title: event.target.value } })} />
+                        </div>
+                        <div>
+                          <FieldLabel htmlFor={`section-${section.id}-limit`}>Gösterim limiti</FieldLabel>
+                          <input className={inputClass} disabled={!canManage} id={`section-${section.id}-limit`}
+                            min={1} max={8} type="number" value={section.settings.limit}
+                            onChange={(event) => replaceSection(index, { ...section, settings: { ...section.settings, limit: Math.min(8, Math.max(1, Number(event.target.value) || 1)) } })} />
+                        </div>
+                        <div className="sm:col-span-2">
+                          <FieldLabel htmlFor={`section-${section.id}-description`}>Açıklama</FieldLabel>
+                          <input className={inputClass} disabled={!canManage} id={`section-${section.id}-description`}
+                            maxLength={240} value={section.settings.description}
+                            onChange={(event) => replaceSection(index, { ...section, settings: { ...section.settings, description: event.target.value } })} />
+                        </div>
+                        <div className="sm:col-span-2">
+                          <p className="text-sm font-medium text-zinc-700">Koleksiyonlar (seçilmezse aktif koleksiyonlar sırasıyla gelir)</p>
+                          <div className="mt-1 grid gap-2 rounded-lg border border-line p-3 sm:grid-cols-2">
+                            {(collectionsQuery.data ?? []).map((collection) => {
+                              const id = Number(collection.id);
+                              const checked = section.settings.collectionIds.includes(id);
+                              return <label className="flex items-center gap-2 text-sm" key={collection.id}>
+                                <input type="checkbox" checked={checked} disabled={!canManage}
+                                  onChange={() => replaceSection(index, { ...section, settings: { ...section.settings,
+                                    collectionIds: checked ? section.settings.collectionIds.filter((value) => value !== id) : [...section.settings.collectionIds, id],
+                                  } })} />
+                                {collection.title}
+                              </label>;
+                            })}
+                          </div>
+                        </div>
+                      </>
+                    ) : null}
+
+                    {section.type === "editorial" || section.type === "promo-banner" ? (
+                      <>
+                        {section.type === "editorial" ? <div>
+                          <FieldLabel htmlFor={`section-${section.id}-eyebrow`}>Üst etiket</FieldLabel>
+                          <input className={inputClass} disabled={!canManage} id={`section-${section.id}-eyebrow`}
+                            maxLength={60} value={section.settings.eyebrow}
+                            onChange={(event) => replaceSection(index, { ...section, settings: { ...section.settings, eyebrow: event.target.value } })} />
+                        </div> : null}
+                        <div>
+                          <FieldLabel htmlFor={`section-${section.id}-title`}>Başlık</FieldLabel>
+                          <input className={inputClass} disabled={!canManage} id={`section-${section.id}-title`}
+                            maxLength={120} value={section.settings.title}
+                            onChange={(event) => replaceSection(index, { ...section, settings: { ...section.settings, title: event.target.value } } as ThemeSection)} />
+                        </div>
+                        <div className="sm:col-span-2">
+                          <FieldLabel htmlFor={`section-${section.id}-description`}>Açıklama</FieldLabel>
+                          <input className={inputClass} disabled={!canManage} id={`section-${section.id}-description`}
+                            maxLength={240} value={section.settings.description}
+                            onChange={(event) => replaceSection(index, { ...section, settings: { ...section.settings, description: event.target.value } } as ThemeSection)} />
+                        </div>
+                        <MediaAssetSelect
+                          assets={mediaQuery.data ?? []}
+                          disabled={!canManage}
+                          id={`section-${section.id}-media`}
+                          label="Bölüm görseli"
+                          loading={mediaQuery.isLoading}
+                          onChange={(mediaId) => replaceSection(index, {
+                            ...section, settings: { ...section.settings, mediaId },
+                          } as ThemeSection)}
+                          value={section.settings.mediaId}
+                        />
+                        <div>
+                          <FieldLabel htmlFor={`section-${section.id}-cta`}>CTA metni</FieldLabel>
+                          <input className={inputClass} disabled={!canManage} id={`section-${section.id}-cta`}
+                            maxLength={40} value={section.settings.ctaLabel}
+                            onChange={(event) => replaceSection(index, { ...section, settings: { ...section.settings, ctaLabel: event.target.value } } as ThemeSection)} />
+                        </div>
+                        <div className="sm:col-span-2">
+                          <FieldLabel htmlFor={`section-${section.id}-target`}>CTA hedefi</FieldLabel>
+                          <select className={inputClass} disabled={!canManage} id={`section-${section.id}-target`}
+                            value={sourceValue(section.settings.ctaTarget)}
+                            onChange={(event) => replaceSection(index, { ...section, settings: { ...section.settings, ctaTarget: sourceFromValue(event.target.value) } } as ThemeSection)}>
+                            <option value="products">Tüm ürünler</option>
+                            {(categoriesQuery.data ?? []).map((category) => <option key={`category-${category.id}`} value={`category:${category.id}`}>Kategori: {category.name}</option>)}
+                            {(collectionsQuery.data ?? []).map((collection) => <option key={`collection-${collection.id}`} value={`collection:${collection.id}`}>Koleksiyon: {collection.title}</option>)}
+                          </select>
+                        </div>
+                      </>
                     ) : null}
                   </div>
                 </li>

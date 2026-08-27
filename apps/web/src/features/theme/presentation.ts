@@ -43,10 +43,27 @@ export const TRUST_ICON_OPTIONS: ReadonlyArray<{ value: ThemeTrustIcon; label: s
 const SECTION_LABELS: Record<ThemeSectionType, string> = {
   hero: "Kapak alanı",
   "product-grid": "Ürün ızgarası",
+  "product-carousel": "Yatay ürün vitrini",
   "collection-blocks": "Koleksiyon blokları",
+  "collection-showcase": "Koleksiyon vitrini",
+  "category-slider": "Kategori kaydırıcısı",
+  editorial: "Editoryal blok",
+  "promo-banner": "Kampanya bannerı",
   "trust-features": "Güven şeritleri",
   newsletter: "Bülten",
 };
+
+export const SECTION_OPTIONS: ReadonlyArray<{ value: ThemeSectionType; label: string }> = [
+  { value: "hero", label: SECTION_LABELS.hero },
+  { value: "category-slider", label: SECTION_LABELS["category-slider"] },
+  { value: "collection-showcase", label: SECTION_LABELS["collection-showcase"] },
+  { value: "product-carousel", label: SECTION_LABELS["product-carousel"] },
+  { value: "product-grid", label: SECTION_LABELS["product-grid"] },
+  { value: "editorial", label: SECTION_LABELS.editorial },
+  { value: "promo-banner", label: SECTION_LABELS["promo-banner"] },
+  { value: "trust-features", label: SECTION_LABELS["trust-features"] },
+  { value: "newsletter", label: SECTION_LABELS.newsletter },
+];
 
 export function sectionLabel(type: ThemeSectionType) {
   return SECTION_LABELS[type] || type;
@@ -75,6 +92,33 @@ export const NUMERIC_BOUNDS = {
   limit: { min: 2, max: 24 },
   columns: { min: 2, max: 5 },
 } as const;
+
+export function createSection(type: ThemeSectionType, order: number): ThemeSection {
+  const id = `${type}-${Date.now().toString(36)}-${order}`.slice(0, 40);
+  const base = { id, enabled: true, order };
+  switch (type) {
+    case "hero":
+      return { ...base, type, settings: { title: "", subtitle: "", mediaId: null, ctaLabel: "", ctaTarget: { type: "products" }, alignment: "left" } };
+    case "product-grid":
+      return { ...base, type, settings: { title: "", source: { type: "products" }, limit: 8, columns: 4, sort: "recommended" } };
+    case "product-carousel":
+      return { ...base, type, settings: { title: "", description: "", source: { type: "products" }, limit: 8, sort: "newest", ctaLabel: "" } };
+    case "collection-blocks":
+      return { ...base, type, settings: { title: "", blocks: [] } };
+    case "collection-showcase":
+      return { ...base, type, settings: { title: "", description: "", collectionIds: [], limit: 4 } };
+    case "category-slider":
+      return { ...base, type, settings: { title: "", description: "", categoryIds: [], limit: 8 } };
+    case "editorial":
+      return { ...base, type, settings: { eyebrow: "", title: "", description: "", mediaId: null, ctaLabel: "", ctaTarget: { type: "products" }, alignment: "left" } };
+    case "promo-banner":
+      return { ...base, type, settings: { title: "", description: "", mediaId: null, ctaLabel: "", ctaTarget: { type: "products" } } };
+    case "trust-features":
+      return { ...base, type, settings: { title: "", items: [] } };
+    case "newsletter":
+      return { ...base, type, settings: { title: "", text: "", buttonLabel: "" } };
+  }
+}
 
 export function clampToBounds(value: number, bounds: { min: number; max: number }) {
   if (!Number.isFinite(value)) return bounds.min;
@@ -162,8 +206,17 @@ export function sectionSummary(section: ThemeSection): string {
       return section.settings.title || "Başlıksız kapak";
     case "product-grid":
       return `${section.settings.limit} ürün · ${section.settings.columns} sütun`;
+    case "product-carousel":
+      return `${section.settings.limit} ürün · yatay akış`;
     case "collection-blocks":
       return `${section.settings.blocks.length} blok`;
+    case "collection-showcase":
+      return `${section.settings.collectionIds.length || "Otomatik"} koleksiyon`;
+    case "category-slider":
+      return `${section.settings.categoryIds.length || "Otomatik"} kategori`;
+    case "editorial":
+    case "promo-banner":
+      return section.settings.title || "Başlıksız içerik";
     case "trust-features":
       return `${section.settings.items.length} madde`;
     case "newsletter":
