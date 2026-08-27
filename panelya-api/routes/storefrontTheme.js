@@ -23,6 +23,7 @@ async function resolveMedia(client, organizationId, config) {
   collect(config.seo.socialImageMediaId);
   for (const section of config.sections) {
     collect(section.settings.mediaId);
+    collect(section.settings.mobileMediaId);
     for (const block of section.settings.blocks || []) collect(block.mediaId);
   }
   if (!ids.size) return {};
@@ -191,3 +192,4 @@ router.post('/preview', previewLimiter, async (req, res, next) => {
 });
 
 module.exports = router;
+module.exports.resolveMedia = resolveMedia;

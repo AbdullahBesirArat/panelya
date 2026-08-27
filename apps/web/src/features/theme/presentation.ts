@@ -98,7 +98,15 @@ export function createSection(type: ThemeSectionType, order: number): ThemeSecti
   const base = { id, enabled: true, order };
   switch (type) {
     case "hero":
-      return { ...base, type, settings: { title: "", subtitle: "", mediaId: null, ctaLabel: "", ctaTarget: { type: "products" }, alignment: "left" } };
+      return {
+        ...base,
+        type,
+        settings: {
+          eyebrow: "", title: "", accentText: "", subtitle: "", mediaId: null,
+          mobileMediaId: null, ctaLabel: "", ctaTarget: { type: "products" },
+          secondaryCtaLabel: "", secondaryCtaTarget: { type: "none" }, alignment: "left",
+        },
+      };
     case "product-grid":
       return { ...base, type, settings: { title: "", source: { type: "products" }, limit: 8, columns: 4, sort: "recommended" } };
     case "product-carousel":

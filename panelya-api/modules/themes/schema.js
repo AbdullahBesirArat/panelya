@@ -12,7 +12,7 @@
 // customHtml, customJs, rawCss, script, style, className, href. There is no field in this
 // schema whose value reaches the page as markup or as a stylesheet fragment.
 
-const CURRENT_SCHEMA_VERSION = 2;
+const CURRENT_SCHEMA_VERSION = 3;
 
 function themeError(message, code, status = 400, meta = undefined) {
   return Object.assign(new Error(message), { code, status, meta });
@@ -216,11 +216,16 @@ function parseContentHeading(settings, path) {
 const SECTION_VALIDATORS = Object.freeze({
   hero(settings, path) {
     return {
+      eyebrow: parseText(settings.eyebrow, { field: `${path}.eyebrow`, max: 60 }),
       title: parseText(settings.title, { field: `${path}.title`, max: 120 }),
+      accentText: parseText(settings.accentText, { field: `${path}.accentText`, max: 120 }),
       subtitle: parseText(settings.subtitle, { field: `${path}.subtitle`, max: 240 }),
       mediaId: parseMediaId(settings.mediaId, `${path}.mediaId`),
+      mobileMediaId: parseMediaId(settings.mobileMediaId, `${path}.mobileMediaId`),
       ctaLabel: parseText(settings.ctaLabel, { field: `${path}.ctaLabel`, max: 40 }),
       ctaTarget: parseLink(settings.ctaTarget, `${path}.ctaTarget`),
+      secondaryCtaLabel: parseText(settings.secondaryCtaLabel, { field: `${path}.secondaryCtaLabel`, max: 40 }),
+      secondaryCtaTarget: parseLink(settings.secondaryCtaTarget, `${path}.secondaryCtaTarget`),
       alignment: parseEnum(settings.alignment ?? 'center', ALIGNMENTS, `${path}.alignment`),
     };
   },

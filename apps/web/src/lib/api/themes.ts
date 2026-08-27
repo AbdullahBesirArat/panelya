@@ -53,11 +53,16 @@ export type ThemeTokens = {
 
 export type ThemeSectionSettings = {
   hero: {
+    eyebrow: string;
     title: string;
+    accentText: string;
     subtitle: string;
     mediaId: string | null;
+    mobileMediaId: string | null;
     ctaLabel: string;
     ctaTarget: ThemeLink;
+    secondaryCtaLabel: string;
+    secondaryCtaTarget: ThemeLink;
     alignment: ThemeAlignment;
   };
   "product-grid": {

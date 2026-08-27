@@ -29,8 +29,9 @@ function section(type: ThemeSectionType, order: number, enabled = true): ThemeSe
       return {
         ...base, type,
         settings: {
-          title: "Kapak", subtitle: "Alt", mediaId: null, ctaLabel: "Keşfet",
-          ctaTarget: { type: "products" }, alignment: "center",
+          eyebrow: "", title: "Kapak", accentText: "", subtitle: "Alt", mediaId: null,
+          mobileMediaId: null, ctaLabel: "Keşfet", ctaTarget: { type: "products" },
+          secondaryCtaLabel: "", secondaryCtaTarget: { type: "none" }, alignment: "center",
         },
       };
     case "product-grid":
@@ -62,7 +63,7 @@ function section(type: ThemeSectionType, order: number, enabled = true): ThemeSe
 
 function config(): ThemeConfig {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     tokens: {
       colors: {
         background: "#ffffff", surface: "#ffffff", text: "#111111", mutedText: "#666666",
@@ -277,8 +278,32 @@ test("homepage media is selected from the tenant media library, never entered as
   const mediaClient = fs.readFileSync(path.join(root, "lib", "api", "media.ts"), "utf8");
   assert.match(editor, /fetchMediaAssets/);
   assert.match(editor, /MediaAssetSelect/);
+  assert.match(editor, /Desktop Hero Görseli/);
+  assert.match(editor, /Mobile Hero Görseli/);
+  assert.match(editor, /Görsel Yükle/);
+  assert.match(editor, /uploadMediaAsset/);
+  assert.match(editor, /invalidateQueries\(\{ queryKey: \["media-assets", organizationSlug\] \}\)/);
+  assert.match(editor, /onChange\(uploaded\.id\)/, "the uploaded asset is selected immediately");
   assert.doesNotMatch(editor, /upload_assets UUID|Yönetilen görsel ID/);
   assert.match(mediaClient, /authenticatedRequest<MediaAsset\[\]>\("\/media"\)/);
+  assert.match(mediaClient, /XMLHttpRequest/);
+  assert.match(mediaClient, /"\/api\/bff\/upload"/);
+  const uploader = mediaClient.slice(mediaClient.indexOf("export async function uploadMediaAsset"));
+  assert.doesNotMatch(uploader, /railway\.app|Bearer /i);
+});
+
+test("hero editor exposes responsive media and optional editorial fields without raw URLs", () => {
+  const source = fs.readFileSync(
+    path.join(__dirname, "..", "src", "components", "sections", "theme-section.tsx"),
+    "utf8"
+  );
+  for (const label of [
+    "Eyebrow", "Ana Başlık", "Vurgulu İkinci Satır", "Açıklama",
+    "Primary CTA Metni", "Secondary CTA Metni",
+  ]) assert.match(source, new RegExp(label));
+  assert.match(source, /mobileMediaId/);
+  assert.match(source, /secondaryCtaTarget/);
+  assert.doesNotMatch(source, /primaryCtaHref|secondaryCtaHref/, "links remain canonical entities, never href text");
 });
 
 test("the preview token is held in render state only and never persisted", () => {

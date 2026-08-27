@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import fs from "node:fs";
+import path from "node:path";
 import { STOREFRONT_API_BASE } from "../src/lib/api/core";
-import { resolveApiAssetUrl, toBffAssetPath } from "../src/lib/api/media";
+import {
+  MAX_MEDIA_UPLOAD_BYTES, resolveApiAssetUrl, toBffAssetPath, validateMediaUpload,
+} from "../src/lib/api/media";
 import { dashboardMediaUrl } from "../src/lib/api/instagram-import";
 import { isLegacyUploadPath } from "../src/lib/bff-config";
 
@@ -68,6 +72,24 @@ test("media URL resolver preserves the empty value contract", () => {
   assert.equal(resolveApiAssetUrl(null), "");
   assert.equal(resolveApiAssetUrl(undefined), "");
   assert.equal(resolveApiAssetUrl("   "), "");
+});
+
+test("media upload rejects unsafe types and oversized files before transmission", () => {
+  assert.equal(validateMediaUpload({ name: "hero.jpg", size: 1024, type: "image/jpeg" }), null);
+  assert.equal(validateMediaUpload({ name: "hero.png", size: 1024, type: "image/png" }), null);
+  assert.equal(validateMediaUpload({ name: "hero.webp", size: 1024, type: "image/webp" }), null);
+  assert.match(validateMediaUpload({ name: "hero.svg", size: 1024, type: "image/svg+xml" }) || "", /JPEG/);
+  assert.match(validateMediaUpload({ name: "hero.jpg", size: MAX_MEDIA_UPLOAD_BYTES + 1, type: "image/jpeg" }) || "", /5 MB/);
+  assert.match(validateMediaUpload({ name: "hero.png.exe", size: 1024, type: "image/png" }) || "", /JPEG/);
+});
+
+test("browser media upload is same-origin and never knows the Railway host or a bearer token", () => {
+  const source = fs.readFileSync(path.join(__dirname, "..", "src", "lib", "api", "media.ts"), "utf8");
+  const uploader = source.slice(source.indexOf("export async function uploadMediaAsset"));
+  assert.match(uploader, /request\.open\("POST", "\/api\/bff\/upload"\)/);
+  assert.match(uploader, /request\.upload\.onprogress/);
+  assert.doesNotMatch(uploader, /railway\.app|Authorization|Bearer /i);
+  assert.doesNotMatch(uploader, /localStorage|sessionStorage/);
 });
 
 test("instagram draft previews share the catalogue proxy mapping", () => {

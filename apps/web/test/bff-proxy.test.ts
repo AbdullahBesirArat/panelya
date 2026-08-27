@@ -85,6 +85,41 @@ test("BFF forwards multipart import uploads byte-for-byte without JSON conversio
   }
 });
 
+test("authenticated media upload stays on the BFF and preserves multipart bytes", async () => {
+  const body = multipartBody();
+  const contentType = `multipart/form-data; boundary=${BOUNDARY}`;
+  const captured: { url?: string; authorization?: string | null; body?: Buffer } = {};
+  const originalFetch = global.fetch;
+  global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    captured.url = String(input);
+    captured.authorization = new Headers(init?.headers).get("authorization");
+    captured.body = Buffer.from(await new Response(init?.body as BodyInit).arrayBuffer());
+    return new Response(JSON.stringify({ files: [{ id: "asset-1", url: "/api/media/asset-1/detail" }] }), {
+      status: 201,
+      headers: { "content-type": "application/json" },
+    });
+  }) as typeof global.fetch;
+
+  try {
+    const request = new NextRequest("https://dashboard.example/api/bff/upload", {
+      method: "POST",
+      headers: {
+        "content-type": contentType,
+        "sec-fetch-site": "same-origin",
+        cookie: `${ACCESS_COOKIE}=owner-session-token`,
+      },
+      body,
+    });
+    const response = await POST(request, { params: Promise.resolve({ path: ["upload"] }) });
+    assert.equal(response.status, 201);
+    assert.equal(captured.url, "http://localhost:3000/api/upload");
+    assert.equal(captured.authorization, "Bearer owner-session-token");
+    assert.equal(Buffer.compare(captured.body as Buffer, body), 0);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
 test("BFF forwards only same-origin OAuth callback locations", async () => {
   const originalFetch = global.fetch;
   try {

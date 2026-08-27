@@ -16,7 +16,9 @@ import {
 import { fetchCategories } from "@/lib/api/catalog";
 import { fetchCollections } from "@/lib/api/content";
 import { fetchDomains } from "@/lib/api/domains";
-import { fetchMediaAssets, resolveApiAssetUrl, type MediaAsset } from "@/lib/api/media";
+import {
+  fetchMediaAssets, MEDIA_UPLOAD_ACCEPT, resolveApiAssetUrl, uploadMediaAsset, type MediaAsset,
+} from "@/lib/api/media";
 import { getApiErrorCode } from "@/lib/api/types";
 import { queryKeys } from "@/lib/query-keys";
 import {
@@ -38,12 +40,14 @@ function errorText(error: unknown) {
 }
 
 function sourceValue(source: { type: string; id?: number | string }) {
+  if (source.type === "none") return "none";
   return (source.type === "category" || source.type === "collection") && Number.isInteger(Number(source.id))
     ? `${source.type}:${source.id}`
     : "products";
 }
 
 function sourceFromValue(value: string) {
+  if (value === "none") return { type: "none" } as const;
   const [type, rawId] = value.split(":");
   const id = Number(rawId);
   if ((type === "category" || type === "collection") && Number.isInteger(id) && id > 0) {
@@ -53,16 +57,22 @@ function sourceFromValue(value: string) {
 }
 
 function MediaAssetSelect({
-  assets, disabled, id, label, loading, value, onChange,
+  assets, disabled, id, label, loading, organizationSlug, value, onChange,
 }: {
   assets: MediaAsset[];
   disabled: boolean;
   id: string;
   label: string;
   loading: boolean;
+  organizationSlug: string;
   value: string | null;
   onChange: (mediaId: string | null) => void;
 }) {
+  const queryClient = useQueryClient();
+  const fileInput = useRef<HTMLInputElement | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadError, setUploadError] = useState("");
   const selectable = assets.filter((asset) => asset.status === "ready");
   const selected = selectable.find((asset) => asset.id === value) ?? null;
   const previewUrl = selected
@@ -70,8 +80,26 @@ function MediaAssetSelect({
     : "";
   const selectedMissing = Boolean(value && !selected);
 
+  async function upload(file: File | null) {
+    if (!file || disabled || uploading) return;
+    setUploading(true);
+    setUploadProgress(0);
+    setUploadError("");
+    try {
+      const uploaded = await uploadMediaAsset(file, setUploadProgress);
+      onChange(uploaded.id);
+      await queryClient.invalidateQueries({ queryKey: ["media-assets", organizationSlug] });
+      await queryClient.refetchQueries({ queryKey: ["media-assets", organizationSlug], type: "active" });
+    } catch (uploadFailure) {
+      setUploadError(uploadFailure instanceof Error ? uploadFailure.message : "Görsel yüklenemedi.");
+    } finally {
+      setUploading(false);
+      if (fileInput.current) fileInput.current.value = "";
+    }
+  }
+
   return (
-    <div>
+    <div className="grid gap-2">
       <FieldLabel htmlFor={id}>{label}</FieldLabel>
       <select
         className={inputClass}
@@ -98,6 +126,32 @@ function MediaAssetSelect({
           src={previewUrl}
         />
       ) : null}
+      <input
+        accept={MEDIA_UPLOAD_ACCEPT}
+        className="sr-only"
+        disabled={disabled || uploading}
+        onChange={(event) => void upload(event.target.files?.[0] ?? null)}
+        ref={fileInput}
+        type="file"
+      />
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          disabled={disabled || uploading}
+          onClick={() => fileInput.current?.click()}
+          type="button"
+          variant="outline"
+        >
+          {uploading ? "Yükleniyor…" : "Görsel Yükle"}
+        </Button>
+        <span className="text-xs text-zinc-500">JPEG, PNG veya WebP · en fazla 5 MB</span>
+      </div>
+      {uploading ? (
+        <div aria-label={`Yükleme ilerlemesi yüzde ${uploadProgress}`} className="grid gap-1" role="status">
+          <progress className="h-2 w-full" max={100} value={uploadProgress} />
+          <span className="text-xs text-zinc-500">%{uploadProgress}</span>
+        </div>
+      ) : null}
+      {uploadError ? <p className="text-xs font-medium text-red-700" role="alert">{uploadError}</p> : null}
     </div>
   );
 }
@@ -625,7 +679,20 @@ export function ThemeSection({ organizationSlug, currentRole }: { organizationSl
                     {section.type === "hero" ? (
                       <>
                         <div>
-                          <FieldLabel htmlFor={`section-${section.id}-title`}>Başlık</FieldLabel>
+                          <FieldLabel htmlFor={`section-${section.id}-eyebrow`}>Eyebrow</FieldLabel>
+                          <input
+                            className={inputClass}
+                            disabled={!canManage}
+                            id={`section-${section.id}-eyebrow`}
+                            maxLength={60}
+                            onChange={(event) => replaceSection(index, {
+                              ...section, settings: { ...section.settings, eyebrow: event.target.value },
+                            })}
+                            value={section.settings.eyebrow}
+                          />
+                        </div>
+                        <div>
+                          <FieldLabel htmlFor={`section-${section.id}-title`}>Ana Başlık</FieldLabel>
                           <input
                             className={inputClass}
                             disabled={!canManage}
@@ -638,7 +705,20 @@ export function ThemeSection({ organizationSlug, currentRole }: { organizationSl
                           />
                         </div>
                         <div>
-                          <FieldLabel htmlFor={`section-${section.id}-subtitle`}>Alt başlık</FieldLabel>
+                          <FieldLabel htmlFor={`section-${section.id}-accent`}>Vurgulu İkinci Satır</FieldLabel>
+                          <input
+                            className={inputClass}
+                            disabled={!canManage}
+                            id={`section-${section.id}-accent`}
+                            maxLength={120}
+                            onChange={(event) => replaceSection(index, {
+                              ...section, settings: { ...section.settings, accentText: event.target.value },
+                            })}
+                            value={section.settings.accentText}
+                          />
+                        </div>
+                        <div className="sm:col-span-2">
+                          <FieldLabel htmlFor={`section-${section.id}-subtitle`}>Açıklama</FieldLabel>
                           <input
                             className={inputClass}
                             disabled={!canManage}
@@ -654,15 +734,28 @@ export function ThemeSection({ organizationSlug, currentRole }: { organizationSl
                           assets={mediaQuery.data ?? []}
                           disabled={!canManage}
                           id={`section-${section.id}-hero-media`}
-                          label="Hero görseli"
+                          label="Desktop Hero Görseli"
                           loading={mediaQuery.isLoading}
+                          organizationSlug={organizationSlug}
                           onChange={(mediaId) => replaceSection(index, {
                             ...section, settings: { ...section.settings, mediaId },
                           })}
                           value={section.settings.mediaId}
                         />
+                        <MediaAssetSelect
+                          assets={mediaQuery.data ?? []}
+                          disabled={!canManage}
+                          id={`section-${section.id}-hero-mobile-media`}
+                          label="Mobile Hero Görseli"
+                          loading={mediaQuery.isLoading}
+                          organizationSlug={organizationSlug}
+                          onChange={(mobileMediaId) => replaceSection(index, {
+                            ...section, settings: { ...section.settings, mobileMediaId },
+                          })}
+                          value={section.settings.mobileMediaId}
+                        />
                         <div>
-                          <FieldLabel htmlFor={`section-${section.id}-hero-cta`}>CTA metni</FieldLabel>
+                          <FieldLabel htmlFor={`section-${section.id}-hero-cta`}>Primary CTA Metni</FieldLabel>
                           <input
                             className={inputClass}
                             disabled={!canManage}
@@ -675,13 +768,38 @@ export function ThemeSection({ organizationSlug, currentRole }: { organizationSl
                           />
                         </div>
                         <div>
-                          <FieldLabel htmlFor={`section-${section.id}-hero-target`}>CTA hedefi</FieldLabel>
+                          <FieldLabel htmlFor={`section-${section.id}-hero-target`}>Primary CTA Hedefi</FieldLabel>
                           <select className={inputClass} disabled={!canManage} id={`section-${section.id}-hero-target`}
                             value={sourceValue(section.settings.ctaTarget)}
                             onChange={(event) => replaceSection(index, { ...section, settings: { ...section.settings, ctaTarget: sourceFromValue(event.target.value) } })}>
+                            <option value="none">Bağlantı yok</option>
                             <option value="products">Tüm ürünler</option>
                             {(categoriesQuery.data ?? []).map((category) => <option key={`category-${category.id}`} value={`category:${category.id}`}>Kategori: {category.name}</option>)}
                             {(collectionsQuery.data ?? []).map((collection) => <option key={`collection-${collection.id}`} value={`collection:${collection.id}`}>Koleksiyon: {collection.title}</option>)}
+                          </select>
+                        </div>
+                        <div>
+                          <FieldLabel htmlFor={`section-${section.id}-hero-secondary-cta`}>Secondary CTA Metni</FieldLabel>
+                          <input
+                            className={inputClass}
+                            disabled={!canManage}
+                            id={`section-${section.id}-hero-secondary-cta`}
+                            maxLength={40}
+                            onChange={(event) => replaceSection(index, {
+                              ...section, settings: { ...section.settings, secondaryCtaLabel: event.target.value },
+                            })}
+                            value={section.settings.secondaryCtaLabel}
+                          />
+                        </div>
+                        <div>
+                          <FieldLabel htmlFor={`section-${section.id}-hero-secondary-target`}>Secondary CTA Hedefi</FieldLabel>
+                          <select className={inputClass} disabled={!canManage} id={`section-${section.id}-hero-secondary-target`}
+                            value={sourceValue(section.settings.secondaryCtaTarget)}
+                            onChange={(event) => replaceSection(index, { ...section, settings: { ...section.settings, secondaryCtaTarget: sourceFromValue(event.target.value) } })}>
+                            <option value="none">Bağlantı yok</option>
+                            <option value="products">Tüm ürünler</option>
+                            {(categoriesQuery.data ?? []).map((category) => <option key={`secondary-category-${category.id}`} value={`category:${category.id}`}>Kategori: {category.name}</option>)}
+                            {(collectionsQuery.data ?? []).map((collection) => <option key={`secondary-collection-${collection.id}`} value={`collection:${collection.id}`}>Koleksiyon: {collection.title}</option>)}
                           </select>
                         </div>
                       </>
@@ -994,6 +1112,7 @@ export function ThemeSection({ organizationSlug, currentRole }: { organizationSl
                           id={`section-${section.id}-media`}
                           label="Bölüm görseli"
                           loading={mediaQuery.isLoading}
+                          organizationSlug={organizationSlug}
                           onChange={(mediaId) => replaceSection(index, {
                             ...section, settings: { ...section.settings, mediaId },
                           } as ThemeSection)}

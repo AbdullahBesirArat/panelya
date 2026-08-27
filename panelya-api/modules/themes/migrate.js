@@ -23,6 +23,28 @@ const MIGRATIONS = Object.freeze({
     schemaVersion: 2,
     sections: Array.isArray(config.sections) ? config.sections.slice() : [],
   }),
+  // v3 extends the hero without changing the meaning of any v2 field. New optional
+  // content is deliberately empty: a migration may normalize shape, never invent copy,
+  // links, or media that a merchant did not approve.
+  2: (config) => ({
+    ...config,
+    schemaVersion: 3,
+    sections: Array.isArray(config.sections) ? config.sections.map((section) => (
+      section?.type === 'hero'
+        ? {
+          ...section,
+          settings: {
+            eyebrow: '',
+            accentText: '',
+            mobileMediaId: null,
+            secondaryCtaLabel: '',
+            secondaryCtaTarget: { type: 'none' },
+            ...(section.settings || {}),
+          },
+        }
+        : section
+    )) : [],
+  }),
 });
 
 function migrateThemeConfig(input) {

@@ -25,7 +25,9 @@ function publicVersion(row) {
     version_number: Number(row.version_number),
     schema_version: Number(row.schema_version),
     status: row.status,
-    config: row.config,
+    // Read migration only: historical and existing draft rows remain immutable in storage,
+    // while every caller receives the current safe shape.
+    config: normalizeThemeConfig(row.config),
     validation_hash: row.validation_hash,
     validation_result: row.validation_result,
     based_on_version_id: row.based_on_version_id ? Number(row.based_on_version_id) : null,
