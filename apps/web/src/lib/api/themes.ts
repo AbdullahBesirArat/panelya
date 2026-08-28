@@ -51,6 +51,24 @@ export type ThemeTokens = {
   container: { maxWidth: number; paddingX: number };
 };
 
+export type ThemeHeroSlide = {
+  id: string;
+  enabled: boolean;
+  order: number;
+  eyebrow: string;
+  title: string;
+  accentText: string;
+  subtitle: string;
+  description: string;
+  mediaId: string | null;
+  mobileMediaId: string | null;
+  ctaLabel: string;
+  ctaTarget: ThemeLink;
+  secondaryCtaLabel: string;
+  secondaryCtaTarget: ThemeLink;
+  alignment: ThemeAlignment;
+};
+
 export type ThemeSectionSettings = {
   hero: {
     eyebrow: string;
@@ -64,6 +82,7 @@ export type ThemeSectionSettings = {
     secondaryCtaLabel: string;
     secondaryCtaTarget: ThemeLink;
     alignment: ThemeAlignment;
+    slides: ThemeHeroSlide[];
   };
   "product-grid": {
     title: string;

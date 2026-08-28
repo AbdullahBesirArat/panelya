@@ -32,6 +32,12 @@ function section(type: ThemeSectionType, order: number, enabled = true): ThemeSe
           eyebrow: "", title: "Kapak", accentText: "", subtitle: "Alt", mediaId: null,
           mobileMediaId: null, ctaLabel: "Keşfet", ctaTarget: { type: "products" },
           secondaryCtaLabel: "", secondaryCtaTarget: { type: "none" }, alignment: "center",
+          slides: [{
+            id: "slide-1", enabled: true, order: 0, eyebrow: "", title: "Kapak", accentText: "",
+            subtitle: "", description: "Alt", mediaId: null, mobileMediaId: null,
+            ctaLabel: "Keşfet", ctaTarget: { type: "products" }, secondaryCtaLabel: "",
+            secondaryCtaTarget: { type: "none" }, alignment: "center",
+          }],
         },
       };
     case "product-grid":
@@ -63,7 +69,7 @@ function section(type: ThemeSectionType, order: number, enabled = true): ThemeSe
 
 function config(): ThemeConfig {
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
     tokens: {
       colors: {
         background: "#ffffff", surface: "#ffffff", text: "#111111", mutedText: "#666666",
@@ -214,7 +220,7 @@ test("toggling a section flips exactly one entry", () => {
 
 test("section summaries describe the section without leaking raw markup", () => {
   const sections = config().sections;
-  assert.equal(sectionSummary(sections[0]), "Kapak");
+  assert.equal(sectionSummary(sections[0]), "1 slayt · Kapak");
   assert.equal(sectionSummary(sections[1]), "8 ürün · 4 sütun");
   assert.equal(sectionSummary(sections[2]), "0 blok");
   assert.equal(sectionSummary(sections[3]), "1 madde");
@@ -324,6 +330,11 @@ test("hero editor exposes responsive media and optional editorial fields without
   ]) assert.match(source, new RegExp(label));
   assert.match(source, /mobileMediaId/);
   assert.match(source, /secondaryCtaTarget/);
+  assert.match(source, /Hero slaytları/);
+  assert.match(source, /Slayt Ekle/);
+  assert.match(source, /section\.settings\.slides\.map/);
+  assert.match(source, /moveHeroSlide/);
+  assert.match(source, /slide\.enabled/);
   assert.doesNotMatch(source, /primaryCtaHref|secondaryCtaHref/, "links remain canonical entities, never href text");
 });
 

@@ -12,7 +12,7 @@
 // customHtml, customJs, rawCss, script, style, className, href. There is no field in this
 // schema whose value reaches the page as markup or as a stylesheet fragment.
 
-const CURRENT_SCHEMA_VERSION = 4;
+const CURRENT_SCHEMA_VERSION = 5;
 
 function themeError(message, code, status = 400, meta = undefined) {
   return Object.assign(new Error(message), { code, status, meta });
@@ -195,6 +195,8 @@ const SECTION_TYPES = Object.freeze([
 const TRUST_ICONS = Object.freeze(['shield', 'truck', 'refresh', 'lock', 'star', 'gift', 'headset']);
 const ALIGNMENTS = Object.freeze(['left', 'center', 'right']);
 const GRID_SORTS = Object.freeze(['recommended', 'newest', 'best_selling', 'price_asc', 'price_desc']);
+const HERO_SLIDE_ID = /^[a-z0-9][a-z0-9_-]{0,39}$/;
+const MAX_HERO_SLIDES = 6;
 
 function parseIdList(value, field, max = 12) {
   const values = Array.isArray(value) ? value.slice(0, max) : [];
@@ -215,7 +217,7 @@ function parseContentHeading(settings, path) {
 
 const SECTION_VALIDATORS = Object.freeze({
   hero(settings, path) {
-    return {
+    const legacy = {
       eyebrow: parseText(settings.eyebrow, { field: `${path}.eyebrow`, max: 60 }),
       title: parseText(settings.title, { field: `${path}.title`, max: 120 }),
       accentText: parseText(settings.accentText, { field: `${path}.accentText`, max: 120 }),
@@ -228,6 +230,62 @@ const SECTION_VALIDATORS = Object.freeze({
       secondaryCtaTarget: parseLink(settings.secondaryCtaTarget, `${path}.secondaryCtaTarget`),
       alignment: parseEnum(settings.alignment ?? 'center', ALIGNMENTS, `${path}.alignment`),
     };
+    if (Array.isArray(settings.slides) && settings.slides.length > MAX_HERO_SLIDES) {
+      throw themeError('Cok fazla hero slayti', 'THEME_TOO_MANY_HERO_SLIDES', 400, { max: MAX_HERO_SLIDES });
+    }
+    const slidesIn = Array.isArray(settings.slides) ? settings.slides.slice() : [];
+    const seen = new Set();
+    const slides = slidesIn.map((raw, index) => {
+      const slide = raw && typeof raw === 'object' ? raw : {};
+      const id = String(slide.id ?? `slide-${index + 1}`).trim().toLowerCase();
+      if (!HERO_SLIDE_ID.test(id)) {
+        throw themeError(`Hero slayt kimligi gecersiz: ${path}.slides[${index}]`, 'THEME_INVALID_HERO_SLIDE_ID', 400, { index });
+      }
+      if (seen.has(id)) {
+        throw themeError(`Hero slayt kimligi tekrar ediyor: ${id}`, 'THEME_DUPLICATE_HERO_SLIDE_ID', 400, { id });
+      }
+      seen.add(id);
+      return {
+        id,
+        enabled: parseBoolean(slide.enabled, true),
+        order: parseIntInRange(slide.order, { field: `${path}.slides[${index}].order`, min: 0, max: 99, fallback: index }),
+        eyebrow: parseText(slide.eyebrow, { field: `${path}.slides[${index}].eyebrow`, max: 60 }),
+        title: parseText(slide.title, { field: `${path}.slides[${index}].title`, max: 120 }),
+        accentText: parseText(slide.accentText, { field: `${path}.slides[${index}].accentText`, max: 120 }),
+        subtitle: parseText(slide.subtitle, { field: `${path}.slides[${index}].subtitle`, max: 120 }),
+        description: parseText(slide.description, { field: `${path}.slides[${index}].description`, max: 240 }),
+        mediaId: parseMediaId(slide.mediaId, `${path}.slides[${index}].mediaId`),
+        mobileMediaId: parseMediaId(slide.mobileMediaId, `${path}.slides[${index}].mobileMediaId`),
+        ctaLabel: parseText(slide.ctaLabel, { field: `${path}.slides[${index}].ctaLabel`, max: 40 }),
+        ctaTarget: parseLink(slide.ctaTarget, `${path}.slides[${index}].ctaTarget`),
+        secondaryCtaLabel: parseText(slide.secondaryCtaLabel, { field: `${path}.slides[${index}].secondaryCtaLabel`, max: 40 }),
+        secondaryCtaTarget: parseLink(slide.secondaryCtaTarget, `${path}.slides[${index}].secondaryCtaTarget`),
+        alignment: parseEnum(slide.alignment ?? 'left', ALIGNMENTS, `${path}.slides[${index}].alignment`),
+      };
+    }).sort((a, b) => (a.order - b.order) || a.id.localeCompare(b.id))
+      .map((slide, order) => ({ ...slide, order }));
+
+    if (slides.length && !slides.some((slide) => slide.enabled)) {
+      throw themeError('Hero icin en az bir gorunur slayt zorunlu', 'THEME_HERO_REQUIRES_VISIBLE_SLIDE', 400, { field: `${path}.slides` });
+    }
+
+    // Keep the legacy single-slide fields synced to the first visible slide. This lets an
+    // older storefront deployment continue rendering during a rolling API/web release.
+    const primary = slides.find((slide) => slide.enabled) || null;
+    return primary ? {
+      eyebrow: primary.eyebrow,
+      title: primary.title,
+      accentText: primary.accentText,
+      subtitle: primary.description || primary.subtitle,
+      mediaId: primary.mediaId,
+      mobileMediaId: primary.mobileMediaId,
+      ctaLabel: primary.ctaLabel,
+      ctaTarget: primary.ctaTarget,
+      secondaryCtaLabel: primary.secondaryCtaLabel,
+      secondaryCtaTarget: primary.secondaryCtaTarget,
+      alignment: primary.alignment,
+      slides,
+    } : { ...legacy, slides };
   },
   'product-grid'(settings, path) {
     return {

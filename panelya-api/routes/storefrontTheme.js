@@ -24,6 +24,10 @@ async function resolveMedia(client, organizationId, config) {
   for (const section of config.sections) {
     collect(section.settings.mediaId);
     collect(section.settings.mobileMediaId);
+    for (const slide of section.settings.slides || []) {
+      collect(slide.mediaId);
+      collect(slide.mobileMediaId);
+    }
     for (const block of section.settings.blocks || []) collect(block.mediaId);
   }
   if (!ids.size) return {};

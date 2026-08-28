@@ -56,6 +56,39 @@ const MIGRATIONS = Object.freeze({
         : section
     )) : [],
   }),
+  // v5 turns the builder hero into an ordered slide collection. The one already-approved
+  // hero becomes slide one verbatim; no campaign copy, media or links are invented.
+  4: (config) => ({
+    ...config,
+    schemaVersion: 5,
+    sections: Array.isArray(config.sections) ? config.sections.map((section) => {
+      if (section?.type !== 'hero') return section;
+      const settings = section.settings || {};
+      return {
+        ...section,
+        settings: {
+          ...settings,
+          slides: [{
+            id: 'slide-1',
+            enabled: true,
+            order: 0,
+            eyebrow: settings.eyebrow || '',
+            title: settings.title || '',
+            accentText: settings.accentText || '',
+            subtitle: '',
+            description: settings.subtitle || '',
+            mediaId: settings.mediaId || null,
+            mobileMediaId: settings.mobileMediaId || null,
+            ctaLabel: settings.ctaLabel || '',
+            ctaTarget: settings.ctaTarget || { type: 'none' },
+            secondaryCtaLabel: settings.secondaryCtaLabel || '',
+            secondaryCtaTarget: settings.secondaryCtaTarget || { type: 'none' },
+            alignment: settings.alignment || 'left',
+          }],
+        },
+      };
+    }) : [],
+  }),
 });
 
 function migrateThemeConfig(input) {

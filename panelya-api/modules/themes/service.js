@@ -169,7 +169,10 @@ function warningsFor(config) {
     warnings.push({ field: 'announcement.text', code: 'THEME_EMPTY_ANNOUNCEMENT', message: 'Duyuru acik ama metni bos.' });
   }
   const hero = config.sections.find((section) => section.type === 'hero' && section.enabled);
-  if (hero && !hero.settings.title && !hero.settings.mediaId) {
+  const heroHasContent = hero && ((hero.settings.slides || []).some((slide) => (
+    slide.enabled && (slide.title || slide.accentText || slide.mediaId || slide.mobileMediaId)
+  )) || hero.settings.title || hero.settings.mediaId || hero.settings.mobileMediaId);
+  if (hero && !heroHasContent) {
     warnings.push({ field: 'sections.hero', code: 'THEME_EMPTY_HERO', message: 'Hero bolumunde baslik ve gorsel yok.' });
   }
   return warnings;

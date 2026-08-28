@@ -11,7 +11,7 @@ import {
   createThemeDraft, createThemePreviewToken, fetchPublishedTheme, fetchThemeDraft, fetchThemePreviewOrigin,
   fetchThemeVersions, publishThemeDraft, rollbackTheme, saveThemeDraft, validateThemeConfig,
   type ThemeColorKey, type ThemeConfig, type ThemeFontStack, type ThemeSection,
-  type ThemeSectionType, type ThemeTrustIcon, type ThemeValidationReport, type ThemeVersion,
+  type ThemeHeroSlide, type ThemeSectionType, type ThemeTrustIcon, type ThemeValidationReport, type ThemeVersion,
 } from "@/lib/api/themes";
 import { fetchCategories, fetchProducts } from "@/lib/api/catalog";
 import { fetchCollections } from "@/lib/api/content";
@@ -22,7 +22,7 @@ import { getApiErrorCode } from "@/lib/api/types";
 import { queryKeys } from "@/lib/query-keys";
 import {
   COLOR_FIELDS, FONT_OPTIONS, NUMERIC_BOUNDS, SECTION_OPTIONS, TRUST_ICON_OPTIONS, canPublish, clampToBounds,
-  createSection,
+  createHeroSlide, createSection,
   draftDiffersFromPublished, moveSection, normalizeHex, previewUrl, saveStateLabel,
   sectionLabel, sectionSummary, themeErrorMessage, toggleSection, versionLabel,
   withSections, withTokens, type SaveState,
@@ -40,7 +40,7 @@ function errorText(error: unknown) {
 
 function sourceValue(source: { type: string; id?: number | string }) {
   if (source.type === "none") return "none";
-  return (source.type === "category" || source.type === "collection") && Number.isInteger(Number(source.id))
+  return (source.type === "category" || source.type === "collection" || source.type === "product") && Number.isInteger(Number(source.id))
     ? `${source.type}:${source.id}`
     : "products";
 }
@@ -49,7 +49,7 @@ function sourceFromValue(value: string) {
   if (value === "none") return { type: "none" } as const;
   const [type, rawId] = value.split(":");
   const id = Number(rawId);
-  if ((type === "category" || type === "collection") && Number.isInteger(id) && id > 0) {
+  if ((type === "category" || type === "collection" || type === "product") && Number.isInteger(id) && id > 0) {
     return { type, id } as const;
   }
   return { type: "products" } as const;
@@ -397,6 +397,54 @@ export function ThemeSection({ organizationSlug, currentRole }: { organizationSl
   function replaceSection(index: number, section: ThemeSection) {
     if (!config) return;
     update(withSections(config, config.sections.map((item, position) => (position === index ? section : item))));
+  }
+
+  function replaceHeroSlide(index: number, section: Extract<ThemeSection, { type: "hero" }>, slideIndex: number, patch: Partial<ThemeHeroSlide>) {
+    replaceSection(index, {
+      ...section,
+      settings: {
+        ...section.settings,
+        slides: section.settings.slides.map((slide, position) => (
+          position === slideIndex ? { ...slide, ...patch } : slide
+        )),
+      },
+    });
+  }
+
+  function moveHeroSlide(index: number, section: Extract<ThemeSection, { type: "hero" }>, slideIndex: number, direction: -1 | 1) {
+    const target = slideIndex + direction;
+    if (target < 0 || target >= section.settings.slides.length) return;
+    const slides = section.settings.slides.slice();
+    const [moved] = slides.splice(slideIndex, 1);
+    slides.splice(target, 0, moved);
+    replaceSection(index, {
+      ...section,
+      settings: { ...section.settings, slides: slides.map((slide, order) => ({ ...slide, order })) },
+    });
+  }
+
+  function addHeroSlide(index: number, section: Extract<ThemeSection, { type: "hero" }>) {
+    if (section.settings.slides.length >= 6) return;
+    replaceSection(index, {
+      ...section,
+      settings: {
+        ...section.settings,
+        slides: [...section.settings.slides, createHeroSlide(section.settings.slides.length)],
+      },
+    });
+  }
+
+  function removeHeroSlide(index: number, section: Extract<ThemeSection, { type: "hero" }>, slideIndex: number) {
+    if (section.settings.slides.length <= 1) return;
+    replaceSection(index, {
+      ...section,
+      settings: {
+        ...section.settings,
+        slides: section.settings.slides
+          .filter((_, position) => position !== slideIndex)
+          .map((slide, order) => ({ ...slide, order })),
+      },
+    });
   }
 
   function move(index: number, direction: -1 | 1) {
@@ -768,7 +816,115 @@ export function ThemeSection({ organizationSlug, currentRole }: { organizationSl
                   </div>
 
                   <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                    {section.type === "hero" ? (
+                    {section.type === "hero" && section.settings.slides.length ? (
+                      <div className="grid gap-4 sm:col-span-2">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-semibold text-zinc-800">Hero slaytları</p>
+                            <p className="text-xs text-zinc-500">1–6 gerçek medya slaytını sıra ve görünürlükle yönetin.</p>
+                          </div>
+                          <Button
+                            disabled={!canManage || section.settings.slides.length >= 6}
+                            onClick={() => addHeroSlide(index, section)}
+                            variant="outline"
+                          >
+                            Slayt Ekle
+                          </Button>
+                        </div>
+                        {section.settings.slides.map((slide, slideIndex) => {
+                          const visibleCount = section.settings.slides.filter((item) => item.enabled).length;
+                          return (
+                            <article className="grid gap-3 rounded-xl border border-line bg-zinc-50 p-4 sm:grid-cols-2" key={slide.id}>
+                              <div className="flex flex-wrap items-center justify-between gap-2 sm:col-span-2">
+                                <p className="text-sm font-semibold text-zinc-800">Slayt {slideIndex + 1}</p>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <Button disabled={!canManage || slideIndex === 0} onClick={() => moveHeroSlide(index, section, slideIndex, -1)} variant="outline">Yukarı</Button>
+                                  <Button disabled={!canManage || slideIndex === section.settings.slides.length - 1} onClick={() => moveHeroSlide(index, section, slideIndex, 1)} variant="outline">Aşağı</Button>
+                                  <label className="flex items-center gap-2 text-sm text-zinc-700">
+                                    <input
+                                      aria-label={`${slideIndex + 1}. hero slaytını göster`}
+                                      checked={slide.enabled}
+                                      disabled={!canManage || (slide.enabled && visibleCount === 1)}
+                                      onChange={(event) => replaceHeroSlide(index, section, slideIndex, { enabled: event.target.checked })}
+                                      type="checkbox"
+                                    />
+                                    Görünür
+                                  </label>
+                                  <Button disabled={!canManage || section.settings.slides.length <= 1} onClick={() => removeHeroSlide(index, section, slideIndex)} variant="outline">Sil</Button>
+                                </div>
+                              </div>
+                              <div>
+                                <FieldLabel htmlFor={`section-${section.id}-slide-${slide.id}-eyebrow`}>Eyebrow</FieldLabel>
+                                <input className={inputClass} disabled={!canManage} id={`section-${section.id}-slide-${slide.id}-eyebrow`} maxLength={60}
+                                  onChange={(event) => replaceHeroSlide(index, section, slideIndex, { eyebrow: event.target.value })} value={slide.eyebrow} />
+                              </div>
+                              <div>
+                                <FieldLabel htmlFor={`section-${section.id}-slide-${slide.id}-title`}>Ana Başlık</FieldLabel>
+                                <input className={inputClass} disabled={!canManage} id={`section-${section.id}-slide-${slide.id}-title`} maxLength={120}
+                                  onChange={(event) => replaceHeroSlide(index, section, slideIndex, { title: event.target.value })} value={slide.title} />
+                              </div>
+                              <div>
+                                <FieldLabel htmlFor={`section-${section.id}-slide-${slide.id}-accent`}>Vurgulu İkinci Satır</FieldLabel>
+                                <input className={inputClass} disabled={!canManage} id={`section-${section.id}-slide-${slide.id}-accent`} maxLength={120}
+                                  onChange={(event) => replaceHeroSlide(index, section, slideIndex, { accentText: event.target.value })} value={slide.accentText} />
+                              </div>
+                              <div>
+                                <FieldLabel htmlFor={`section-${section.id}-slide-${slide.id}-subtitle`}>Alt Başlık</FieldLabel>
+                                <input className={inputClass} disabled={!canManage} id={`section-${section.id}-slide-${slide.id}-subtitle`} maxLength={120}
+                                  onChange={(event) => replaceHeroSlide(index, section, slideIndex, { subtitle: event.target.value })} value={slide.subtitle} />
+                              </div>
+                              <div className="sm:col-span-2">
+                                <FieldLabel htmlFor={`section-${section.id}-slide-${slide.id}-description`}>Açıklama</FieldLabel>
+                                <input className={inputClass} disabled={!canManage} id={`section-${section.id}-slide-${slide.id}-description`} maxLength={240}
+                                  onChange={(event) => replaceHeroSlide(index, section, slideIndex, { description: event.target.value })} value={slide.description} />
+                              </div>
+                              <MediaAssetSelect assets={mediaQuery.data ?? []} disabled={!canManage}
+                                id={`section-${section.id}-slide-${slide.id}-media`} label="Desktop Hero Görseli"
+                                loading={mediaQuery.isLoading} organizationSlug={organizationSlug}
+                                onChange={(mediaId) => replaceHeroSlide(index, section, slideIndex, { mediaId })} value={slide.mediaId} />
+                              <MediaAssetSelect assets={mediaQuery.data ?? []} disabled={!canManage}
+                                id={`section-${section.id}-slide-${slide.id}-mobile-media`} label="Mobile Hero Görseli"
+                                loading={mediaQuery.isLoading} organizationSlug={organizationSlug}
+                                onChange={(mobileMediaId) => replaceHeroSlide(index, section, slideIndex, { mobileMediaId })} value={slide.mobileMediaId} />
+                              <div>
+                                <FieldLabel htmlFor={`section-${section.id}-slide-${slide.id}-cta`}>Primary CTA Metni</FieldLabel>
+                                <input className={inputClass} disabled={!canManage} id={`section-${section.id}-slide-${slide.id}-cta`} maxLength={40}
+                                  onChange={(event) => replaceHeroSlide(index, section, slideIndex, { ctaLabel: event.target.value })} value={slide.ctaLabel} />
+                              </div>
+                              <div>
+                                <FieldLabel htmlFor={`section-${section.id}-slide-${slide.id}-target`}>Primary CTA Hedefi</FieldLabel>
+                                <select className={inputClass} disabled={!canManage} id={`section-${section.id}-slide-${slide.id}-target`}
+                                  onChange={(event) => replaceHeroSlide(index, section, slideIndex, { ctaTarget: sourceFromValue(event.target.value) })}
+                                  value={sourceValue(slide.ctaTarget)}>
+                                  <option value="none">Bağlantı yok</option><option value="products">Tüm ürünler</option>
+                                  {(categoriesQuery.data ?? []).map((category) => <option key={`slide-${slide.id}-category-${category.id}`} value={`category:${category.id}`}>Kategori: {category.name}</option>)}
+                                  {(collectionsQuery.data ?? []).map((collection) => <option key={`slide-${slide.id}-collection-${collection.id}`} value={`collection:${collection.id}`}>Koleksiyon: {collection.title}</option>)}
+                                  {(productsQuery.data ?? []).map((product) => <option key={`slide-${slide.id}-product-${product.id}`} value={`product:${product.id}`}>Ürün: {product.name}</option>)}
+                                </select>
+                              </div>
+                              <div>
+                                <FieldLabel htmlFor={`section-${section.id}-slide-${slide.id}-secondary-cta`}>Secondary CTA Metni</FieldLabel>
+                                <input className={inputClass} disabled={!canManage} id={`section-${section.id}-slide-${slide.id}-secondary-cta`} maxLength={40}
+                                  onChange={(event) => replaceHeroSlide(index, section, slideIndex, { secondaryCtaLabel: event.target.value })} value={slide.secondaryCtaLabel} />
+                              </div>
+                              <div>
+                                <FieldLabel htmlFor={`section-${section.id}-slide-${slide.id}-secondary-target`}>Secondary CTA Hedefi</FieldLabel>
+                                <select className={inputClass} disabled={!canManage} id={`section-${section.id}-slide-${slide.id}-secondary-target`}
+                                  onChange={(event) => replaceHeroSlide(index, section, slideIndex, { secondaryCtaTarget: sourceFromValue(event.target.value) })}
+                                  value={sourceValue(slide.secondaryCtaTarget)}>
+                                  <option value="none">Bağlantı yok</option><option value="products">Tüm ürünler</option>
+                                  {(categoriesQuery.data ?? []).map((category) => <option key={`slide-${slide.id}-secondary-category-${category.id}`} value={`category:${category.id}`}>Kategori: {category.name}</option>)}
+                                  {(collectionsQuery.data ?? []).map((collection) => <option key={`slide-${slide.id}-secondary-collection-${collection.id}`} value={`collection:${collection.id}`}>Koleksiyon: {collection.title}</option>)}
+                                  {(productsQuery.data ?? []).map((product) => <option key={`slide-${slide.id}-secondary-product-${product.id}`} value={`product:${product.id}`}>Ürün: {product.name}</option>)}
+                                </select>
+                              </div>
+                            </article>
+                          );
+                        })}
+                      </div>
+                    ) : null}
+
+                    {section.type === "hero" && !section.settings.slides.length ? (
                       <>
                         <div>
                           <FieldLabel htmlFor={`section-${section.id}-eyebrow`}>Eyebrow</FieldLabel>

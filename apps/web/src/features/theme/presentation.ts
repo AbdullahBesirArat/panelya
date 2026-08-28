@@ -1,6 +1,6 @@
 import type {
   ThemeColorKey, ThemeConfig, ThemeFontStack, ThemeSection, ThemeSectionType,
-  ThemeTrustIcon, ThemeValidationReport, ThemeVersion,
+  ThemeHeroSlide, ThemeTrustIcon, ThemeValidationReport, ThemeVersion,
 } from "@/lib/api/themes";
 
 // Pure presentation + editing helpers so the theme editor can be unit-tested without
@@ -93,11 +93,32 @@ export const NUMERIC_BOUNDS = {
   columns: { min: 2, max: 5 },
 } as const;
 
+export function createHeroSlide(order: number): ThemeHeroSlide {
+  return {
+    id: `slide-${Date.now().toString(36)}-${order}`.slice(0, 40),
+    enabled: true,
+    order,
+    eyebrow: "",
+    title: "",
+    accentText: "",
+    subtitle: "",
+    description: "",
+    mediaId: null,
+    mobileMediaId: null,
+    ctaLabel: "",
+    ctaTarget: { type: "products" },
+    secondaryCtaLabel: "",
+    secondaryCtaTarget: { type: "none" },
+    alignment: "left",
+  };
+}
+
 export function createSection(type: ThemeSectionType, order: number): ThemeSection {
   const id = `${type}-${Date.now().toString(36)}-${order}`.slice(0, 40);
   const base = { id, enabled: true, order };
   switch (type) {
-    case "hero":
+    case "hero": {
+      const firstSlide = createHeroSlide(0);
       return {
         ...base,
         type,
@@ -105,8 +126,10 @@ export function createSection(type: ThemeSectionType, order: number): ThemeSecti
           eyebrow: "", title: "", accentText: "", subtitle: "", mediaId: null,
           mobileMediaId: null, ctaLabel: "", ctaTarget: { type: "products" },
           secondaryCtaLabel: "", secondaryCtaTarget: { type: "none" }, alignment: "left",
+          slides: [firstSlide],
         },
       };
+    }
     case "product-grid":
       return { ...base, type, settings: { title: "", source: { type: "products" }, productIds: [], limit: 8, columns: 4, sort: "recommended" } };
     case "product-carousel":
@@ -211,7 +234,7 @@ export function draftDiffersFromPublished(draftHash: string | null, publishedHas
 export function sectionSummary(section: ThemeSection): string {
   switch (section.type) {
     case "hero":
-      return section.settings.title || "Başlıksız kapak";
+      return `${section.settings.slides.length || 1} slayt · ${section.settings.slides.find((slide) => slide.enabled)?.title || section.settings.title || "Başlıksız kapak"}`;
     case "product-grid":
       return `${section.settings.limit} ürün · ${section.settings.columns} sütun`;
     case "product-carousel":
