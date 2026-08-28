@@ -395,7 +395,10 @@ function parseAnnouncement(input = {}) {
   return {
     enabled: parseBoolean(source.enabled, false),
     text: parseText(source.text, { field: 'announcement.text', max: 160 }),
+    linkLabel: parseText(source.linkLabel, { field: 'announcement.linkLabel', max: 40 }),
     link: parseLink(source.link, 'announcement.link'),
+    backgroundColor: parseColor(source.backgroundColor ?? '#2a4827', 'announcement.backgroundColor'),
+    textColor: parseColor(source.textColor ?? '#ffffff', 'announcement.textColor'),
   };
 }
 
@@ -494,6 +497,8 @@ function themeCssVariables(config) {
   for (const token of COLOR_TOKENS) {
     declarations.push([`--theme-${kebab(token)}`, tokens.colors[token]]);
   }
+  declarations.push(['--theme-announcement-background', config.announcement.backgroundColor]);
+  declarations.push(['--theme-announcement-text', config.announcement.textColor]);
   declarations.push(['--theme-font-heading', FONT_STACKS[tokens.fonts.heading]]);
   declarations.push(['--theme-font-body', FONT_STACKS[tokens.fonts.body]]);
   declarations.push(['--theme-spacing', `${tokens.spacing}px`]);

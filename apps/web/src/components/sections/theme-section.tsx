@@ -383,6 +383,17 @@ export function ThemeSection({ organizationSlug, currentRole }: { organizationSl
     }));
   }
 
+  function setAnnouncement(patch: Partial<ThemeConfig["announcement"]>) {
+    if (!config) return;
+    update({ ...config, announcement: { ...config.announcement, ...patch } });
+  }
+
+  function setAnnouncementColor(field: "backgroundColor" | "textColor", value: string) {
+    const hex = normalizeHex(value);
+    if (!hex) return;
+    setAnnouncement({ [field]: hex });
+  }
+
   function replaceSection(index: number, section: ThemeSection) {
     if (!config) return;
     update(withSections(config, config.sections.map((item, position) => (position === index ? section : item))));
@@ -591,6 +602,92 @@ export function ThemeSection({ organizationSlug, currentRole }: { organizationSl
                   value={config.tokens.container.paddingX}
                 />
               </div>
+            </div>
+          </Panel>
+
+          <Panel
+            title="Duyuru çubuğu"
+            description="Tüm storefront sayfalarında header üstünde görünen, tema tarafından yönetilen tek global duyuru alanı."
+          >
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label className="flex items-center gap-3 rounded-lg border border-line p-3 text-sm text-zinc-800 sm:col-span-2">
+                <input
+                  checked={config.announcement.enabled}
+                  disabled={!canManage}
+                  onChange={(event) => setAnnouncement({ enabled: event.target.checked })}
+                  type="checkbox"
+                />
+                Duyuru çubuğunu etkinleştir
+              </label>
+              <div className="sm:col-span-2">
+                <FieldLabel htmlFor="theme-announcement-text">Duyuru metni</FieldLabel>
+                <input
+                  className={inputClass}
+                  disabled={!canManage}
+                  id="theme-announcement-text"
+                  maxLength={160}
+                  onChange={(event) => setAnnouncement({ text: event.target.value })}
+                  value={config.announcement.text}
+                />
+              </div>
+              <div>
+                <FieldLabel htmlFor="theme-announcement-link-label">Bağlantı etiketi (isteğe bağlı)</FieldLabel>
+                <input
+                  className={inputClass}
+                  disabled={!canManage}
+                  id="theme-announcement-link-label"
+                  maxLength={40}
+                  onChange={(event) => setAnnouncement({ linkLabel: event.target.value })}
+                  value={config.announcement.linkLabel}
+                />
+              </div>
+              <div>
+                <FieldLabel htmlFor="theme-announcement-link">Bağlantı hedefi (isteğe bağlı)</FieldLabel>
+                <select
+                  className={inputClass}
+                  disabled={!canManage}
+                  id="theme-announcement-link"
+                  onChange={(event) => setAnnouncement({ link: sourceFromValue(event.target.value) })}
+                  value={sourceValue(config.announcement.link)}
+                >
+                  <option value="none">Bağlantı yok</option>
+                  <option value="products">Tüm ürünler</option>
+                  {(categoriesQuery.data ?? []).map((category) => (
+                    <option key={`announcement-category-${category.id}`} value={`category:${category.id}`}>
+                      Kategori · {category.name}
+                    </option>
+                  ))}
+                  {(collectionsQuery.data ?? []).map((collection) => (
+                    <option key={`announcement-collection-${collection.id}`} value={`collection:${collection.id}`}>
+                      Koleksiyon · {collection.title}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {(["backgroundColor", "textColor"] as const).map((field) => (
+                <div key={field}>
+                  <FieldLabel htmlFor={`theme-announcement-${field}`}>
+                    {field === "backgroundColor" ? "Arka plan rengi" : "Metin rengi"}
+                  </FieldLabel>
+                  <div className="flex items-center gap-2">
+                    <input
+                      className="h-9 w-12 cursor-pointer rounded border border-line bg-white"
+                      disabled={!canManage}
+                      id={`theme-announcement-${field}`}
+                      onChange={(event) => setAnnouncementColor(field, event.target.value)}
+                      type="color"
+                      value={config.announcement[field]}
+                    />
+                    <input
+                      aria-label={`${field === "backgroundColor" ? "Arka plan" : "Metin"} rengi (hex)`}
+                      className={inputClass}
+                      disabled={!canManage}
+                      onChange={(event) => setAnnouncementColor(field, event.target.value)}
+                      value={config.announcement[field]}
+                    />
+                  </div>
+                </div>
+              ))}
             </div>
           </Panel>
 

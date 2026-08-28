@@ -77,7 +77,14 @@ function config(): ThemeConfig {
     },
     header: { logoMediaId: null, showSearch: true, showAccount: true, showCart: true, sticky: true },
     footer: { text: "Suvera", showPaymentIcons: true, social: [] },
-    announcement: { enabled: true, text: "Kargo bedava", link: { type: "none" } },
+    announcement: {
+      enabled: true,
+      text: "Kargo bedava",
+      linkLabel: "",
+      link: { type: "none" },
+      backgroundColor: "#2a4827",
+      textColor: "#ffffff",
+    },
     sections: BASE_SECTION_TYPES.map((type, index) => section(type, index)),
     seo: { titleTemplate: "%s | Suvera", defaultDescription: "", socialImageMediaId: null },
   };
@@ -267,6 +274,20 @@ test("the editor offers no control that could carry raw CSS, HTML or a URL", () 
   // Publishing is a server decision; the client may only add a gate, never remove one.
   assert.match(source, /publishAllowed/);
   assert.match(source, /THEME_VERSION_CONFLICT/);
+});
+
+test("the canonical announcement editor exposes only managed text, entity links and safe colours", () => {
+  const source = fs.readFileSync(
+    path.join(__dirname, "..", "src", "components", "sections", "theme-section.tsx"),
+    "utf8"
+  );
+  for (const label of [
+    "Duyuru çubuğu", "Duyuru metni", "Bağlantı etiketi", "Bağlantı hedefi",
+    "Arka plan rengi", "Metin rengi",
+  ]) assert.match(source, new RegExp(label));
+  assert.match(source, /sourceFromValue\(event\.target\.value\)/);
+  assert.match(source, /setAnnouncementColor/);
+  assert.doesNotMatch(source, /announcementHref|announcementUrl/);
 });
 
 test("homepage media is selected from the tenant media library, never entered as a UUID", () => {

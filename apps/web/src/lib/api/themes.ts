@@ -146,7 +146,14 @@ export type ThemeConfig = {
     showPaymentIcons: boolean;
     social: Array<{ platform: string; handle: string }>;
   };
-  announcement: { enabled: boolean; text: string; link: ThemeLink };
+  announcement: {
+    enabled: boolean;
+    text: string;
+    linkLabel: string;
+    link: ThemeLink;
+    backgroundColor: string;
+    textColor: string;
+  };
   sections: ThemeSection[];
   /** Content metadata only — the canonical host is resolved by A27, never by a theme. */
   seo: { titleTemplate: string; defaultDescription: string; socialImageMediaId: string | null };
