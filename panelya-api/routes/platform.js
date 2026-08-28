@@ -9,6 +9,7 @@ const { auditLog } = require('../services/audit');
 const { slugify } = require('../services/tenant');
 const { createImpersonationToken } = require('../services/authTokens');
 const { getPlanUsage } = require('../services/planLimits');
+const { normalizeStorefrontUrl } = require('../services/tenantUrls');
 const {
   VALID_PLANS,
   assertStatusTransition,
@@ -248,6 +249,7 @@ router.post('/stores', platformWriteLimiter, async (req, res, next) => {
   try {
     const { errors, value } = validateCreateStoreInput(req.body);
     if (errors.length) return res.status(400).json({ error: errors[0], errors });
+    const storefrontUrl = normalizeStorefrontUrl(req.body.storefrontUrl || '');
 
     const slug = slugify(req.body.slug || value.name);
     if (!slug) return res.status(400).json({ error: 'Gecerli bir slug uretilemedi' });
@@ -295,8 +297,8 @@ router.post('/stores', platformWriteLimiter, async (req, res, next) => {
     // --- Organization ---
     const settings = normalizeStoreSettings(value.settings);
     const orgResult = await client.query(
-      `insert into organizations (name, slug, plan, status, owner_user_id, store_settings, metadata)
-       values ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb)
+      `insert into organizations (name, slug, plan, status, owner_user_id, store_settings, metadata, storefront_url)
+       values ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8)
        returning id, name, slug, plan, status, owner_user_id, created_at`,
       [
         value.name,
@@ -306,6 +308,7 @@ router.post('/stores', platformWriteLimiter, async (req, res, next) => {
         ownerUserId,
         JSON.stringify(settings),
         JSON.stringify({ description: value.description, storeType: value.storeType }),
+        storefrontUrl || null,
       ]
     );
     const organization = orgResult.rows[0];
@@ -385,7 +388,9 @@ router.patch('/stores/:organizationId', platformWriteLimiter, async (req, res, n
     if (typeof req.body.name === 'string' && req.body.name.trim()) push('name', req.body.name.trim().slice(0, 160));
     if (req.body.plan && VALID_PLANS.includes(req.body.plan)) push('plan', req.body.plan);
     if (typeof req.body.domain === 'string') push('domain', req.body.domain.trim().slice(0, 200) || null);
-    if (typeof req.body.storefrontUrl === 'string') push('storefront_url', req.body.storefrontUrl.trim().slice(0, 300) || null);
+    if (typeof req.body.storefrontUrl === 'string') {
+      push('storefront_url', normalizeStorefrontUrl(req.body.storefrontUrl) || null);
+    }
     if (req.body.settings && typeof req.body.settings === 'object') {
       const merged = normalizeStoreSettings(req.body.settings, store.store_settings || {});
       push('store_settings', JSON.stringify(merged));
@@ -706,7 +711,9 @@ router.patch('/stores/:organizationId/domain', platformWriteLimiter, async (req,
 
     const domain = typeof req.body.domain === 'string' ? req.body.domain.trim().slice(0, 200) : store.domain;
     const subdomain = typeof req.body.subdomain === 'string' ? req.body.subdomain.trim().slice(0, 120) : (store.metadata?.subdomain || '');
-    const storefrontUrl = typeof req.body.storefrontUrl === 'string' ? req.body.storefrontUrl.trim().slice(0, 300) : store.storefront_url;
+    const storefrontUrl = typeof req.body.storefrontUrl === 'string'
+      ? normalizeStorefrontUrl(req.body.storefrontUrl)
+      : store.storefront_url;
     const domainStatus = ['none', 'pending', 'verified', 'active', 'error'].includes(req.body.domainStatus)
       ? req.body.domainStatus : (domain ? 'pending' : 'none');
 

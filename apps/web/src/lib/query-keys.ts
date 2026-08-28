@@ -145,6 +145,7 @@ export const queryKeys = {
   theme: {
     published: (organizationSlug: string) => ["theme", organizationSlug, "published"] as const,
     draft: (organizationSlug: string) => ["theme", organizationSlug, "draft"] as const,
+    previewOrigin: (organizationSlug: string) => ["theme", organizationSlug, "preview-origin"] as const,
     versions: (organizationSlug: string) => ["theme", organizationSlug, "versions"] as const,
     version: (organizationSlug: string, versionId: number) =>
       ["theme", organizationSlug, "version", versionId] as const,

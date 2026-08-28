@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import {
@@ -8,14 +8,13 @@ import {
   SectionError, SectionLoading, StatusPill, formatDateTime,
 } from "@/components/operations-shared";
 import {
-  createThemeDraft, createThemePreviewToken, fetchPublishedTheme, fetchThemeDraft,
+  createThemeDraft, createThemePreviewToken, fetchPublishedTheme, fetchThemeDraft, fetchThemePreviewOrigin,
   fetchThemeVersions, publishThemeDraft, rollbackTheme, saveThemeDraft, validateThemeConfig,
   type ThemeColorKey, type ThemeConfig, type ThemeFontStack, type ThemeSection,
   type ThemeSectionType, type ThemeTrustIcon, type ThemeValidationReport, type ThemeVersion,
 } from "@/lib/api/themes";
 import { fetchCategories } from "@/lib/api/catalog";
 import { fetchCollections } from "@/lib/api/content";
-import { fetchDomains } from "@/lib/api/domains";
 import {
   fetchMediaAssets, MEDIA_UPLOAD_ACCEPT, resolveApiAssetUrl, uploadMediaAsset, type MediaAsset,
 } from "@/lib/api/media";
@@ -188,11 +187,9 @@ export function ThemeSection({ organizationSlug, currentRole }: { organizationSl
     queryKey: queryKeys.theme.versions(organizationSlug),
     queryFn: () => fetchThemeVersions(30),
   });
-  // A27: the preview has to run on the storefront's own origin, which is the tenant's
-  // canonical custom domain when they have one.
-  const domainsQuery = useQuery({
-    queryKey: queryKeys.domains.tenant(organizationSlug),
-    queryFn: fetchDomains,
+  const previewOriginQuery = useQuery({
+    queryKey: queryKeys.theme.previewOrigin(organizationSlug),
+    queryFn: fetchThemePreviewOrigin,
   });
   const categoriesQuery = useQuery({
     queryKey: queryKeys.catalog.categories(organizationSlug),
@@ -227,13 +224,7 @@ export function ThemeSection({ organizationSlug, currentRole }: { organizationSl
     setExpectedHash(draft.validation_hash);
   }, [draft]);
 
-  const storefrontOrigin = useMemo(() => {
-    const canonical = (domainsQuery.data?.items ?? []).find(
-      (domain) => domain.is_canonical && domain.status === "active"
-    );
-    if (canonical) return `https://${canonical.hostname}`;
-    return process.env.NEXT_PUBLIC_STOREFRONT_URL || "";
-  }, [domainsQuery.data]);
+  const storefrontOrigin = previewOriginQuery.data?.origin || "";
 
   // Every hash the editor accepts goes through here so the ref above never falls behind the
   // state: a stale ref would let a refetch overwrite the config the user is editing.
@@ -1169,6 +1160,11 @@ export function ThemeSection({ organizationSlug, currentRole }: { organizationSl
                 Önizle
               </Button>
             </div>
+            {!previewOriginQuery.isLoading && !storefrontOrigin ? (
+              <InlineHint>
+                Önizleme için Ayarlar bölümünde geçerli bir Storefront Adresi tanımlayın.
+              </InlineHint>
+            ) : null}
 
             {report ? (
               <div className="mt-4 grid gap-2">

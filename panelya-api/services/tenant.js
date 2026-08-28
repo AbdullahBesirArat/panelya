@@ -104,7 +104,7 @@ async function resolveOrganization(req, client = db, options = {}) {
     }
 
     const result = await client.query(
-      `select id, name, slug, plan, status, store_settings
+      `select id, name, slug, plan, status, store_settings, storefront_url
        from organizations
        where ${conditions.join(' and ')}
        limit 1`,
@@ -124,7 +124,7 @@ async function resolveOrganization(req, client = db, options = {}) {
 
   const slug = requestedOrganizationSlug(req);
   const result = await client.query(
-    `select id, name, slug, plan, status, store_settings
+    `select id, name, slug, plan, status, store_settings, storefront_url
      from organizations
      where slug = $1 and status <> 'suspended'
      limit 1`,

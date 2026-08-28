@@ -9,7 +9,12 @@ export async function fetchSuperAdminOverview() {
   return authenticatedRequest<SuperAdminOverview>("/organizations/superadmin/overview");
 }
 
-export async function updateOrganizationSettings(payload: { name: string; slug: string; settings?: StoreSettings }) {
+export async function updateOrganizationSettings(payload: {
+  name: string;
+  slug: string;
+  storefrontUrl?: string;
+  settings?: StoreSettings;
+}) {
   return authenticatedRequest<ApiOrganizationSettings>("/organizations/current", {
     method: "PUT",
     body: JSON.stringify(payload),

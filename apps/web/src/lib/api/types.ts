@@ -381,6 +381,7 @@ export type OrganizationSummary = {
     plan: string;
     status: string;
     created_at: string;
+    storefront_url?: string | null;
     store_settings?: StoreSettings;
   };
   metrics: {
@@ -463,6 +464,7 @@ export type ApiOrganizationSettings = {
   created_at: string;
   updated_at: string;
   public_access_token: string;
+  storefront_url?: string | null;
   store_settings?: StoreSettings;
 };
 

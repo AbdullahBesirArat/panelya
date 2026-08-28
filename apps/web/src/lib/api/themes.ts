@@ -204,6 +204,10 @@ export function fetchThemeDraft() {
   return authenticatedRequest<{ draft: ThemeVersion | null }>("/themes/draft");
 }
 
+export function fetchThemePreviewOrigin() {
+  return authenticatedRequest<{ origin: string | null; source: string }>("/themes/preview-origin");
+}
+
 /** Forks the published theme into an editable draft. Idempotent per organization. */
 export function createThemeDraft() {
   return authenticatedRequest<{ draft: ThemeVersion }>("/themes/draft", {

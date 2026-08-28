@@ -6,6 +6,7 @@ const { auditLog } = require('../services/audit');
 const { rateLimit } = require('../middleware/security');
 const themes = require('../modules/themes/service');
 const { themeCssVariables, defaultThemeConfig } = require('../modules/themes/schema');
+const { resolveStorefrontBaseUrl } = require('../services/tenantUrls');
 
 const router = express.Router();
 const READ_ROLES = ['super_admin', 'owner', 'admin', 'member', 'viewer'];
@@ -48,6 +49,11 @@ router.get('/published', requireAuth, requireRole(READ_ROLES), themeRoute(async 
 router.get('/draft', requireAuth, requireRole(READ_ROLES), themeRoute(async ({ client, organization }) => ({
   draft: themes.publicVersion(await themes.loadDraft(client, organization.id)),
 })));
+
+router.get('/preview-origin', requireAuth, requireRole(READ_ROLES), themeRoute(async ({ client, organization }) => {
+  const resolved = await resolveStorefrontBaseUrl(client, organization.id);
+  return { origin: resolved.baseUrl || null, source: resolved.source };
+}));
 
 router.post('/draft', requireAuth, requireRole(EDIT_ROLES), themeRoute(async ({ req, client, organization }) => {
   const draft = await themes.createDraft(client, {

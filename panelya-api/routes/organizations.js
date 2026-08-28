@@ -9,6 +9,7 @@ const { assertPlanCapacity } = require('../services/planLimits');
 const { getOrganizationSummary, invalidateOrganizationSummary, setOrganizationSummary } = require('../services/summaryCache');
 const { requestedOrganizationSlug, resolveOrganization, slugify } = require('../services/tenant');
 const { cleanStoreSettings, publicStoreSettings } = require('../services/storeSettings');
+const { normalizeStorefrontUrl } = require('../services/tenantUrls');
 
 const router = express.Router();
 const VALID_ORGANIZATION_PLANS = ['starter', 'growth', 'business', 'enterprise'];
@@ -393,11 +394,14 @@ router.put('/current', requireAuth, requireRole(['owner', 'admin', 'super_admin'
       ...(organization.store_settings || {}),
       ...(req.body.settings && typeof req.body.settings === 'object' ? req.body.settings : {}),
     });
+    const storefrontUrl = Object.prototype.hasOwnProperty.call(req.body, 'storefrontUrl')
+      ? normalizeStorefrontUrl(req.body.storefrontUrl)
+      : String(organization.storefront_url || '').trim();
 
     if (!name || !slug) return res.status(400).json({ error: 'Magaza adi ve slug zorunlu' });
 
     const oldResult = await db.query(
-      'select id, name, slug, plan, status, store_settings from organizations where id = $1 limit 1',
+      'select id, name, slug, plan, status, store_settings, storefront_url from organizations where id = $1 limit 1',
       [organization.id]
     );
 
@@ -406,10 +410,11 @@ router.put('/current', requireAuth, requireRole(['owner', 'admin', 'super_admin'
        set name = $1,
            slug = $2,
            store_settings = $3::jsonb,
+           storefront_url = $4,
            updated_at = now()
-       where id = $4
-       returning id, name, slug, plan, status, created_at, updated_at, public_access_token, store_settings`,
-      [name, slug, JSON.stringify(storeSettings), organization.id]
+       where id = $5
+       returning id, name, slug, plan, status, created_at, updated_at, public_access_token, store_settings, storefront_url`,
+      [name, slug, JSON.stringify(storeSettings), storefrontUrl || null, organization.id]
     );
 
     invalidateOrganizationSummary(organization.id);

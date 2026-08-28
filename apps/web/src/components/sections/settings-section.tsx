@@ -61,6 +61,7 @@ export function SettingsSection({
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.summary.all }),
         queryClient.invalidateQueries({ queryKey: queryKeys.session.all }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.theme.previewOrigin(organizationSlug) }),
       ]);
     },
   });
@@ -136,6 +137,7 @@ export function SettingsSection({
     settingsMutation.mutate({
       name: String(form.get("name") || "").trim(),
       slug: String(form.get("slug") || "").trim(),
+      storefrontUrl: String(form.get("storefrontUrl") || "").trim(),
       settings: {
         contactEmail: String(form.get("contactEmail") || "").trim(),
         supportPhone: String(form.get("supportPhone") || "").trim(),
@@ -253,6 +255,19 @@ export function SettingsSection({
                   name="supportPhone"
                 />
               </div>
+            </div>
+            <div className="grid gap-2">
+              <FieldLabel htmlFor="settingsStorefrontUrl">Storefront Adresi</FieldLabel>
+              <input
+                className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm"
+                defaultValue={summary.organization.storefront_url || ""}
+                disabled={!canManageSettings || settingsMutation.isPending}
+                id="settingsStorefrontUrl"
+                name="storefrontUrl"
+                placeholder="https://magaza.vercel.app"
+                type="url"
+              />
+              <InlineHint>Önizleme ve mağaza bağlantılarında kullanılacak ana storefront adresi.</InlineHint>
             </div>
             <div className="grid gap-3 sm:grid-cols-3">
               <div className="grid gap-2">
