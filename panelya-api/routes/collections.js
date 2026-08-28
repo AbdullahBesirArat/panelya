@@ -10,9 +10,19 @@ const {
   replaceCollectionProducts,
 } = require('../services/collectionMemberships');
 const { syncMediaReferences } = require('../services/mediaAssets');
+const { rateLimit } = require('../middleware/security');
+const {
+  listPublicCollections,
+  listPreviewCollections,
+} = require('../services/collectionReads');
 
 const router = express.Router();
 const managerOnly = [requireAuth, requireRole(['super_admin', 'owner', 'admin'])];
+const previewLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: Number(process.env.THEME_PREVIEW_RATE_LIMIT || 120),
+  message: 'Cok fazla onizleme istegi. Lutfen biraz sonra tekrar deneyin.',
+});
 
 function collectionPayload(body) {
   const sortOrder = Number(body.sort_order || 0);
@@ -31,16 +41,42 @@ function collectionPayload(body) {
 router.get('/', async (req, res, next) => {
   try {
     const organization = await resolveOrganization(req, db, { allowPublic: !req.auth });
-    const result = await db.query(
-      `select *
-       from collections
-       where organization_id = $1 and active = true
-       order by sort_order asc, id asc`,
-      [organization.id]
-    );
-    res.json(result.rows);
+    const collections = await listPublicCollections(db, { organizationId: organization.id });
+    res.json(collections);
   } catch (err) {
     next(err);
+  }
+});
+
+// A valid theme-preview session may read the inactive collections explicitly selected by
+// that same tenant's draft. The public route above remains active-only and query flags do
+// not participate in this authorization decision.
+router.get('/preview', previewLimiter, async (req, res, next) => {
+  const client = await db.pool.connect();
+  try {
+    await client.query('begin');
+    const organization = await resolveOrganization(req, client, { allowPublic: true });
+    await db.setTenantContext(client, organization.id);
+    const token = String(req.get('x-theme-preview-token') || '').trim();
+    if (!token) {
+      await client.query('rollback');
+      return res.status(400).json({ error: 'Onizleme anahtari zorunlu', code: 'THEME_PREVIEW_TOKEN_REQUIRED' });
+    }
+    const collections = await listPreviewCollections(client, {
+      organizationId: organization.id,
+      token,
+    });
+    await client.query('commit');
+    res.setHeader('Cache-Control', 'no-store, max-age=0');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    return res.json(collections);
+  } catch (err) {
+    await client.query('rollback').catch(() => {});
+    return next(err);
+  } finally {
+    client.release();
   }
 });
 
