@@ -859,8 +859,8 @@ export function ThemeSection({ organizationSlug, currentRole }: { organizationSl
                                   onChange={(event) => replaceHeroSlide(index, section, slideIndex, { eyebrow: event.target.value })} value={slide.eyebrow} />
                               </div>
                               <div>
-                                <FieldLabel htmlFor={`section-${section.id}-slide-${slide.id}-title`}>Ana Başlık</FieldLabel>
-                                <input className={inputClass} disabled={!canManage} id={`section-${section.id}-slide-${slide.id}-title`} maxLength={120}
+                                <FieldLabel htmlFor={slideIndex === 0 ? `section-${section.id}-title` : `section-${section.id}-slide-${slide.id}-title`}>Ana Başlık</FieldLabel>
+                                <input className={inputClass} disabled={!canManage} id={slideIndex === 0 ? `section-${section.id}-title` : `section-${section.id}-slide-${slide.id}-title`} maxLength={120}
                                   onChange={(event) => replaceHeroSlide(index, section, slideIndex, { title: event.target.value })} value={slide.title} />
                               </div>
                               <div>
