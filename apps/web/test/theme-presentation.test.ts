@@ -37,10 +37,10 @@ function section(type: ThemeSectionType, order: number, enabled = true): ThemeSe
     case "product-grid":
       return {
         ...base, type,
-        settings: { title: "Ürünler", source: { type: "products" }, limit: 8, columns: 4, sort: "recommended" },
+        settings: { title: "Ürünler", source: { type: "products" }, productIds: [], limit: 8, columns: 4, sort: "recommended" },
       };
     case "product-carousel":
-      return { ...base, type, settings: { title: "Yeni", description: "", source: { type: "products" }, limit: 8, sort: "newest", ctaLabel: "" } };
+      return { ...base, type, settings: { title: "Yeni", description: "", source: { type: "products" }, productIds: [], limit: 8, sort: "newest", ctaLabel: "" } };
     case "collection-blocks":
       return { ...base, type, settings: { title: "Koleksiyonlar", blocks: [] } };
     case "collection-showcase":
@@ -63,7 +63,7 @@ function section(type: ThemeSectionType, order: number, enabled = true): ThemeSe
 
 function config(): ThemeConfig {
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     tokens: {
       colors: {
         background: "#ffffff", surface: "#ffffff", text: "#111111", mutedText: "#666666",

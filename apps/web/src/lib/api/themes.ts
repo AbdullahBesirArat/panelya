@@ -10,7 +10,7 @@ import { authenticatedRequest } from "./core";
 
 export type ThemeFontStack = "system" | "serif" | "sans" | "mono";
 export type ThemeAlignment = "left" | "center" | "right";
-export type ThemeGridSort = "recommended" | "newest" | "price_asc" | "price_desc";
+export type ThemeGridSort = "recommended" | "newest" | "best_selling" | "price_asc" | "price_desc";
 export type ThemeTrustIcon =
   | "shield" | "truck" | "refresh" | "lock" | "star" | "gift" | "headset";
 export type ThemeSectionType =
@@ -68,6 +68,7 @@ export type ThemeSectionSettings = {
   "product-grid": {
     title: string;
     source: ThemeLink;
+    productIds: number[];
     limit: number;
     columns: number;
     sort: ThemeGridSort;
@@ -76,6 +77,7 @@ export type ThemeSectionSettings = {
     title: string;
     description: string;
     source: ThemeLink;
+    productIds: number[];
     limit: number;
     sort: ThemeGridSort;
     ctaLabel: string;

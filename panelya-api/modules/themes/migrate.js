@@ -45,6 +45,17 @@ const MIGRATIONS = Object.freeze({
         : section
     )) : [],
   }),
+  // v4 lets merchants curate exact real products for a product section and adds a
+  // sales-backed sort. Empty lists preserve every v3 section's existing behaviour.
+  3: (config) => ({
+    ...config,
+    schemaVersion: 4,
+    sections: Array.isArray(config.sections) ? config.sections.map((section) => (
+      section?.type === 'product-grid' || section?.type === 'product-carousel'
+        ? { ...section, settings: { productIds: [], ...(section.settings || {}) } }
+        : section
+    )) : [],
+  }),
 });
 
 function migrateThemeConfig(input) {

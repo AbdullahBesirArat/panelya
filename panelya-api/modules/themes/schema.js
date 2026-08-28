@@ -12,7 +12,7 @@
 // customHtml, customJs, rawCss, script, style, className, href. There is no field in this
 // schema whose value reaches the page as markup or as a stylesheet fragment.
 
-const CURRENT_SCHEMA_VERSION = 3;
+const CURRENT_SCHEMA_VERSION = 4;
 
 function themeError(message, code, status = 400, meta = undefined) {
   return Object.assign(new Error(message), { code, status, meta });
@@ -194,7 +194,7 @@ const SECTION_TYPES = Object.freeze([
 ]);
 const TRUST_ICONS = Object.freeze(['shield', 'truck', 'refresh', 'lock', 'star', 'gift', 'headset']);
 const ALIGNMENTS = Object.freeze(['left', 'center', 'right']);
-const GRID_SORTS = Object.freeze(['recommended', 'newest', 'price_asc', 'price_desc']);
+const GRID_SORTS = Object.freeze(['recommended', 'newest', 'best_selling', 'price_asc', 'price_desc']);
 
 function parseIdList(value, field, max = 12) {
   const values = Array.isArray(value) ? value.slice(0, max) : [];
@@ -233,6 +233,7 @@ const SECTION_VALIDATORS = Object.freeze({
     return {
       title: parseText(settings.title, { field: `${path}.title`, max: 120 }),
       source: parseLink(settings.source ?? { type: 'products' }, `${path}.source`),
+      productIds: parseIdList(settings.productIds, `${path}.productIds`, 24),
       limit: parseIntInRange(settings.limit, { field: `${path}.limit`, min: 2, max: 24, fallback: 8 }),
       columns: parseIntInRange(settings.columns, { field: `${path}.columns`, min: 2, max: 5, fallback: 4 }),
       sort: parseEnum(settings.sort ?? 'recommended', GRID_SORTS, `${path}.sort`),
@@ -242,6 +243,7 @@ const SECTION_VALIDATORS = Object.freeze({
     return {
       ...parseContentHeading(settings, path),
       source: parseLink(settings.source ?? { type: 'products' }, `${path}.source`),
+      productIds: parseIdList(settings.productIds, `${path}.productIds`, 16),
       limit: parseIntInRange(settings.limit, { field: `${path}.limit`, min: 2, max: 16, fallback: 8 }),
       sort: parseEnum(settings.sort ?? 'newest', GRID_SORTS, `${path}.sort`),
       ctaLabel: parseText(settings.ctaLabel, { field: `${path}.ctaLabel`, max: 40 }),

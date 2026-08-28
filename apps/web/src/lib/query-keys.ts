@@ -42,6 +42,8 @@ export const queryKeys = {
       ) => ["products", organizationSlug, search, status, categoryId] as const,
       byCategory: (organizationSlug: string, categoryId?: string | null) =>
         ["category-products", organizationSlug, categoryId ?? ""] as const,
+      themePicker: (organizationSlug: string) =>
+        ["theme-products", organizationSlug] as const,
     },
     categories: (organizationSlug: string) =>
       ["categories", organizationSlug] as const,

@@ -19,7 +19,20 @@ function normalizedListMatch(expression, placeholder) {
 
 function buildCatalogFilter(organizationId, query, { excludeFacet = '' } = {}) {
   const params = [organizationId];
-  const conditions = ['p.organization_id = $1', "p.status in ('active', 'out')"];
+  const conditions = ['p.organization_id = $1', query.activeOnly ? "p.status = 'active'" : "p.status in ('active', 'out')"];
+
+  if (query.sort === 'best_selling') {
+    conditions.push(`exists (
+      select 1
+      from order_items sold_item
+      join orders sold_order
+        on sold_order.id = sold_item.order_id
+       and sold_order.organization_id = sold_item.organization_id
+      where sold_item.organization_id = p.organization_id
+        and sold_item.product_id = p.id
+        and sold_order.payment_status = 'paid'
+    )`);
+  }
 
   if (query.q) {
     const placeholder = addParam(params, query.q);

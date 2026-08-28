@@ -28,7 +28,10 @@ const router = express.Router();
  *         schema: { type: integer, minimum: 1, maximum: 60, default: 24 }
  *       - in: query
  *         name: sort
- *         schema: { type: string, enum: [recommended, newest, oldest, price_asc, price_desc, name_asc] }
+ *         schema: { type: string, enum: [recommended, newest, best_selling, oldest, price_asc, price_desc, name_asc] }
+ *       - in: query
+ *         name: status
+ *         schema: { type: string, enum: [active, all], default: all }
  *     responses:
  *       200:
  *         description: Catalog page and database-backed facets

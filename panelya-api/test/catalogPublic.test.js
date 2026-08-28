@@ -29,6 +29,19 @@ test('catalog rejects arbitrary sort values and invalid prices', () => {
   assert.ok(Object.values(SORT_SQL).every((sql) => !sql.includes(';')));
 });
 
+test('homepage bestseller sorting is tenant-scoped, paid-sales-backed and never labels zero-sale products', () => {
+  const query = parseCatalogQuery({ sort: 'best_selling', status: 'active' });
+  const filter = buildCatalogFilter('tenant-a', query);
+  assert.equal(query.activeOnly, true);
+  assert.match(filter.where, /p\.status = 'active'/);
+  assert.match(filter.where, /sold_item\.organization_id = p\.organization_id/);
+  assert.match(filter.where, /sold_order\.organization_id = sold_item\.organization_id/);
+  assert.match(filter.where, /sold_order\.payment_status = 'paid'/);
+  assert.match(SORT_SQL.best_selling, /sum\(sold_item\.quantity\)/);
+  assert.match(SORT_SQL.best_selling, /sold_item\.organization_id = p\.organization_id/);
+  assert.throws(() => parseCatalogQuery({ status: 'draft' }), /status gecersiz/);
+});
+
 test('multiple catalog filters use bind placeholders, never raw user input', () => {
   const query = parseCatalogQuery({
     q: "elbise' or true --",

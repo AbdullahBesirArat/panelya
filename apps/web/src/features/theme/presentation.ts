@@ -108,9 +108,9 @@ export function createSection(type: ThemeSectionType, order: number): ThemeSecti
         },
       };
     case "product-grid":
-      return { ...base, type, settings: { title: "", source: { type: "products" }, limit: 8, columns: 4, sort: "recommended" } };
+      return { ...base, type, settings: { title: "", source: { type: "products" }, productIds: [], limit: 8, columns: 4, sort: "recommended" } };
     case "product-carousel":
-      return { ...base, type, settings: { title: "", description: "", source: { type: "products" }, limit: 8, sort: "newest", ctaLabel: "" } };
+      return { ...base, type, settings: { title: "", description: "", source: { type: "products" }, productIds: [], limit: 8, sort: "newest", ctaLabel: "" } };
     case "collection-blocks":
       return { ...base, type, settings: { title: "", blocks: [] } };
     case "collection-showcase":

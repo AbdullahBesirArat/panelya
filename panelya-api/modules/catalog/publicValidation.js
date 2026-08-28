@@ -1,6 +1,16 @@
 const SORT_SQL = Object.freeze({
   recommended: 'p.featured_in_category desc, p.created_at desc, p.id desc',
   newest: 'p.created_at desc, p.id desc',
+  best_selling: `coalesce((
+    select sum(sold_item.quantity)
+    from order_items sold_item
+    join orders sold_order
+      on sold_order.id = sold_item.order_id
+     and sold_order.organization_id = sold_item.organization_id
+    where sold_item.organization_id = p.organization_id
+      and sold_item.product_id = p.id
+      and sold_order.payment_status = 'paid'
+  ), 0) desc, p.created_at desc, p.id desc`,
   oldest: 'p.created_at asc, p.id asc',
   price_asc: 'coalesce(nullif(p.sale_price, 0), p.price) asc, p.id asc',
   price_desc: 'coalesce(nullif(p.sale_price, 0), p.price) desc, p.id desc',
@@ -60,6 +70,12 @@ function optionalAvailability(value) {
   throw validationError('availability gecersiz');
 }
 
+function activeOnly(value) {
+  if (value == null || value === '' || value === 'all') return false;
+  if (String(value).toLowerCase() === 'active') return true;
+  throw validationError('status gecersiz');
+}
+
 function parseCatalogQuery(query = {}) {
   const requestedSort = boundedText(query.sort || 'recommended', 30, 'sort').toLowerCase();
   const sort = SORT_ALIASES[requestedSort] || requestedSort;
@@ -75,6 +91,7 @@ function parseCatalogQuery(query = {}) {
     page: boundedInteger(query.page, 1, 1, 100000, 'page'),
     pageSize: boundedInteger(query.pageSize ?? query.page_size ?? query.limit, 24, 1, 60, 'pageSize'),
     sort,
+    activeOnly: activeOnly(query.status),
     category: boundedText(query.category ?? query.category_id, 120, 'category'),
     collection: boundedText(query.collection ?? query.collection_slug, 120, 'collection'),
     colors: textList(query.color ?? query.colors, 'color'),

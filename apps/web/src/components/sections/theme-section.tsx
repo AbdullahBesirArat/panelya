@@ -13,7 +13,7 @@ import {
   type ThemeColorKey, type ThemeConfig, type ThemeFontStack, type ThemeSection,
   type ThemeSectionType, type ThemeTrustIcon, type ThemeValidationReport, type ThemeVersion,
 } from "@/lib/api/themes";
-import { fetchCategories } from "@/lib/api/catalog";
+import { fetchCategories, fetchProducts } from "@/lib/api/catalog";
 import { fetchCollections } from "@/lib/api/content";
 import {
   fetchMediaAssets, MEDIA_UPLOAD_ACCEPT, resolveApiAssetUrl, uploadMediaAsset, type MediaAsset,
@@ -198,6 +198,10 @@ export function ThemeSection({ organizationSlug, currentRole }: { organizationSl
   const collectionsQuery = useQuery({
     queryKey: queryKeys.content.collections(organizationSlug),
     queryFn: fetchCollections,
+  });
+  const productsQuery = useQuery({
+    queryKey: queryKeys.catalog.products.themePicker(organizationSlug),
+    queryFn: () => fetchProducts({ status: "active", limit: 200 }),
   });
   const mediaQuery = useQuery({
     enabled: canManage,
@@ -880,6 +884,12 @@ export function ThemeSection({ organizationSlug, currentRole }: { organizationSl
                             onChange={(event) => replaceSection(index, { ...section, settings: { ...section.settings, description: event.target.value } })} />
                         </div>
                         <div className="sm:col-span-2">
+                          <FieldLabel htmlFor={`section-${section.id}-cta`}>CTA Metni</FieldLabel>
+                          <input className={inputClass} disabled={!canManage} id={`section-${section.id}-cta`}
+                            maxLength={40} value={section.settings.ctaLabel}
+                            onChange={(event) => replaceSection(index, { ...section, settings: { ...section.settings, ctaLabel: event.target.value } })} />
+                        </div>
+                        <div className="sm:col-span-2">
                           <FieldLabel htmlFor={`section-${section.id}-source`}>Ürün kaynağı</FieldLabel>
                           <select className={inputClass} disabled={!canManage} id={`section-${section.id}-source`}
                             value={sourceValue(section.settings.source)}
@@ -888,6 +898,60 @@ export function ThemeSection({ organizationSlug, currentRole }: { organizationSl
                             {(categoriesQuery.data ?? []).map((category) => <option key={`category-${category.id}`} value={`category:${category.id}`}>Kategori: {category.name}</option>)}
                             {(collectionsQuery.data ?? []).map((collection) => <option key={`collection-${collection.id}`} value={`collection:${collection.id}`}>Koleksiyon: {collection.title}</option>)}
                           </select>
+                        </div>
+                      </>
+                    ) : null}
+
+                    {section.type === "product-grid" || section.type === "product-carousel" ? (
+                      <>
+                        <div>
+                          <FieldLabel htmlFor={`section-${section.id}-sort`}>Sıralama</FieldLabel>
+                          <select
+                            className={inputClass}
+                            disabled={!canManage || section.settings.productIds.length > 0}
+                            id={`section-${section.id}-sort`}
+                            onChange={(event) => replaceSection(index, {
+                              ...section,
+                              settings: { ...section.settings, sort: event.target.value as typeof section.settings.sort },
+                            } as ThemeSection)}
+                            value={section.settings.sort}
+                          >
+                            <option value="newest">En yeni gerçek ürünler</option>
+                            <option value="best_selling">Gerçek ödemeli satış adedine göre</option>
+                            <option value="recommended">Kategori vitrini önceliği</option>
+                            <option value="price_asc">Fiyat: artan</option>
+                            <option value="price_desc">Fiyat: azalan</option>
+                          </select>
+                          {section.settings.sort === "best_selling" ? (
+                            <InlineHint>Yalnız ödemesi tamamlanmış siparişlerde satışı bulunan ürünler gösterilir.</InlineHint>
+                          ) : null}
+                        </div>
+                        <div className="sm:col-span-2">
+                          <p className="text-sm font-medium text-zinc-700">Seçili gerçek ürünler</p>
+                          <InlineHint>Seçim yapılırsa kaynak ve sıralama yerine yalnız bu aktif ürünler kullanılır.</InlineHint>
+                          <div className="mt-2 grid max-h-64 gap-2 overflow-y-auto rounded-lg border border-line p-3 sm:grid-cols-2">
+                            {(productsQuery.data ?? []).map((product) => {
+                              const id = Number(product.id);
+                              const checked = section.settings.productIds.includes(id);
+                              return <label className="flex items-start gap-2 text-sm" key={product.id}>
+                                <input
+                                  checked={checked}
+                                  disabled={!canManage}
+                                  onChange={() => replaceSection(index, {
+                                    ...section,
+                                    settings: {
+                                      ...section.settings,
+                                      productIds: checked
+                                        ? section.settings.productIds.filter((value) => value !== id)
+                                        : [...section.settings.productIds, id],
+                                    },
+                                  } as ThemeSection)}
+                                  type="checkbox"
+                                />
+                                <span>{product.name}</span>
+                              </label>;
+                            })}
+                          </div>
                         </div>
                       </>
                     ) : null}
