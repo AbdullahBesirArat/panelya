@@ -53,6 +53,11 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
       - run: npm ci
+      - name: Provision required PostgreSQL extensions
+        run: >-
+          psql -v ON_ERROR_STOP=1 -d "$DATABASE_URL"
+          -c "create extension if not exists pg_trgm"
+          -c "create extension if not exists unaccent"
       # Apply schema + all migrations from an empty database.
       - run: npm run db:schema --prefix panelya-api
       - run: npm run db:migrate --prefix panelya-api
@@ -122,6 +127,11 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
       - run: npm ci
+      - name: Provision required PostgreSQL extensions
+        run: >-
+          psql -v ON_ERROR_STOP=1 -d "$DATABASE_URL"
+          -c "create extension if not exists pg_trgm"
+          -c "create extension if not exists unaccent"
       - run: npm run db:setup
       - name: Start API
         run: npm run start:api > api.log 2>&1 &
