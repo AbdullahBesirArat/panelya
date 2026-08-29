@@ -39,7 +39,7 @@ export function ProductStatusActions({
       <button className="focus-ring inline-flex h-9 items-center rounded-lg border border-line bg-white px-3 text-xs font-semibold text-ink" onClick={onToggleVisible} type="button">
         {allVisibleSelected ? "Görünenleri bırak" : "Görünenleri seç"}
       </button>
-      <select aria-label="Toplu ürün durumu" className="focus-ring h-9 rounded-lg border border-line bg-white px-2 text-xs" onChange={(event) => onStatusChange(event.target.value as ProductStatus)} value={bulkStatus}>
+      <select aria-label="Seçilenlerin yeni durumu" className="focus-ring h-9 rounded-lg border border-line bg-white px-2 text-xs" onChange={(event) => onStatusChange(event.target.value as ProductStatus)} value={bulkStatus}>
         {statusOptions.map((option) => <option key={option} value={option}>{statusLabels[option]}</option>)}
       </select>
       <button className="focus-ring inline-flex h-9 items-center rounded-lg border border-line bg-white px-3 text-xs font-semibold text-ink disabled:opacity-50" disabled={!selectedCount || isPending} onClick={() => onRun("status")} type="button">
