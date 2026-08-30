@@ -41,6 +41,55 @@ function enabledFlag(value, fallback = true) {
   return value == null ? fallback : value !== false;
 }
 
+function normalizeInstagramHandle(value) {
+  const handle = clampStr(value, 80).replace(/^@+/, '');
+  if (!handle) return '';
+  if (!/^[a-zA-Z0-9._]+$/.test(handle)) {
+    throw Object.assign(new Error('Gecerli bir Instagram kullanici adi girin'), { status: 400 });
+  }
+  return `@${handle}`;
+}
+
+function normalizeInstagramUrl(value, handle = '') {
+  const raw = clampStr(value, 300);
+  const normalizedHandle = normalizeInstagramHandle(handle).replace(/^@/, '');
+  if (!raw) return normalizedHandle ? `https://www.instagram.com/${normalizedHandle}` : '';
+
+  let parsed;
+  try {
+    parsed = new URL(raw);
+  } catch (_) {
+    throw Object.assign(new Error('Gecerli bir Instagram adresi girin'), { status: 400 });
+  }
+  const hostname = parsed.hostname.toLowerCase().replace(/^www\./, '');
+  if (parsed.protocol !== 'https:' || hostname !== 'instagram.com') {
+    throw Object.assign(new Error('Instagram adresi https://www.instagram.com ile baslamali'), { status: 400 });
+  }
+  const pathHandle = parsed.pathname.split('/').filter(Boolean)[0] || normalizedHandle;
+  if (!pathHandle || !/^[a-zA-Z0-9._]+$/.test(pathHandle)) {
+    throw Object.assign(new Error('Gecerli bir Instagram profil adresi girin'), { status: 400 });
+  }
+  return `https://www.instagram.com/${pathHandle}`;
+}
+
+function normalizeServiceNotes(value) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item) => typeof item === 'string')
+    .map((item) => clampStr(item, 160))
+    .filter(Boolean)
+    .slice(0, 12);
+}
+
+function normalizeInstagramSnapshot(value) {
+  const source = value && typeof value === 'object' ? value : {};
+  return Object.fromEntries(['posts', 'followers', 'following'].flatMap((key) => {
+    if (source[key] === '' || source[key] == null) return [];
+    const number = Number(source[key]);
+    return Number.isFinite(number) && number >= 0 ? [[key, Math.floor(number)]] : [];
+  }));
+}
+
 function normalizeShoppingNotes(settings = {}) {
   const source = settings.shoppingNotes && typeof settings.shoppingNotes === 'object'
     ? settings.shoppingNotes
@@ -174,6 +223,9 @@ function paymentInstructionsFromSettings(settings = {}) {
 
 function cleanStoreSettings(value = {}) {
   const settings = value && typeof value === 'object' ? value : {};
+  const brand = settings.brand && typeof settings.brand === 'object' ? settings.brand : {};
+  const social = settings.social && typeof settings.social === 'object' ? settings.social : {};
+  const contact = settings.contact && typeof settings.contact === 'object' ? settings.contact : {};
   const paymentProvider = ['manual', 'iyzico'].includes(settings.paymentProvider)
     ? settings.paymentProvider
     : 'manual';
@@ -186,8 +238,40 @@ function cleanStoreSettings(value = {}) {
     shippingFee,
     freeShippingThreshold,
   });
+  const instagramHandle = normalizeInstagramHandle(social.instagramHandle || settings.instagramHandle || '');
+  const instagramUrl = normalizeInstagramUrl(
+    social.instagramUrl || (/^https:\/\//i.test(social.instagram || '') ? social.instagram : '') || settings.instagramUrl || '',
+    instagramHandle
+  );
+  const addressLine1 = clampStr(contact.addressLine1 || settings.addressLine1, 240);
+  const addressLine2 = clampStr(contact.addressLine2 || settings.addressLine2, 240);
+  const district = clampStr(contact.district || settings.district, 120);
+  const city = clampStr(contact.city || settings.city, 120);
+  const postalCode = clampStr(contact.postalCode || settings.postalCode, 20);
 
   const next = {
+    brand: {
+      ...brand,
+      name: clampStr(brand.name || settings.displayName, 160),
+    },
+    storeType: clampStr(settings.storeType, 120),
+    social: {
+      ...social,
+      instagram: instagramUrl,
+      instagramHandle,
+      instagramUrl,
+      instagramSnapshot: normalizeInstagramSnapshot(social.instagramSnapshot || settings.instagramSnapshot),
+    },
+    contact: {
+      ...contact,
+      address: clampStr(contact.address || [addressLine1, addressLine2, district, city, postalCode].filter(Boolean).join(', '), 1000),
+      addressLine1,
+      addressLine2,
+      district,
+      city,
+      postalCode,
+    },
+    serviceNotes: normalizeServiceNotes(settings.serviceNotes),
     contactEmail: cleanEmail(settings.contactEmail || ''),
     supportPhone: clampStr(settings.supportPhone, 40),
     shippingFee,
@@ -222,6 +306,10 @@ function cleanStoreSettings(value = {}) {
 
 module.exports = {
   cleanStoreSettings,
+  normalizeInstagramHandle,
+  normalizeInstagramSnapshot,
+  normalizeInstagramUrl,
+  normalizeServiceNotes,
   normalizeIban,
   normalizeWhatsAppPhone,
   paymentInstructionsFromSettings,

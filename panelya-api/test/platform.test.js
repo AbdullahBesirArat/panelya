@@ -90,6 +90,21 @@ test('normalizeStoreSettings alanlari sinirlar ve yapilandirir', () => {
   assert.equal(s.seo.title, 'T');
 });
 
+test('platform store settings mevcut canonical profile ve social alanlarini korur', () => {
+  const base = {
+    brand: { name: 'SUVERA BUTİK' },
+    storeType: 'Butik Mağaza',
+    contact: { addressLine1: 'Bağlarbaşı Mahallesi', city: 'İstanbul' },
+    social: { instagramHandle: '@suvera.butik', instagramUrl: 'https://www.instagram.com/suvera.butik' },
+    serviceNotes: ['Aynı Gün Kargo'],
+  };
+  const settings = normalizeStoreSettings({ seo: { title: 'Suvera' } }, base);
+  assert.equal(settings.brand.name, 'SUVERA BUTİK');
+  assert.equal(settings.contact.addressLine1, 'Bağlarbaşı Mahallesi');
+  assert.equal(settings.social.instagramUrl, 'https://www.instagram.com/suvera.butik');
+  assert.deepEqual(settings.serviceNotes, ['Aynı Gün Kargo']);
+});
+
 test('summarizeSettingsCompleteness eksikleri tespit eder', () => {
   const empty = summarizeSettingsCompleteness({}, {});
   assert.equal(empty.isComplete, false);

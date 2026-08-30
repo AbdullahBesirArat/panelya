@@ -121,11 +121,19 @@ function normalizeStoreSettings(input = {}, base = {}) {
   const legal = input.legal || {};
   const social = input.social || input.socialLinks || {};
   const commerce = input.commerce || {};
+  const baseBrand = base.brand || {};
+  const baseContact = base.contact || {};
+  const baseSocial = base.social || {};
 
   const next = {
     ...base,
+    storeType: clampStr(input.storeType || base.storeType, 120),
+    serviceNotes: Array.isArray(input.serviceNotes)
+      ? input.serviceNotes.filter((item) => typeof item === 'string').map((item) => clampStr(item, 160)).filter(Boolean).slice(0, 12)
+      : (Array.isArray(base.serviceNotes) ? base.serviceNotes : []),
     brand: {
-      name: clampStr(brand.name || brand.brandName, 160),
+      ...baseBrand,
+      name: clampStr(brand.name || brand.brandName || baseBrand.name, 160),
       logoUrl: clampStr(brand.logoUrl || brand.logo, 500),
       faviconUrl: clampStr(brand.faviconUrl || brand.favicon, 500),
       bannerUrl: clampStr(brand.bannerUrl || brand.banner, 500),
@@ -134,13 +142,25 @@ function normalizeStoreSettings(input = {}, base = {}) {
       font: clampStr(brand.font, 80),
     },
     contact: {
+      ...baseContact,
       phone: clampStr(contact.phone, 40),
       email: clampStr(contact.email, 200),
-      address: clampStr(contact.address, 500),
+      address: clampStr(contact.address || baseContact.address, 500),
+      addressLine1: clampStr(contact.addressLine1 || baseContact.addressLine1, 240),
+      addressLine2: clampStr(contact.addressLine2 || baseContact.addressLine2, 240),
+      district: clampStr(contact.district || baseContact.district, 120),
+      city: clampStr(contact.city || baseContact.city, 120),
+      postalCode: clampStr(contact.postalCode || baseContact.postalCode, 20),
       footer: clampStr(contact.footer, 1000),
     },
     social: {
-      instagram: clampStr(social.instagram, 200),
+      ...baseSocial,
+      instagram: clampStr(social.instagram || social.instagramUrl || baseSocial.instagram, 300),
+      instagramHandle: clampStr(social.instagramHandle || baseSocial.instagramHandle, 80),
+      instagramUrl: clampStr(social.instagramUrl || social.instagram || baseSocial.instagramUrl, 300),
+      instagramSnapshot: social.instagramSnapshot && typeof social.instagramSnapshot === 'object'
+        ? social.instagramSnapshot
+        : (baseSocial.instagramSnapshot || {}),
       facebook: clampStr(social.facebook, 200),
       x: clampStr(social.x || social.twitter, 200),
       tiktok: clampStr(social.tiktok, 200),

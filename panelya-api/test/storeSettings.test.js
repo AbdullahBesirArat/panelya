@@ -54,6 +54,41 @@ test('store settings public WhatsApp ve IBAN alanlarini temiz sekilde saklar', (
   assert.deepEqual(settings.custom_colors, [{ name: 'Ekru', hex: '#eee7d8' }]);
 });
 
+test('store profile, Instagram, address and declared service notes canonical settings icinde normalize edilir', () => {
+  const settings = cleanStoreSettings({
+    displayName: ' SUVERA BUTİK ',
+    storeType: 'Butik Mağaza',
+    instagramHandle: '@suvera.butik',
+    instagramUrl: 'https://instagram.com/suvera.butik/',
+    addressLine1: 'Bağlarbaşı Mahallesi',
+    addressLine2: 'Bağdat Caddesi 402 C',
+    district: 'Maltepe',
+    city: 'İstanbul',
+    postalCode: '34844',
+    serviceNotes: [' Güvenli Alışveriş ', '', 'Aynı Gün Kargo'],
+    instagramSnapshot: { posts: 101, followers: 1936, following: 94 },
+  });
+
+  assert.equal(settings.brand.name, 'SUVERA BUTİK');
+  assert.equal(settings.social.instagramHandle, '@suvera.butik');
+  assert.equal(settings.social.instagramUrl, 'https://www.instagram.com/suvera.butik');
+  assert.deepEqual(settings.serviceNotes, ['Güvenli Alışveriş', 'Aynı Gün Kargo']);
+  assert.deepEqual(settings.social.instagramSnapshot, { posts: 101, followers: 1936, following: 94 });
+  assert.equal(settings.contact.postalCode, '34844');
+});
+
+test('store profile optional alanlari fake fallback uretmez ve gecersiz sosyal URL reddedilir', () => {
+  const settings = cleanStoreSettings({});
+  assert.equal(settings.social.instagramHandle, '');
+  assert.equal(settings.social.instagramUrl, '');
+  assert.deepEqual(settings.serviceNotes, []);
+  assert.deepEqual(settings.social.instagramSnapshot, {});
+  assert.throws(
+    () => cleanStoreSettings({ instagramUrl: 'https://example.com/suvera' }),
+    /Instagram/
+  );
+});
+
 test('store settings ozel bedenleri (custom_sizes) normalize ederek saklar', () => {
   const settings = cleanStoreSettings({
     custom_sizes: ['  4XL ', '1-2 Yaş', '', 42, 'A'.repeat(40)],

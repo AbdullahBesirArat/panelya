@@ -390,9 +390,13 @@ router.put('/current', requireAuth, requireRole(['owner', 'admin', 'super_admin'
     const organization = await resolveOrganization(req);
     const name = String(req.body.name || '').trim().slice(0, 160);
     const slug = slugify(req.body.slug || organization.slug);
+    const incomingSettings = req.body.settings && typeof req.body.settings === 'object' ? req.body.settings : {};
     const storeSettings = cleanStoreSettings({
       ...(organization.store_settings || {}),
-      ...(req.body.settings && typeof req.body.settings === 'object' ? req.body.settings : {}),
+      ...incomingSettings,
+      brand: { ...(organization.store_settings?.brand || {}), ...(incomingSettings.brand || {}) },
+      contact: { ...(organization.store_settings?.contact || {}), ...(incomingSettings.contact || {}) },
+      social: { ...(organization.store_settings?.social || {}), ...(incomingSettings.social || {}) },
     });
     const storefrontUrl = Object.prototype.hasOwnProperty.call(req.body, 'storefrontUrl')
       ? normalizeStorefrontUrl(req.body.storefrontUrl)

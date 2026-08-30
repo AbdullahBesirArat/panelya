@@ -139,6 +139,33 @@ export function SettingsSection({
       slug: String(form.get("slug") || "").trim(),
       storefrontUrl: String(form.get("storefrontUrl") || "").trim(),
       settings: {
+        brand: {
+          ...storeSettings.brand,
+          name: String(form.get("displayName") || "").trim(),
+        },
+        storeType: String(form.get("storeType") || "").trim(),
+        social: {
+          ...storeSettings.social,
+          instagramHandle: String(form.get("instagramHandle") || "").trim(),
+          instagramUrl: String(form.get("instagramUrl") || "").trim(),
+          instagramSnapshot: {
+            posts: optionalNumberFromForm(form.get("instagramPosts")),
+            followers: optionalNumberFromForm(form.get("instagramFollowers")),
+            following: optionalNumberFromForm(form.get("instagramFollowing")),
+          },
+        },
+        contact: {
+          ...storeSettings.contact,
+          addressLine1: String(form.get("addressLine1") || "").trim(),
+          addressLine2: String(form.get("addressLine2") || "").trim(),
+          district: String(form.get("district") || "").trim(),
+          city: String(form.get("city") || "").trim(),
+          postalCode: String(form.get("postalCode") || "").trim(),
+        },
+        serviceNotes: String(form.get("serviceNotes") || "")
+          .split(/\r?\n/)
+          .map((note) => note.trim())
+          .filter(Boolean),
         contactEmail: String(form.get("contactEmail") || "").trim(),
         supportPhone: String(form.get("supportPhone") || "").trim(),
         shippingFee: numberFromForm(form.get("shippingFee")),
@@ -268,6 +295,66 @@ export function SettingsSection({
                 type="url"
               />
               <InlineHint>Önizleme ve mağaza bağlantılarında kullanılacak ana storefront adresi.</InlineHint>
+            </div>
+            <div className="rounded-lg border border-line bg-zinc-50 p-4">
+              <div className="mb-4">
+                <p className="text-sm font-semibold text-ink">Mağaza Bilgileri / Sosyal Medya</p>
+                <p className="mt-1 text-xs text-zinc-600">
+                  Vitrindeki mağaza kimliği, adres, Instagram bağlantısı ve mağaza beyanları bu canonical alandan beslenir.
+                </p>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="grid gap-2">
+                  <FieldLabel htmlFor="settingsDisplayName">Görünen mağaza adı</FieldLabel>
+                  <input className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm" defaultValue={storeSettings.brand?.name || summary.organization.name} disabled={!canManageSettings || settingsMutation.isPending} id="settingsDisplayName" name="displayName" />
+                </div>
+                <div className="grid gap-2">
+                  <FieldLabel htmlFor="settingsStoreType">Mağaza türü</FieldLabel>
+                  <input className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm" defaultValue={storeSettings.storeType || ""} disabled={!canManageSettings || settingsMutation.isPending} id="settingsStoreType" name="storeType" />
+                </div>
+                <div className="grid gap-2">
+                  <FieldLabel htmlFor="settingsInstagramHandle">Instagram kullanıcı adı</FieldLabel>
+                  <input className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm" defaultValue={storeSettings.social?.instagramHandle || ""} disabled={!canManageSettings || settingsMutation.isPending} id="settingsInstagramHandle" name="instagramHandle" placeholder="@magaza" />
+                </div>
+                <div className="grid gap-2">
+                  <FieldLabel htmlFor="settingsInstagramUrl">Instagram profil adresi</FieldLabel>
+                  <input className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm" defaultValue={storeSettings.social?.instagramUrl || storeSettings.social?.instagram || ""} disabled={!canManageSettings || settingsMutation.isPending} id="settingsInstagramUrl" name="instagramUrl" placeholder="https://www.instagram.com/magaza" type="url" />
+                </div>
+                <div className="grid gap-2 sm:col-span-2">
+                  <FieldLabel htmlFor="settingsAddressLine1">Adres satırı 1</FieldLabel>
+                  <input className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm" defaultValue={storeSettings.contact?.addressLine1 || ""} disabled={!canManageSettings || settingsMutation.isPending} id="settingsAddressLine1" name="addressLine1" />
+                </div>
+                <div className="grid gap-2 sm:col-span-2">
+                  <FieldLabel htmlFor="settingsAddressLine2">Adres satırı 2</FieldLabel>
+                  <input className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm" defaultValue={storeSettings.contact?.addressLine2 || ""} disabled={!canManageSettings || settingsMutation.isPending} id="settingsAddressLine2" name="addressLine2" />
+                </div>
+                <div className="grid gap-2">
+                  <FieldLabel htmlFor="settingsDistrict">İlçe</FieldLabel>
+                  <input className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm" defaultValue={storeSettings.contact?.district || ""} disabled={!canManageSettings || settingsMutation.isPending} id="settingsDistrict" name="district" />
+                </div>
+                <div className="grid gap-2">
+                  <FieldLabel htmlFor="settingsCity">İl</FieldLabel>
+                  <input className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm" defaultValue={storeSettings.contact?.city || ""} disabled={!canManageSettings || settingsMutation.isPending} id="settingsCity" name="city" />
+                </div>
+                <div className="grid gap-2">
+                  <FieldLabel htmlFor="settingsPostalCode">Posta kodu</FieldLabel>
+                  <input className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm" defaultValue={storeSettings.contact?.postalCode || ""} disabled={!canManageSettings || settingsMutation.isPending} id="settingsPostalCode" inputMode="numeric" name="postalCode" />
+                </div>
+                <div className="grid gap-2 sm:col-span-2">
+                  <FieldLabel htmlFor="settingsServiceNotes">Mağaza beyanları</FieldLabel>
+                  <textarea className="focus-ring min-h-28 rounded-lg border border-line bg-white px-3 py-3 text-sm" defaultValue={(storeSettings.serviceNotes || []).join("\n")} disabled={!canManageSettings || settingsMutation.isPending} id="settingsServiceNotes" name="serviceNotes" placeholder="Her satıra bir bilgi" />
+                  <InlineHint>Her satır storefront’ta ayrı bir service note olarak gösterilir. Yalnız mağazanın doğruladığı beyanları girin.</InlineHint>
+                </div>
+              </div>
+              <div className="mt-4 border-t border-line pt-4">
+                <p className="mb-3 text-xs font-semibold uppercase tracking-[0.16em] text-zinc-600">Instagram profil snapshot (opsiyonel)</p>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <div className="grid gap-2"><FieldLabel htmlFor="settingsInstagramPosts">Gönderi</FieldLabel><input className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm" defaultValue={storeSettings.social?.instagramSnapshot?.posts ?? ""} disabled={!canManageSettings || settingsMutation.isPending} id="settingsInstagramPosts" min="0" name="instagramPosts" type="number" /></div>
+                  <div className="grid gap-2"><FieldLabel htmlFor="settingsInstagramFollowers">Takipçi</FieldLabel><input className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm" defaultValue={storeSettings.social?.instagramSnapshot?.followers ?? ""} disabled={!canManageSettings || settingsMutation.isPending} id="settingsInstagramFollowers" min="0" name="instagramFollowers" type="number" /></div>
+                  <div className="grid gap-2"><FieldLabel htmlFor="settingsInstagramFollowing">Takip</FieldLabel><input className="focus-ring h-10 rounded-lg border border-line bg-white px-3 text-sm" defaultValue={storeSettings.social?.instagramSnapshot?.following ?? ""} disabled={!canManageSettings || settingsMutation.isPending} id="settingsInstagramFollowing" min="0" name="instagramFollowing" type="number" /></div>
+                </div>
+                <InlineHint>Bu değerler canlı Instagram API senkronizasyonu değildir; yalnız owner tarafından güncellenen sosyal kanıt bilgisidir.</InlineHint>
+              </div>
             </div>
             <div className="grid gap-3 sm:grid-cols-3">
               <div className="grid gap-2">
@@ -792,6 +879,12 @@ function providerLabel(provider: string | null | undefined) {
 function numberFromForm(value: FormDataEntryValue | null) {
   const number = Number(value);
   return Number.isFinite(number) && number >= 0 ? number : 0;
+}
+
+function optionalNumberFromForm(value: FormDataEntryValue | null) {
+  if (value == null || String(value).trim() === "") return undefined;
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : undefined;
 }
 
 function freeShippingLabel(value: number | undefined) {

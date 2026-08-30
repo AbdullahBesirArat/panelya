@@ -469,6 +469,29 @@ export type ApiOrganizationSettings = {
 };
 
 export type StoreSettings = {
+  brand?: {
+    name?: string;
+  };
+  storeType?: string;
+  social?: {
+    instagram?: string;
+    instagramHandle?: string;
+    instagramUrl?: string;
+    instagramSnapshot?: {
+      posts?: number;
+      followers?: number;
+      following?: number;
+    };
+  };
+  contact?: {
+    address?: string;
+    addressLine1?: string;
+    addressLine2?: string;
+    district?: string;
+    city?: string;
+    postalCode?: string;
+  };
+  serviceNotes?: string[];
   contactEmail?: string;
   supportPhone?: string;
   shippingFee?: number;
