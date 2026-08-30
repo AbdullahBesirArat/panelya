@@ -14,6 +14,7 @@ import {
 } from "@/lib/api";
 import { MetricGrid } from "@/components/page-kit";
 import { queryKeys } from "@/lib/query-keys";
+import { serializeLoadedOperationalSettings } from "@/lib/store-settings-payload";
 import {
   ActivityPanel,
   DataCell,
@@ -134,9 +135,6 @@ export function SettingsSection({
     event.preventDefault();
     if (!canManageSettings) return;
     const form = new FormData(event.currentTarget);
-    const hasStoredSetting = (key: string) => Object.prototype.hasOwnProperty.call(storeSettings, key);
-    const contactEmail = String(form.get("contactEmail") || "").trim();
-    const whatsappPhone = String(form.get("whatsappPhone") || "").trim();
     settingsMutation.mutate({
       name: String(form.get("name") || "").trim(),
       slug: String(form.get("slug") || "").trim(),
@@ -169,35 +167,7 @@ export function SettingsSection({
           .split(/\r?\n/)
           .map((note) => note.trim())
           .filter(Boolean),
-        ...(hasStoredSetting("contactEmail") && contactEmail ? { contactEmail } : {}),
-        ...(hasStoredSetting("supportPhone") ? { supportPhone: String(form.get("supportPhone") || "").trim() } : {}),
-        ...(hasStoredSetting("shippingFee") ? { shippingFee: numberFromForm(form.get("shippingFee")) } : {}),
-        ...(hasStoredSetting("freeShippingThreshold") ? { freeShippingThreshold: numberFromForm(form.get("freeShippingThreshold")) } : {}),
-        ...(hasStoredSetting("paymentProvider") ? { paymentProvider: form.get("paymentProvider") === "iyzico" ? "iyzico" : "manual" } : {}),
-        ...(hasStoredSetting("paymentEnabled") ? { paymentEnabled: form.get("paymentEnabled") === "on" } : {}),
-        ...(hasStoredSetting("orderEmailEnabled") ? { orderEmailEnabled: form.get("orderEmailEnabled") === "on" } : {}),
-        ...(hasStoredSetting("whatsappPhone") && whatsappPhone ? { whatsappPhone } : {}),
-        ...(hasStoredSetting("iban") ? { iban: String(form.get("iban") || "").trim() } : {}),
-        ...(hasStoredSetting("ibanHolderName") ? { ibanHolderName: String(form.get("ibanHolderName") || "").trim() } : {}),
-        ...(hasStoredSetting("bankName") ? { bankName: String(form.get("bankName") || "").trim() } : {}),
-        ...(hasStoredSetting("paymentNote") ? { paymentNote: String(form.get("paymentNote") || "").trim() } : {}),
-        ...(hasStoredSetting("shoppingNotes") ? { shoppingNotes: {
-          freeShipping: {
-            enabled: form.get("shoppingFreeShippingEnabled") === "on",
-            description: String(form.get("shoppingFreeShippingDescription") || "").trim(),
-          },
-          returns: {
-            enabled: form.get("shoppingReturnsEnabled") === "on",
-            title: String(form.get("shoppingReturnsTitle") || "").trim(),
-            description: String(form.get("shoppingReturnsDescription") || "").trim(),
-            days: numberFromForm(form.get("shoppingReturnsDays")),
-          },
-          payment: {
-            enabled: form.get("shoppingPaymentEnabled") === "on",
-            title: String(form.get("shoppingPaymentTitle") || "").trim(),
-            description: String(form.get("shoppingPaymentDescription") || "").trim(),
-          },
-        } } : {}),
+        ...serializeLoadedOperationalSettings(storeSettings, form),
       },
     });
   }
@@ -877,11 +847,6 @@ function providerLabel(provider: string | null | undefined) {
   if (!provider || provider === "manual") return "Manuel";
   if (provider === "iyzico") return "iyzico";
   return provider;
-}
-
-function numberFromForm(value: FormDataEntryValue | null) {
-  const number = Number(value);
-  return Number.isFinite(number) && number >= 0 ? number : 0;
 }
 
 function optionalNumberFromForm(value: FormDataEntryValue | null) {

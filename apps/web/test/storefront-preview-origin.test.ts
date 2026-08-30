@@ -35,10 +35,7 @@ test("owner settings manage the existing tenant storefront URL field", () => {
 
 test("profile-only saves preserve operational settings omitted by a stale summary", () => {
   const settings = fs.readFileSync(path.join(root, "src/components/sections/settings-section.tsx"), "utf8");
-  assert.match(settings, /const hasStoredSetting = \(key: string\)/);
-  assert.match(settings, /hasStoredSetting\("contactEmail"\) && contactEmail/);
-  assert.match(settings, /hasStoredSetting\("whatsappPhone"\) && whatsappPhone/);
-  assert.match(settings, /hasStoredSetting\("shoppingNotes"\)/);
+  assert.match(settings, /serializeLoadedOperationalSettings\(storeSettings, form\)/);
   assert.match(settings, /brand: \{/);
   assert.match(settings, /serviceNotes: String\(form\.get\("serviceNotes"\)/);
 });
