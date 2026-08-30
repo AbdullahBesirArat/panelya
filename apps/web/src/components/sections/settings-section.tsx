@@ -134,6 +134,7 @@ export function SettingsSection({
     event.preventDefault();
     if (!canManageSettings) return;
     const form = new FormData(event.currentTarget);
+    const hasStoredSetting = (key: string) => Object.prototype.hasOwnProperty.call(storeSettings, key);
     settingsMutation.mutate({
       name: String(form.get("name") || "").trim(),
       slug: String(form.get("slug") || "").trim(),
@@ -166,19 +167,19 @@ export function SettingsSection({
           .split(/\r?\n/)
           .map((note) => note.trim())
           .filter(Boolean),
-        contactEmail: String(form.get("contactEmail") || "").trim(),
-        supportPhone: String(form.get("supportPhone") || "").trim(),
-        shippingFee: numberFromForm(form.get("shippingFee")),
-        freeShippingThreshold: numberFromForm(form.get("freeShippingThreshold")),
-        paymentProvider: form.get("paymentProvider") === "iyzico" ? "iyzico" : "manual",
-        paymentEnabled: form.get("paymentEnabled") === "on",
-        orderEmailEnabled: form.get("orderEmailEnabled") === "on",
-        whatsappPhone: String(form.get("whatsappPhone") || "").trim(),
-        iban: String(form.get("iban") || "").trim(),
-        ibanHolderName: String(form.get("ibanHolderName") || "").trim(),
-        bankName: String(form.get("bankName") || "").trim(),
-        paymentNote: String(form.get("paymentNote") || "").trim(),
-        shoppingNotes: {
+        ...(hasStoredSetting("contactEmail") ? { contactEmail: String(form.get("contactEmail") || "").trim() } : {}),
+        ...(hasStoredSetting("supportPhone") ? { supportPhone: String(form.get("supportPhone") || "").trim() } : {}),
+        ...(hasStoredSetting("shippingFee") ? { shippingFee: numberFromForm(form.get("shippingFee")) } : {}),
+        ...(hasStoredSetting("freeShippingThreshold") ? { freeShippingThreshold: numberFromForm(form.get("freeShippingThreshold")) } : {}),
+        ...(hasStoredSetting("paymentProvider") ? { paymentProvider: form.get("paymentProvider") === "iyzico" ? "iyzico" : "manual" } : {}),
+        ...(hasStoredSetting("paymentEnabled") ? { paymentEnabled: form.get("paymentEnabled") === "on" } : {}),
+        ...(hasStoredSetting("orderEmailEnabled") ? { orderEmailEnabled: form.get("orderEmailEnabled") === "on" } : {}),
+        ...(hasStoredSetting("whatsappPhone") ? { whatsappPhone: String(form.get("whatsappPhone") || "").trim() } : {}),
+        ...(hasStoredSetting("iban") ? { iban: String(form.get("iban") || "").trim() } : {}),
+        ...(hasStoredSetting("ibanHolderName") ? { ibanHolderName: String(form.get("ibanHolderName") || "").trim() } : {}),
+        ...(hasStoredSetting("bankName") ? { bankName: String(form.get("bankName") || "").trim() } : {}),
+        ...(hasStoredSetting("paymentNote") ? { paymentNote: String(form.get("paymentNote") || "").trim() } : {}),
+        ...(hasStoredSetting("shoppingNotes") ? { shoppingNotes: {
           freeShipping: {
             enabled: form.get("shoppingFreeShippingEnabled") === "on",
             description: String(form.get("shoppingFreeShippingDescription") || "").trim(),
@@ -194,7 +195,7 @@ export function SettingsSection({
             title: String(form.get("shoppingPaymentTitle") || "").trim(),
             description: String(form.get("shoppingPaymentDescription") || "").trim(),
           },
-        },
+        } } : {}),
       },
     });
   }

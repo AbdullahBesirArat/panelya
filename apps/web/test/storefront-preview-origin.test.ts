@@ -32,3 +32,13 @@ test("owner settings manage the existing tenant storefront URL field", () => {
   assert.match(organizations, /storefrontUrl\?: string/);
   assert.doesNotMatch(settings, /railway\.app|Authorization:\s*["']Bearer/i);
 });
+
+test("profile-only saves preserve operational settings omitted by a stale summary", () => {
+  const settings = fs.readFileSync(path.join(root, "src/components/sections/settings-section.tsx"), "utf8");
+  assert.match(settings, /const hasStoredSetting = \(key: string\)/);
+  assert.match(settings, /hasStoredSetting\("contactEmail"\)/);
+  assert.match(settings, /hasStoredSetting\("whatsappPhone"\)/);
+  assert.match(settings, /hasStoredSetting\("shoppingNotes"\)/);
+  assert.match(settings, /brand: \{/);
+  assert.match(settings, /serviceNotes: String\(form\.get\("serviceNotes"\)/);
+});
