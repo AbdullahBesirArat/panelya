@@ -135,6 +135,8 @@ export function SettingsSection({
     if (!canManageSettings) return;
     const form = new FormData(event.currentTarget);
     const hasStoredSetting = (key: string) => Object.prototype.hasOwnProperty.call(storeSettings, key);
+    const contactEmail = String(form.get("contactEmail") || "").trim();
+    const whatsappPhone = String(form.get("whatsappPhone") || "").trim();
     settingsMutation.mutate({
       name: String(form.get("name") || "").trim(),
       slug: String(form.get("slug") || "").trim(),
@@ -167,14 +169,14 @@ export function SettingsSection({
           .split(/\r?\n/)
           .map((note) => note.trim())
           .filter(Boolean),
-        ...(hasStoredSetting("contactEmail") ? { contactEmail: String(form.get("contactEmail") || "").trim() } : {}),
+        ...(hasStoredSetting("contactEmail") && contactEmail ? { contactEmail } : {}),
         ...(hasStoredSetting("supportPhone") ? { supportPhone: String(form.get("supportPhone") || "").trim() } : {}),
         ...(hasStoredSetting("shippingFee") ? { shippingFee: numberFromForm(form.get("shippingFee")) } : {}),
         ...(hasStoredSetting("freeShippingThreshold") ? { freeShippingThreshold: numberFromForm(form.get("freeShippingThreshold")) } : {}),
         ...(hasStoredSetting("paymentProvider") ? { paymentProvider: form.get("paymentProvider") === "iyzico" ? "iyzico" : "manual" } : {}),
         ...(hasStoredSetting("paymentEnabled") ? { paymentEnabled: form.get("paymentEnabled") === "on" } : {}),
         ...(hasStoredSetting("orderEmailEnabled") ? { orderEmailEnabled: form.get("orderEmailEnabled") === "on" } : {}),
-        ...(hasStoredSetting("whatsappPhone") ? { whatsappPhone: String(form.get("whatsappPhone") || "").trim() } : {}),
+        ...(hasStoredSetting("whatsappPhone") && whatsappPhone ? { whatsappPhone } : {}),
         ...(hasStoredSetting("iban") ? { iban: String(form.get("iban") || "").trim() } : {}),
         ...(hasStoredSetting("ibanHolderName") ? { ibanHolderName: String(form.get("ibanHolderName") || "").trim() } : {}),
         ...(hasStoredSetting("bankName") ? { bankName: String(form.get("bankName") || "").trim() } : {}),
