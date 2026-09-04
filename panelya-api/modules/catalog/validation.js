@@ -55,6 +55,10 @@ function normalizeVariants(rawVariants) {
 }
 
 function productParams(body, options = {}) {
+  // Spin media has a dedicated tenant-checked association endpoint.
+  const details = body.details && typeof body.details === 'object' && !Array.isArray(body.details)
+    ? { ...body.details } : {};
+  delete details.spin360;
   const price = Number(body.price);
   const salePrice = body.sale_price == null || body.sale_price === '' ? null : Number(body.sale_price);
   const variants = normalizeVariants(body.variants);
@@ -76,7 +80,7 @@ function productParams(body, options = {}) {
     JSON.stringify(Array.isArray(body.colors) ? body.colors.slice(0, 20) : []),
     JSON.stringify(Array.isArray(body.sizes) ? body.sizes.slice(0, 30) : []),
     JSON.stringify(Array.isArray(body.images) ? body.images.slice(0, 20) : []),
-    JSON.stringify(body.details && typeof body.details === 'object' ? body.details : {}),
+    JSON.stringify(details),
     String(body.tags || '').slice(0, 500),
     String(body.description || '').slice(0, 5000),
     String(body.product_story || '').slice(0, 5000),

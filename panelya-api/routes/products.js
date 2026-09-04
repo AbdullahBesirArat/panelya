@@ -8,6 +8,7 @@ const { syncMediaReferences } = require('../services/mediaAssets');
 const notifications = require('../modules/notifications/service');
 
 const router = express.Router();
+const { normalizeSpin360 } = require('../modules/catalog/spin360');
 const {
   PRODUCT_STATUSES,
   normalizeProductIds,
@@ -122,6 +123,42 @@ router.get('/', listProducts);
 
 router.get('/:id', getProduct);
 
+// This route changes only the optional media association, never inventory or variants.
+router.put('/:id/spin360', requireAuth, requireRole(['super_admin', 'owner', 'admin']), async (req, res, next) => {
+  const client = await db.pool.connect();
+  try {
+    const organization = await resolveOrganization(req, client);
+    if (req.auth?.organizationId && String(req.auth.organizationId) !== String(organization.id)) {
+      return res.status(403).json({ error: 'Workspace erisimi reddedildi' });
+    }
+    if (!Object.prototype.hasOwnProperty.call(req.body || {}, 'spin360')) {
+      return res.status(400).json({ error: 'spin360 alani zorunlu' });
+    }
+    const spin360 = normalizeSpin360(req.body.spin360);
+    await client.query('begin');
+    await db.setTenantContext(client, organization.id);
+    const previous = await client.query('select details from products where id=$1 and organization_id=$2 for update',
+      [req.params.id, organization.id]);
+    if (!previous.rows.length) {
+      await client.query('rollback');
+      return res.status(404).json({ error: 'Urun bulunamadi' });
+    }
+    await syncMediaReferences(client, {
+      organizationId: organization.id, resourceType: 'product', resourceId: req.params.id,
+      fieldName: 'spin360', values: spin360?.frames || [],
+    });
+    await client.query(`update products set details=jsonb_set(details, '{spin360}', $3::jsonb), updated_at=now()
+      where id=$1 and organization_id=$2`, [req.params.id, organization.id, JSON.stringify(spin360)]);
+    await auditLog(req, { action: 'UPDATE', resourceType: 'product', resourceId: req.params.id,
+      oldValue: { spin360: previous.rows[0].details?.spin360 || null }, newValue: { spin360 }, store: client });
+    await client.query('commit');
+    res.json({ spin360 });
+  } catch (error) {
+    await client.query('rollback');
+    next(error);
+  } finally { client.release(); }
+});
+
 router.post('/', requireAuth, requireRole(['super_admin', 'owner', 'admin']), async (req, res, next) => {
   const client = await db.pool.connect();
 
@@ -215,6 +252,10 @@ router.post('/bulk', requireAuth, requireRole(['super_admin', 'owner', 'admin'])
         [organization.id, ids]
       );
       for (const product of result.rows) {
+        await syncMediaReferences(client, {
+          organizationId: organization.id, resourceType: 'product', resourceId: product.id,
+          fieldName: 'spin360', values: [],
+        });
         await syncMediaReferences(client, {
           organizationId: organization.id,
           resourceType: 'product',
@@ -395,7 +436,9 @@ router.put('/:id', requireAuth, requireRole(['super_admin', 'owner', 'admin']), 
     const result = await client.query(
       `update products set
         name=$1, category_id=$2, price=$3, sale_price=$4, status=$5,
-        colors=$6, sizes=$7, images=$8, details=$9, tags=$10, description=$11, product_story=$12, emoji=coalesce($13, emoji),
+        colors=$6, sizes=$7, images=$8, details=($9::jsonb - 'spin360') ||
+          case when details ? 'spin360' then jsonb_build_object('spin360', details->'spin360') else '{}'::jsonb end,
+        tags=$10, description=$11, product_story=$12, emoji=coalesce($13, emoji),
         featured_in_category=$14,
         updated_at=now()
        where id=$15 and organization_id=$16
@@ -543,6 +586,13 @@ router.delete('/:id', requireAuth, requireRole(['super_admin', 'owner']), async 
       'delete from products where id = $1 and organization_id = $2',
       [req.params.id, organization.id]
     );
+    await syncMediaReferences(db, {
+      organizationId: organization.id,
+      resourceType: 'product',
+      resourceId: req.params.id,
+      fieldName: 'spin360',
+      values: [],
+    });
     await syncMediaReferences(db, {
       organizationId: organization.id,
       resourceType: 'product',

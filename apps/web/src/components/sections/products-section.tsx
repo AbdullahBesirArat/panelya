@@ -48,6 +48,7 @@ import {
 } from "@/features/products/components";
 import { ProductRelationsEditor } from "@/features/products/components/product-relations-editor";
 import { ProductSizeGuideEditor } from "@/features/products/components/product-size-guide-editor";
+import { ProductSpinEditor } from "@/features/products/components/product-spin-editor";
 import { parseProductForm } from "@/features/products/product-form-schema";
 import {
   colorEntryHex,
@@ -1244,6 +1245,10 @@ export function ProductsSection({
                       Toplam stok, seçilen renk/beden kutularındaki stokların toplamından otomatik hesaplanır.
                     </div>
                 </VariantEditor>
+                {editingProductId && <ProductSpinEditor key={editingProductId} productId={editingProductId}
+                  initial={products.find((product) => product.id === editingProductId)?.details?.spin360}
+                  disabled={!canManageCatalog}
+                  onSaved={() => { void queryClient.invalidateQueries({ queryKey: queryKeys.catalog.products.all(organizationSlug) }); }} />}
                 <ImageManager
                   colorLabel={colorEntryLabel}
                   colors={productColors}
