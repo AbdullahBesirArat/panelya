@@ -33,6 +33,7 @@ export type MediaAsset = {
   id: string;
   url: string;
   original_filename: string;
+  checksum?: string;
   byte_size: number;
   content_type: string;
   width: number | null;
@@ -69,6 +70,10 @@ export function validateMediaUpload(file: Pick<File, "name" | "size" | "type">) 
 
 export async function fetchMediaAssets() {
   return authenticatedRequest<MediaAsset[]>("/media");
+}
+
+export async function fetchMediaAssetsByChecksums(checksums: string[]) {
+  return authenticatedRequest<MediaAsset[]>(`/media?checksums=${encodeURIComponent(checksums.join(","))}`);
 }
 
 export async function uploadProductImages(files: File[]) {

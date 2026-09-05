@@ -3,7 +3,7 @@
 import Image from "next/image";
 import { useState } from "react";
 import { authenticatedRequest } from "@/lib/api/core";
-import { resolveApiAssetUrl, uploadMediaAsset } from "@/lib/api/media";
+import { fetchMediaAssetsByChecksums, resolveApiAssetUrl, uploadMediaAsset } from "@/lib/api/media";
 
 type Spin = { frameCount: number; poster: string; frames: string[] };
 
@@ -15,6 +15,33 @@ export function ProductSpinEditor({ productId, initial, disabled, onSaved }: {
   const [files, setFiles] = useState<File[]>([]);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  async function inspectFiles() {
+    if (files.length < 2 || files.length > 72) throw new Error("2–72 sıralı WebP kare seçin.");
+    const checksums = await Promise.all(files.map(async file => {
+      const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
+      return Array.from(new Uint8Array(digest), value => value.toString(16).padStart(2, "0")).join("");
+    }));
+    if (new Set(checksums).size !== files.length) throw new Error("Aynı kare birden fazla seçilemez.");
+    const assets = await fetchMediaAssetsByChecksums(checksums);
+    if (assets.length >= 200) throw new Error("Medya eşleşmeleri sınırı aştı; yükleme durduruldu.");
+    // Fail closed while the API deployment is still catching up with the editor.
+    if (assets.some(asset => !asset.checksum || !checksums.includes(asset.checksum))) throw new Error("Medya doğrulaması tamamlanamadı; yükleme durduruldu.");
+    return checksums.map(checksum => {
+      const matches = assets.filter(asset => asset.checksum === checksum);
+      const ready = matches.find(asset => asset.status === "ready" || asset.status === "orphan_candidate");
+      if (!ready && matches.length) throw new Error("Bir kare depolamada işleniyor. Daha sonra tekrar kontrol edin.");
+      return ready;
+    });
+  }
+  async function inspect() {
+    setBusy(true);
+    try {
+      const existing = await inspectFiles();
+      const count = existing.filter(Boolean).length;
+      setMessage(`Medya kontrolü: ${count} mevcut, ${files.length - count} eksik. Henüz yükleme yapılmadı.`);
+    } catch (error) { setMessage(error instanceof Error ? error.message : "Medya kontrol edilemedi."); }
+    finally { setBusy(false); }
+  }
   async function save(remove = false) {
     setBusy(true);
     setMessage("");
@@ -31,16 +58,22 @@ export function ProductSpinEditor({ productId, initial, disabled, onSaved }: {
           if (dimensions && dimensions !== size) throw new Error("Tüm karelerin boyutları aynı olmalı.");
           dimensions = size;
         }
+        const existing = await inspectFiles();
         const frames: string[] = [];
-        for (const file of files) {
+        for (let index = 0; index < files.length; index++) {
+          const file = files[index];
           setMessage(`Yükleniyor: ${frames.length + 1}/${files.length}`);
-          frames.push((await uploadMediaAsset(file)).url);
+          frames.push(existing[index]?.url || (await uploadMediaAsset(file)).url);
         }
         next = { frameCount: frames.length, poster: frames[0], frames };
       }
-      await authenticatedRequest(`/products/${productId}/spin360`, {
-        method: "PUT", body: JSON.stringify({ spin360: next }),
-      });
+      const unchanged = next === null ? spin === null : spin?.frameCount === next.frameCount
+        && spin.poster === next.poster && spin.frames.every((frame, index) => frame === next.frames[index]);
+      if (!unchanged) {
+        await authenticatedRequest(`/products/${productId}/spin360`, {
+          method: "PUT", body: JSON.stringify({ spin360: next }),
+        });
+      }
       setSpin(next);
       setFiles([]);
       setMessage(remove ? "360° görünüm kaldırıldı." : "360° görünüm kaydedildi.");
@@ -59,6 +92,7 @@ export function ProductSpinEditor({ productId, initial, disabled, onSaved }: {
     </label>
     {files.length > 0 && <p className="break-words text-xs">{files.map(file => file.name).join(" → ")}</p>}
     <div className="flex gap-3">
+      <button type="button" className="focus-ring rounded border border-line px-3 py-2 text-xs" disabled={disabled || busy || files.length < 2} onClick={() => void inspect()}>Medya kütüphanesini kontrol et</button>
       <button type="button" className="focus-ring rounded border border-line px-3 py-2 text-xs" disabled={disabled || busy || files.length < 2} onClick={() => void save()}>
         {spin ? "360° görünümü değiştir" : "360° görünümü kaydet"}
       </button>

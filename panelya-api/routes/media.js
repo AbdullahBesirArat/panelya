@@ -66,10 +66,14 @@ router.get('/:assetId/:variant', async (req, res, next) => {
 
 router.get('/', requireAuth, requireRole(['super_admin', 'owner', 'admin']), async (req, res, next) => {
   try {
+    const checksums = req.query.checksums === undefined ? null : String(req.query.checksums).split(',');
+    if (checksums && (!checksums.length || checksums.length > 72 || checksums.some(value => !/^[a-f0-9]{64}$/.test(value)))) {
+      return res.status(400).json({ error: 'Gorsel checksum listesi gecersiz' });
+    }
     const organization = await resolveOrganization(req);
     const result = await db.query(
       `select ua.id, ua.url, ua.original_filename, ua.byte_size, ua.content_type,
-              ua.width, ua.height, ua.status, ua.created_at,
+              ua.width, ua.height, ua.status, ua.created_at, ua.checksum,
               coalesce(jsonb_object_agg(mv.variant_name, jsonb_build_object(
                 'url', mv.url, 'width', mv.width, 'height', mv.height, 'byte_size', mv.byte_size
               )) filter (where mv.id is not null), '{}'::jsonb) as variants,
@@ -78,10 +82,11 @@ router.get('/', requireAuth, requireRole(['super_admin', 'owner', 'admin']), asy
        left join media_variants mv on mv.asset_id = ua.id and mv.organization_id = ua.organization_id
        left join media_references mr on mr.asset_id = ua.id and mr.organization_id = ua.organization_id
        where ua.organization_id = $1 and ua.storage_provider <> 'legacy'
+         and ($2::text[] is null or ua.checksum = any($2::text[]))
        group by ua.id
        order by ua.created_at desc
        limit 200`,
-      [organization.id]
+      [organization.id, checksums]
     );
     res.json(result.rows);
   } catch (error) {
