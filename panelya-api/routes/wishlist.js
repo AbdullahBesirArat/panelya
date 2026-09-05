@@ -2,6 +2,7 @@ const express = require('express');
 const db = require('../db');
 const { rateLimit } = require('../middleware/security');
 const customerAuth = require('./customerAuth');
+const { SPIN_AVAILABILITY_SQL } = require('../modules/catalog/repository');
 
 const router = express.Router();
 const wishlistLimiter = rateLimit({
@@ -43,6 +44,7 @@ async function listWishlistItems(client, { organizationId, customerEmail }) {
       p.price,
       coalesce(p.images->>0, '') as image,
       c.name as category,
+      ${SPIN_AVAILABILITY_SQL} as has_spin360,
       w.created_at as added_at
      from customer_wishlist w
      join products p on p.id = w.product_id and p.organization_id = w.organization_id

@@ -1,7 +1,10 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const { normalizeSpin360 } = require('../modules/catalog/spin360');
 const { productParams } = require('../modules/catalog/validation');
+const { productSelect } = require('../modules/catalog/repository');
 const frames = [1, 2].map((n) => `/api/media/11111111-1111-4111-8111-${String(n).padStart(12, '0')}/detail`);
 test('spin manifests preserve ordered managed frames and reject unsafe or ambiguous sets', () => {
   const valid = { frameCount: 2, poster: frames[0], frames };
@@ -18,6 +21,30 @@ test('ordinary product writer cannot bypass spin ownership checks', () => {
   const params = productParams({ name: 'Test', price: 100, details });
   assert.deepEqual(JSON.parse(params[9]), { fabric_info: 'Pamuk' });
   assert.ok(details.spin360);
+});
+
+test('card queries expose only lightweight canonical spin availability', () => {
+  const cardSql = productSelect('p.organization_id = $1', { includeSpinManifest: false });
+  assert.match(cardSql, /as has_spin360/);
+  assert.match(cardSql, /jsonb_array_length\(p\.details->'spin360'->'frames'\) between 2 and 72/);
+  assert.match(cardSql, /count\(distinct spin_frame\)/);
+  assert.match(cardSql, /p\.details->'spin360'->>'poster' = p\.details->'spin360'->'frames'->>0/);
+  assert.match(cardSql, /coalesce\(p\.details, '\{\}'::jsonb\) - 'spin360' as details/);
+  assert.doesNotMatch(cardSql, /p\.details as details/);
+
+  const detailSql = productSelect('p.id = $1');
+  assert.match(detailSql, /p\.details as details/);
+  assert.match(detailSql, /as has_spin360/);
+});
+
+test('every public product-card repository requests the lightweight spin contract', () => {
+  const catalogRoot = path.join(__dirname, '..', 'modules', 'catalog');
+  for (const file of ['publicRepository.js', 'cards.js', 'relations.js']) {
+    const source = fs.readFileSync(path.join(catalogRoot, file), 'utf8');
+    assert.match(source, /includeSpinManifest:\s*false/, `${file} must not return frame manifests`);
+  }
+  const controller = fs.readFileSync(path.join(catalogRoot, 'controller.js'), 'utf8');
+  assert.match(controller, /includeSpinManifest:\s*isAdminManagementRequest\(req\)/);
 });
 
 test('association endpoint scopes writes, rolls back foreign assets, and never enters stock writes', async () => {

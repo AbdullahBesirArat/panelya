@@ -10,7 +10,23 @@ async function assertCategoryScope(client, organizationId, categoryId) {
   if (!categoryResult.rows[0]) throw Object.assign(new Error('Kategori bulunamadi'), { status: 400 });
 }
 
-function productSelect(whereClause, { includeInactiveVariants = false } = {}) {
+const SPIN_AVAILABILITY_SQL = `case
+    when jsonb_typeof(p.details->'spin360') = 'object'
+     and jsonb_typeof(p.details->'spin360'->'frames') = 'array'
+    then case when jsonb_array_length(p.details->'spin360'->'frames') between 2 and 72
+     and p.details->'spin360'->'frameCount' = to_jsonb(jsonb_array_length(p.details->'spin360'->'frames'))
+     and jsonb_typeof(p.details->'spin360'->'poster') = 'string'
+     and p.details->'spin360'->>'poster' = p.details->'spin360'->'frames'->>0
+     and not exists (
+       select 1 from jsonb_array_elements(p.details->'spin360'->'frames') spin_frame
+       where jsonb_typeof(spin_frame) <> 'string' or btrim(spin_frame #>> '{}') = ''
+     )
+     and (select count(distinct spin_frame) from jsonb_array_elements_text(p.details->'spin360'->'frames') spin_frame)
+       = jsonb_array_length(p.details->'spin360'->'frames')
+    then true else false end
+    else false end`;
+
+function productSelect(whereClause, { includeInactiveVariants = false, includeSpinManifest = true } = {}) {
   const activeVariantFilter = includeInactiveVariants ? '' : '\n          and pv.is_active';
   const isActiveField = includeInactiveVariants ? ",\n            'is_active', pv.is_active" : '';
   return `select
@@ -28,7 +44,8 @@ function productSelect(whereClause, { includeInactiveVariants = false } = {}) {
              where pv_size.organization_id = p.organization_id
                and pv_size.product_id = p.id and pv_size.is_active
                and trim(pv_size.size) <> '') size_options), '[]'::jsonb) as sizes,
-    p.images, p.details, p.tags,
+    p.images, ${includeSpinManifest ? 'p.details' : "coalesce(p.details, '{}'::jsonb) - 'spin360'"} as details,
+    ${SPIN_AVAILABILITY_SQL} as has_spin360, p.tags,
     p.description, p.product_story, p.featured_in_category, p.emoji,
     p.created_at, p.updated_at,
     coalesce((select jsonb_agg(jsonb_build_object(
@@ -52,4 +69,4 @@ async function fetchProduct(client, productId, organizationId) {
   return result.rows[0] || null;
 }
 
-module.exports = { assertCategoryScope, productSelect, fetchProduct };
+module.exports = { assertCategoryScope, productSelect, fetchProduct, SPIN_AVAILABILITY_SQL };

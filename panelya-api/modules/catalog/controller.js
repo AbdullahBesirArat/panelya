@@ -36,7 +36,10 @@ async function listProducts(req, res, next) {
 
     params.push(paging.limit, paging.offset);
     const result = await db.query(
-      `${productSelect(filters.join(' and '), { includeInactiveVariants: isAdminManagementRequest(req) })}
+      `${productSelect(filters.join(' and '), {
+        includeInactiveVariants: isAdminManagementRequest(req),
+        includeSpinManifest: isAdminManagementRequest(req),
+      })}
        order by p.created_at desc
        limit $${params.length - 1} offset $${params.length}`,
       params

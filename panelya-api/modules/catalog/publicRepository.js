@@ -124,7 +124,7 @@ async function queryItems(client, organizationId, query) {
   const total = Number(countResult.rows[0]?.total || 0);
   const params = [...filter.params, query.pageSize, (query.page - 1) * query.pageSize];
   const result = await client.query(
-    `${productSelect(filter.where)}
+    `${productSelect(filter.where, { includeSpinManifest: false })}
      order by ${SORT_SQL[query.sort]}
      limit $${params.length - 1} offset $${params.length}`,
     params

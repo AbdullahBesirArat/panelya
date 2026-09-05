@@ -11,7 +11,7 @@ async function productCardsByIds(client, organizationId, ids, { limit = MAX_CARD
   const cleanIds = [...new Set((ids || []).map(Number).filter((id) => Number.isInteger(id) && id > 0))].slice(0, limit);
   if (!cleanIds.length) return [];
   const result = await client.query(
-    productSelect("p.organization_id = $1 and p.id = any($2::bigint[]) and p.status in ('active', 'out')"),
+    productSelect("p.organization_id = $1 and p.id = any($2::bigint[]) and p.status in ('active', 'out')", { includeSpinManifest: false }),
     [organizationId, cleanIds]
   );
   const byId = new Map(result.rows.map((row) => [Number(row.id), row]));

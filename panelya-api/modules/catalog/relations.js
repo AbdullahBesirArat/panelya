@@ -107,7 +107,7 @@ async function resolveRelated(client, { organizationId, productId, relationType 
   if (!ids.length) return { relation_type: relationType, fallback: usedFallback, items: [] };
 
   const cards = await client.query(
-    productSelect("p.organization_id = $1 and p.id = any($2::bigint[]) and p.status in ('active', 'out')"),
+    productSelect("p.organization_id = $1 and p.id = any($2::bigint[]) and p.status in ('active', 'out')", { includeSpinManifest: false }),
     [organizationId, ids]
   );
   const byId = new Map(cards.rows.map((row) => [Number(row.id), row]));
