@@ -1199,6 +1199,48 @@ if (!ADMIN_URL) {
     );
     assert.deepEqual(workerHealth.rows[0], { succeeded: true, last_error: null });
 
+    // P1-A / R8: a tenant-scoped expiry (the dashboard route) must never expire, cancel or
+    // list another tenant's due reservations, and must not stamp the global worker heartbeat.
+    const orderB = await admin.query(
+      "insert into orders (organization_id, order_code, customer_id, total, status) values ($1,$2,$3,100,'payment_pending') returning id",
+      [orgB, `RLS-R8-${stamp}`, fixtures.b.customerId]
+    );
+    await admin.query(
+      `insert into order_items (organization_id, order_id, product_id, variant_id, product_name, quantity, unit_price)
+       values ($1,$2,$3,$4,'R8 item',1,100)`,
+      [orgB, orderB.rows[0].id, fixtures.b.productId, fixtures.b.variantId]
+    );
+    await admin.query('update product_variants set on_hand = 1 where organization_id = $1 and id = $2', [orgB, fixtures.b.variantId]);
+    const reservationB = await asTenant(runtimePool, orgB, (client) => createInventoryReservation(client, {
+      organizationId: orgB,
+      orderId: orderB.rows[0].id,
+      customerId: fixtures.b.customerId,
+      items: [{ product_id: fixtures.b.productId, variant_id: fixtures.b.variantId, quantity: 1, unit_price: 100 }],
+      idempotencyKey: `r8-foreign-${stamp}`,
+      ttlMinutes: 15,
+    }));
+    await admin.query(
+      "update inventory_reservations set expires_at = now() - interval '1 minute' where id = $1",
+      [reservationB.reservation.id]
+    );
+    await admin.query("delete from inventory_worker_health where job_name = 'inventory_reservation_expiry'");
+    const scopedRun = await expireInventoryReservations({ pool: systemPool, organizationId: orgA, limit: 500 });
+    assert.equal(scopedRun.includes(reservationB.reservation.id), false, 'tenant A run must not return tenant B reservations');
+    const foreignState = await admin.query(
+      `select r.status, o.status as order_status
+         from inventory_reservations r join orders o on o.organization_id = r.organization_id and o.id = r.order_id
+        where r.id = $1`,
+      [reservationB.reservation.id]
+    );
+    assert.deepEqual(foreignState.rows[0], { status: 'active', order_status: 'payment_pending' });
+    const scopedHealth = await admin.query(
+      "select count(*)::int as n from inventory_worker_health where job_name = 'inventory_reservation_expiry'"
+    );
+    assert.equal(scopedHealth.rows[0].n, 0, 'a tenant-scoped run must not stamp the global worker heartbeat');
+    // The unscoped worker still expires it (system behaviour unchanged).
+    const workerRun = await expireInventoryReservations({ pool: systemPool, limit: 500 });
+    assert.equal(workerRun.includes(reservationB.reservation.id), true);
+
     const isolatedOrder = await createOrder('tenant-isolation');
     await assert.rejects(
       asTenant(runtimePool, orgB, (client) => createInventoryReservation(client, {
@@ -5696,6 +5738,150 @@ const integrationService = require('../../modules/integrations/service');
       );
       assert.equal(seen.rows[0].n, 0);
     });
+  });
+
+  test('P1-A role x tenant matrix over HTTP: foreign objects, selectors, roles and audiences are refused', async () => {
+    const express = require('express');
+    const jwt = require('jsonwebtoken');
+    const { attachAuthIfPresent } = require('../../middleware/auth');
+    const { attachSession } = require('../../middleware/authSession');
+    const { ensureJwtSecret } = require('../../middleware/security');
+    const { createAppAccessToken, createAdminAccessToken, ADMIN_AUDIENCE } = require('../../services/authTokens');
+
+    // Same middleware order as server.js, mounting only the routers under test.
+    const app = express();
+    app.use(express.json());
+    app.use(attachAuthIfPresent);
+    app.use(attachSession);
+    app.use(appDb.requestContextMiddleware);
+    app.use('/api/orders', require('../../routes/orders'));
+    app.use('/api/customers', require('../../routes/customers'));
+    app.use('/api/products', require('../../routes/products'));
+    app.use('/api/audit', require('../../routes/audit'));
+    app.use((err, _req, res, _next) => res.status(err.status || 500).json({ error: String(err.message || err) }));
+    const server = await new Promise((resolve) => { const s2 = app.listen(0, '127.0.0.1', () => resolve(s2)); });
+    const base = `http://127.0.0.1:${server.address().port}/api`;
+
+    try {
+      const slugs = await admin.query('select id, slug from organizations where id = any($1)', [[orgA, orgB]]);
+      const slugOf = Object.fromEntries(slugs.rows.map((row) => [row.id, row.slug]));
+      const orderCodes = await admin.query('select id, order_code from orders where id = any($1)', [[fixtures.a.orderId, fixtures.b.orderId]]);
+      const codeOf = Object.fromEntries(orderCodes.rows.map((row) => [row.id, row.order_code]));
+      const foreignProduct = await admin.query(
+        "insert into products (organization_id, name, price, status) values ($1,'P1A foreign',10,'active') returning id", [orgB]
+      );
+
+      const appToken = (orgId, role) => createAppAccessToken({
+        user: { id: crypto.randomUUID(), email: `${role}@example.test`, name: role },
+        membership: { role, organization: { id: orgId, slug: slugOf[orgId] } },
+      });
+      async function call(method, route, { token, headers = {}, body } = {}) {
+        const response = await fetch(`${base}${route}`, {
+          method,
+          headers: {
+            ...(body ? { 'content-type': 'application/json' } : {}),
+            ...(token ? { authorization: `Bearer ${token}` } : {}),
+            ...headers,
+          },
+          body: body ? JSON.stringify(body) : undefined,
+        });
+        const text = await response.text();
+        return { status: response.status, text };
+      }
+      const leakMarker = (text) => [codeOf[fixtures.b.orderId], 'Customer B'].find((marker) => text.includes(marker)) || null;
+      const leaksB = (text) => leakMarker(text) !== null;
+      const statusOf = async (orderId) => (await admin.query('select status from orders where id = $1', [orderId])).rows[0].status;
+      const bStatusBefore = await statusOf(fixtures.b.orderId);
+      const aStatusBefore = await statusOf(fixtures.a.orderId);
+
+      // 1. Every tenant-A role reads only tenant-A data; foreign detail is refused.
+      for (const role of ['owner', 'admin', 'member', 'viewer']) {
+        const token = appToken(orgA, role);
+        for (const route of ['/orders', '/customers']) {
+          const list = await call('GET', route, { token });
+          assert.equal(list.status, 200, `${role} GET ${route}`);
+          assert.equal(leakMarker(list.text), null, `${role} GET ${route} must not contain tenant B data`);
+        }
+        const ownList = await call('GET', '/orders', { token });
+        assert.ok(ownList.text.includes(codeOf[fixtures.a.orderId]), `${role} sees its own order`);
+        assert.equal((await call('GET', `/orders/${fixtures.a.orderId}`, { token })).status, 200);
+        const foreign = await call('GET', `/orders/${fixtures.b.orderId}`, { token });
+        assert.ok([403, 404].includes(foreign.status), `${role} foreign order detail -> ${foreign.status}`);
+        assert.equal(leaksB(foreign.text), false);
+        const foreignPacking = await call('GET', `/orders/${fixtures.b.orderId}/packing-list`, { token });
+        assert.ok([403, 404].includes(foreignPacking.status), `${role} foreign packing list -> ${foreignPacking.status}`);
+        assert.equal(leaksB(foreignPacking.text), false);
+      }
+
+      // 2. A client-chosen tenant selector never overrides an app token's own tenant.
+      const owner = appToken(orgA, 'owner');
+      for (const [route, headers] of [
+        ['/orders', { 'x-organization-slug': slugOf[orgB] }],
+        [`/orders?organizationSlug=${slugOf[orgB]}`, {}],
+        [`/customers?organization=${slugOf[orgB]}`, {}],
+      ]) {
+        const result = await call('GET', route, { token: owner, headers });
+        assert.equal(result.status, 200);
+        assert.equal(leaksB(result.text), false, `selector override via ${route}`);
+      }
+      const bodySelector = await call('PUT', `/orders/${fixtures.b.orderId}/status`, {
+        token: owner,
+        headers: { 'x-organization-slug': slugOf[orgB] },
+        body: { status: 'cancelled', organizationSlug: slugOf[orgB] },
+      });
+      assert.ok(bodySelector.status >= 400, `owner A cancelling B order via selectors -> ${bodySelector.status}`);
+
+      // 3. Role gates on mutations: refused with 403 and state unchanged.
+      for (const role of ['member', 'viewer']) {
+        const result = await call('PUT', `/orders/${fixtures.a.orderId}/status`, { token: appToken(orgA, role), body: { status: 'cancelled' } });
+        assert.equal(result.status, 403, `${role} PUT status`);
+      }
+      const viewerNote = await call('POST', `/orders/${fixtures.a.orderId}/notes`, {
+        token: appToken(orgA, 'viewer'), body: { content: 'x', visibility: 'internal' },
+      });
+      assert.equal(viewerNote.status, 403);
+      for (const role of ['admin', 'member', 'viewer']) {
+        const del = await call('DELETE', `/products/${fixtures.a.productId}`, { token: appToken(orgA, role) });
+        assert.equal(del.status, 403, `${role} DELETE product`);
+      }
+      assert.equal(await statusOf(fixtures.a.orderId), aStatusBefore);
+
+      // 4. Cross-tenant mutations by an authorised owner change nothing.
+      const crossStatus = await call('PUT', `/orders/${fixtures.b.orderId}/status`, { token: owner, body: { status: 'cancelled' } });
+      assert.ok(crossStatus.status >= 400, `owner A PUT B status -> ${crossStatus.status}`);
+      const crossNote = await call('POST', `/orders/${fixtures.b.orderId}/notes`, { token: owner, body: { content: 'x', visibility: 'internal' } });
+      assert.ok(crossNote.status >= 400, `owner A POST B note -> ${crossNote.status}`);
+      await call('DELETE', `/products/${foreignProduct.rows[0].id}`, { token: owner });
+      assert.equal((await admin.query('select 1 from products where id = $1', [foreignProduct.rows[0].id])).rowCount, 1,
+        'owner A must not delete a tenant B product');
+      assert.equal(await statusOf(fixtures.b.orderId), bStatusBefore);
+
+      // 5. Authentication and audit gates.
+      assert.equal((await call('GET', '/orders')).status, 401);
+      assert.equal((await call('GET', '/audit', { token: owner })).status, 403);
+      assert.equal((await call('GET', '/audit', {
+        token: createAdminAccessToken({ id: crypto.randomUUID(), username: 'ops', role: 'admin' }),
+      })).status, 403);
+
+      // 6. Audiences and signatures: forged or cross-audience tokens are refused.
+      const forgedAdmin = jwt.sign({ sub: 'x', role: 'super_admin', actorType: 'admin' }, ensureJwtSecret('app'), {
+        algorithm: 'HS256', issuer: 'panelya-api', audience: ADMIN_AUDIENCE, expiresIn: '5m',
+      });
+      const unknownSecret = jwt.sign({ sub: 'x', role: 'owner', organizationId: orgA, actorType: 'app' }, 'not-the-secret'.repeat(4), {
+        algorithm: 'HS256', issuer: 'panelya-api', audience: 'panelya-app', expiresIn: '5m',
+      });
+      for (const token of [forgedAdmin, unknownSecret]) {
+        assert.equal((await call('GET', '/orders', { token })).status, 401);
+      }
+      // Only the platform operator (admin audience, super_admin) selects a tenant by slug.
+      const superAdmin = createAdminAccessToken({ id: crypto.randomUUID(), username: 'root', role: 'super_admin' });
+      const selected = await call('GET', '/orders', { token: superAdmin, headers: { 'x-organization-slug': slugOf[orgB] } });
+      assert.equal(selected.status, 200);
+      assert.ok(selected.text.includes(codeOf[fixtures.b.orderId]));
+      assert.equal(selected.text.includes(codeOf[fixtures.a.orderId]), false);
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
   });
 
   test('safe rollback retains tenant columns; cross-tenant corruption blocks reapply', async () => {
