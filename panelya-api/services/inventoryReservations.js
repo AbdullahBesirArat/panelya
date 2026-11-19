@@ -288,8 +288,13 @@ async function transitionOrderInventory(client, orderId, previousStatus, nextSta
   return { changed: false };
 }
 
-async function expireInventoryReservations({ pool = db.getSystemPool(), limit = 100 } = {}) {
-  await pool.query(
+// organizationId (optional) confines the run to one tenant. The unscoped form is the
+// system worker/CLI; a tenant-triggered run must always pass it, because this function
+// uses the system pool (which sees every tenant) and must not act across tenants.
+// Scoped runs also leave the global worker heartbeat alone so they cannot mask a dead worker.
+async function expireInventoryReservations({ pool = db.getSystemPool(), limit = 100, organizationId = null } = {}) {
+  const scoped = organizationId !== null && organizationId !== undefined && organizationId !== '';
+  if (!scoped) await pool.query(
     `insert into inventory_worker_health (job_name, last_started_at, updated_at)
      values ('inventory_reservation_expiry', now(), now())
      on conflict (job_name) do update set last_started_at = now(), updated_at = now()`
@@ -302,10 +307,13 @@ async function expireInventoryReservations({ pool = db.getSystemPool(), limit = 
       `select id, organization_id, order_id
          from inventory_reservations
         where status = 'active' and expires_at <= now()
+          ${scoped ? 'and organization_id = $2' : ''}
         order by expires_at, id
         limit $1
         for update skip locked`,
-      [Math.min(Math.max(Number(limit) || 100, 1), 500)]
+      scoped
+        ? [Math.min(Math.max(Number(limit) || 100, 1), 500), String(organizationId)]
+        : [Math.min(Math.max(Number(limit) || 100, 1), 500)]
     );
     for (const reservation of selected.rows) {
       const result = await releaseReservation(client, {
@@ -328,7 +336,7 @@ async function expireInventoryReservations({ pool = db.getSystemPool(), limit = 
       expired.push(reservation.id);
     }
     await client.query('commit');
-    await pool.query(
+    if (!scoped) await pool.query(
       `update inventory_worker_health
           set last_succeeded_at = now(), last_error = null,
               processed_count = $2, updated_at = now()
@@ -338,7 +346,7 @@ async function expireInventoryReservations({ pool = db.getSystemPool(), limit = 
     return expired;
   } catch (error) {
     await client.query('rollback').catch(() => {});
-    await pool.query(
+    if (!scoped) await pool.query(
       `insert into inventory_worker_health
          (job_name, last_failed_at, last_error, updated_at)
        values ('inventory_reservation_expiry', now(), $1, now())

@@ -250,7 +250,9 @@ router.post('/expire-pending', requireAuth, requireRole(['super_admin', 'owner',
       1440
     );
     const limit = Math.min(Math.max(Number(req.body.limit || process.env.PAYMENT_PENDING_EXPIRE_LIMIT || 100), 1), 500);
-    const expired = await expirePendingOrders({ olderThanMinutes, limit });
+    // Tenant-triggered: confine the system-pool job to the caller's resolved tenant (R8).
+    const organization = await resolveOrganization(req);
+    const expired = await expirePendingOrders({ limit, organizationId: organization.id });
     await auditLog(req, {
       action: 'EXPIRE_PENDING',
       resourceType: 'order',

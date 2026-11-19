@@ -1199,6 +1199,48 @@ if (!ADMIN_URL) {
     );
     assert.deepEqual(workerHealth.rows[0], { succeeded: true, last_error: null });
 
+    // P1-A / R8: a tenant-scoped expiry (the dashboard route) must never expire, cancel or
+    // list another tenant's due reservations, and must not stamp the global worker heartbeat.
+    const orderB = await admin.query(
+      "insert into orders (organization_id, order_code, customer_id, total, status) values ($1,$2,$3,100,'payment_pending') returning id",
+      [orgB, `RLS-R8-${stamp}`, fixtures.b.customerId]
+    );
+    await admin.query(
+      `insert into order_items (organization_id, order_id, product_id, variant_id, product_name, quantity, unit_price)
+       values ($1,$2,$3,$4,'R8 item',1,100)`,
+      [orgB, orderB.rows[0].id, fixtures.b.productId, fixtures.b.variantId]
+    );
+    await admin.query('update product_variants set on_hand = 1 where organization_id = $1 and id = $2', [orgB, fixtures.b.variantId]);
+    const reservationB = await asTenant(runtimePool, orgB, (client) => createInventoryReservation(client, {
+      organizationId: orgB,
+      orderId: orderB.rows[0].id,
+      customerId: fixtures.b.customerId,
+      items: [{ product_id: fixtures.b.productId, variant_id: fixtures.b.variantId, quantity: 1, unit_price: 100 }],
+      idempotencyKey: `r8-foreign-${stamp}`,
+      ttlMinutes: 15,
+    }));
+    await admin.query(
+      "update inventory_reservations set expires_at = now() - interval '1 minute' where id = $1",
+      [reservationB.reservation.id]
+    );
+    await admin.query("delete from inventory_worker_health where job_name = 'inventory_reservation_expiry'");
+    const scopedRun = await expireInventoryReservations({ pool: systemPool, organizationId: orgA, limit: 500 });
+    assert.equal(scopedRun.includes(reservationB.reservation.id), false, 'tenant A run must not return tenant B reservations');
+    const foreignState = await admin.query(
+      `select r.status, o.status as order_status
+         from inventory_reservations r join orders o on o.organization_id = r.organization_id and o.id = r.order_id
+        where r.id = $1`,
+      [reservationB.reservation.id]
+    );
+    assert.deepEqual(foreignState.rows[0], { status: 'active', order_status: 'payment_pending' });
+    const scopedHealth = await admin.query(
+      "select count(*)::int as n from inventory_worker_health where job_name = 'inventory_reservation_expiry'"
+    );
+    assert.equal(scopedHealth.rows[0].n, 0, 'a tenant-scoped run must not stamp the global worker heartbeat');
+    // The unscoped worker still expires it (system behaviour unchanged).
+    const workerRun = await expireInventoryReservations({ pool: systemPool, limit: 500 });
+    assert.equal(workerRun.includes(reservationB.reservation.id), true);
+
     const isolatedOrder = await createOrder('tenant-isolation');
     await assert.rejects(
       asTenant(runtimePool, orgB, (client) => createInventoryReservation(client, {
