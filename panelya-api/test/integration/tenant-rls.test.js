@@ -5884,6 +5884,58 @@ const integrationService = require('../../modules/integrations/service');
     }
   });
 
+  test('R10 expiry worker: dry run counts and changes nothing; a real run expires, cancels and stamps the heartbeat', async () => {
+    const { runExpiryOnce } = require('../../services/inventoryExpiryWorker');
+    const quiet = { info() {}, warn() {} };
+    const stamp = Date.now();
+    const order = await admin.query(
+      "insert into orders (organization_id, order_code, customer_id, total, status) values ($1,$2,$3,100,'payment_pending') returning id",
+      [orgB, `RLS-R10-${stamp}`, fixtures.b.customerId]
+    );
+    await admin.query(
+      `insert into order_items (organization_id, order_id, product_id, variant_id, product_name, quantity, unit_price)
+       values ($1,$2,$3,$4,'R10 item',1,100)`,
+      [orgB, order.rows[0].id, fixtures.b.productId, fixtures.b.variantId]
+    );
+    await admin.query('update product_variants set on_hand = 1 where organization_id = $1 and id = $2', [orgB, fixtures.b.variantId]);
+    const reservation = await asTenant(runtimePool, orgB, (client) => createInventoryReservation(client, {
+      organizationId: orgB,
+      orderId: order.rows[0].id,
+      customerId: fixtures.b.customerId,
+      items: [{ product_id: fixtures.b.productId, variant_id: fixtures.b.variantId, quantity: 1, unit_price: 100 }],
+      idempotencyKey: `r10-worker-${stamp}`,
+      ttlMinutes: 15,
+    }));
+    await admin.query(
+      "update inventory_reservations set expires_at = now() - interval '1 minute' where id = $1",
+      [reservation.reservation.id]
+    );
+    await admin.query("delete from inventory_worker_health where job_name = 'inventory_reservation_expiry'");
+    const stateOf = async () => (await admin.query(
+      `select r.status as reservation, o.status as order_status
+         from inventory_reservations r join orders o on o.organization_id = r.organization_id and o.id = r.order_id
+        where r.id = $1`,
+      [reservation.reservation.id]
+    )).rows[0];
+    const heartbeats = async () => (await admin.query(
+      "select count(*)::int as n from inventory_worker_health where job_name = 'inventory_reservation_expiry'"
+    )).rows[0].n;
+
+    const dry = await runExpiryOnce({ config: { dryRun: true, limit: 500 }, logger: quiet });
+    assert.equal(dry.dryRun, true);
+    assert.ok(dry.due >= 1, 'the due reservation is counted');
+    assert.deepEqual(await stateOf(), { reservation: 'active', order_status: 'payment_pending' });
+    assert.equal(await heartbeats(), 0, 'a dry run must not stamp the worker heartbeat');
+
+    const real = await runExpiryOnce({ config: { dryRun: false, limit: 500 }, logger: quiet });
+    assert.ok(real.expired >= 1);
+    assert.deepEqual(await stateOf(), { reservation: 'expired', order_status: 'cancelled' });
+    const health = await admin.query(
+      "select last_succeeded_at is not null as succeeded, last_error from inventory_worker_health where job_name = 'inventory_reservation_expiry'"
+    );
+    assert.deepEqual(health.rows[0], { succeeded: true, last_error: null });
+  });
+
   test('safe rollback retains tenant columns; cross-tenant corruption blocks reapply', async () => {
     // A34's five FORCE-RLS policies also depend on the helper introduced in 038.
     await runRollback({ pool: migratorPool, target: '072_instagram_ai_catalog_ingestion.sql', logger: { log() {}, warn() {} } });
