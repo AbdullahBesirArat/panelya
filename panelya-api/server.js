@@ -82,6 +82,7 @@ const webVitalsRoutes = require('./routes/webVitals');
 const v1Routes = require('./routes/v1');
 const { startWebhookWorker } = require('./modules/integrations/worker');
 const { startImportWorker } = require('./modules/imports/worker');
+const { startInventoryExpiryWorker } = require('./services/inventoryExpiryWorker');
 const { startAbandonedCartWorker } = require('./modules/cart/abandoned');
 const { startNotificationOutboxWorker } = require('./modules/notifications/worker');
 const { startSubscriptionLifecycleWorker } = require('./services/subscriptionWorker');
@@ -439,6 +440,7 @@ function startOrderNotificationOutboxWorker() {
 listen(port);
 startOrderNotificationOutboxWorker();
 startImportWorker();
+startInventoryExpiryWorker();
 startAbandonedCartWorker();
 startNotificationOutboxWorker();
 startSubscriptionLifecycleWorker();
