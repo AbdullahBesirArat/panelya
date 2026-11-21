@@ -10,7 +10,10 @@ const {
   createInventoryReservation,
   releaseReservation,
 } = require('../services/inventoryReservations');
-const { checkoutIdempotencyKey, findCheckoutReplay } = require('../services/checkoutIdempotency');
+const {
+  SCOPES: IDEMPOTENCY_SCOPES, checkoutIdempotencyKey, checkoutRequestFingerprint,
+  assertReplayMatches, findCheckoutReplay,
+} = require('../services/checkoutIdempotency');
 const { markCartConverted, prepareCartConversion, restoreConvertedCart } = require('../modules/cart/service');
 const { orderGiftSnapshot, resolveCheckoutGift, roundFee } = require('../modules/cart/giftWrap');
 const { calculateCartPricing, cartTotal, priceCartItems } = require('../services/cartPricing');
@@ -199,7 +202,10 @@ router.post('/initialize', paymentInitLimiter, async (req, res, next) => {
     const organization = await resolveOrganization(req, client, { allowPublic: true });
     await db.setTenantContext(client, organization.id);
     const idempotencyKey = checkoutIdempotencyKey(req);
-    const replay = await findCheckoutReplay(client, organization.id, idempotencyKey);
+    const requestFingerprint = checkoutRequestFingerprint({
+      organizationId: organization.id, scope: IDEMPOTENCY_SCOPES.paymentInitialize, key: idempotencyKey, body: req.body,
+    });
+    const replay = assertReplayMatches(await findCheckoutReplay(client, organization.id, idempotencyKey), requestFingerprint);
     if (replay) {
       await client.query('commit');
       transactionOpen = false;
@@ -275,9 +281,9 @@ router.post('/initialize', paymentInitLimiter, async (req, res, next) => {
         subtotal, discount_total, campaign_discount, coupon_discount,
         shipping_discount, coupon_code, promotion_snapshot, net_total, tax_total, currency,
         invoice_profile_id, invoice_snapshot, tax_snapshot, invoice_retention_until,
-        gift_wrap_fee, gift_note, gift_wrap_snapshot)
+        gift_wrap_fee, gift_note, gift_wrap_snapshot, checkout_request_fingerprint)
        values ($1,$2,$3,$4,'payment_pending',$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17::jsonb,
-        $18,$19,$20,$21,$22::jsonb,$23::jsonb,$24,$25,$26,$27::jsonb)
+        $18,$19,$20,$21,$22::jsonb,$23::jsonb,$24,$25,$26,$27::jsonb,$28)
        on conflict (organization_id, checkout_idempotency_key)
          where checkout_idempotency_key is not null
        do nothing
@@ -310,11 +316,14 @@ router.post('/initialize', paymentInitLimiter, async (req, res, next) => {
         giftFee,
         giftSnapshot.note,
         JSON.stringify(giftSnapshot),
+        requestFingerprint,
       ]
     );
 
     if (!orderResult.rows[0]) {
-      const concurrentReplay = await findCheckoutReplay(client, organization.id, idempotencyKey);
+      const concurrentReplay = assertReplayMatches(
+        await findCheckoutReplay(client, organization.id, idempotencyKey), requestFingerprint
+      );
       await client.query('commit');
       transactionOpen = false;
       client.release();
