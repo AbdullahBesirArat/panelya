@@ -174,7 +174,13 @@ function corsOptions() {
       if (!isProduction() && /^https:\/\/[a-z0-9-]+\.vercel\.app$/i.test(String(origin || ''))) {
         return callback(null, true);
       }
-      return callback(new Error('CORS origin reddedildi'), false);
+      // A denied Origin is a client error, not a server fault: without a status the
+      // global error handler answered 500 "Bir hata olustu", which looked like an outage
+      // and hid the real cause. The allow-list itself is unchanged.
+      return callback(
+        Object.assign(new Error('CORS origin reddedildi'), { status: 403, code: 'CORS_ORIGIN_DENIED' }),
+        false
+      );
     },
   };
 }
