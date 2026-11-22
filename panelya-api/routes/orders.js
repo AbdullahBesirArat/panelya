@@ -3,8 +3,10 @@ const db = require('../db');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { rateLimit } = require('../middleware/security');
 const {
+  cardGraceMinutes,
   consumeReservation,
   createInventoryReservation,
+  ibanGraceMinutes,
 } = require('../services/inventoryReservations');
 const {
   SCOPES: IDEMPOTENCY_SCOPES, checkoutIdempotencyKey, checkoutRequestFingerprint,
@@ -248,20 +250,26 @@ router.get('/', requireAuth, requireRole(['super_admin', 'owner', 'admin', 'memb
 
 router.post('/expire-pending', requireAuth, requireRole(['super_admin', 'owner', 'admin']), async (req, res, next) => {
   try {
-    const olderThanMinutes = Math.min(
-      Math.max(Number(req.body.olderThanMinutes || process.env.PAYMENT_PENDING_TIMEOUT_MINUTES || 30), 5),
-      1440
-    );
     const limit = Math.min(Math.max(Number(req.body.limit || process.env.PAYMENT_PENDING_EXPIRE_LIMIT || 100), 1), 500);
     // Tenant-triggered: confine the system-pool job to the caller's resolved tenant (R8).
     const organization = await resolveOrganization(req);
-    const expired = await expirePendingOrders({ limit, organizationId: organization.id });
+    const organizationId = organization.id;
+    const ibanGrace = ibanGraceMinutes();
+    const cardGrace = cardGraceMinutes();
+    const report = await expirePendingOrders({ limit, organizationId, graceMinutes: ibanGrace, cardGrace });
     await auditLog(req, {
       action: 'EXPIRE_PENDING',
       resourceType: 'order',
-      newValue: { olderThanMinutes, expiredCount: expired.length },
+      newValue: {
+        expiredCount: report.expiredCount,
+        skipped: report.skipped,
+        ibanGraceMinutes: ibanGrace,
+        cardGraceMinutes: cardGrace,
+        scoped: true,
+        organizationId,
+      },
     });
-    res.json({ ok: true, expiredCount: expired.length, expired });
+    res.json(report);
   } catch (err) {
     next(err);
   }

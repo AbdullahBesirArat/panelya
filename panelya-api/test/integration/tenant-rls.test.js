@@ -5986,7 +5986,7 @@ const integrationService = require('../../modules/integrations/service');
     const tables = [
       'inventory_reservations', 'inventory_reservation_items', 'orders', 'products',
       'product_variants', 'inventory_movements', 'coupon_redemptions', 'order_events',
-      'audit_logs', 'inventory_worker_health',
+      'audit_logs', 'payment_callback_events', 'inventory_worker_health',
     ];
     const snapshot = async () => Object.fromEntries((await admin.query(tables.map((table) => `
       select '${table}' as name, count(*)::int as count,
@@ -6144,6 +6144,72 @@ const integrationService = require('../../modules/integrations/service');
     assert.deepEqual(retried.sort(), [foreign.id, retry.id].sort());
     assert.deepEqual(await Promise.all([foreign, retry].map(releaseCount)), [1, 1]);
     assert.deepEqual(await expireInventoryReservations({ pool: systemPool, graceMinutes: 60 }), []);
+
+    const callback = await seedReservation(orgA, 'callback-pending', { expired: true });
+    const card = await seedReservation(orgA, 'card-grace', { expired: true });
+    const token = `r10-token-${stamp}`;
+    const cardCode = (await admin.query(
+      'update orders set payment_token = $1 where id = $2 returning order_code', [token, card.orderId]
+    )).rows[0].order_code;
+    await admin.query(
+      `insert into payment_callback_events (organization_id, provider, order_code, processing_status)
+       select organization_id, 'iyzico', order_code, 'processing' from orders where id = $1`,
+      [callback.orderId]
+    );
+    await admin.query(
+      `insert into payment_callback_events (organization_id, provider, order_code, processing_status)
+       values ($1, 'iyzico', $3, 'processed'), ($2, 'iyzico', $3, 'pending')`,
+      [orgA, orgB, cardCode]
+    );
+
+    // The route sends this service's report directly as JSON.
+    const { expirePendingOrders } = require('../../services/pendingOrders');
+    const scoped = { pool: systemPool, organizationId: orgA, graceMinutes: 60, cardGrace: 60 };
+    const protectedState = await Promise.all([callback, card].map(stateOf));
+    assert.deepEqual(await expirePendingOrders(scoped), {
+      ok: true, expiredCount: 0, expired: [],
+      skipped: { ...skipped, callback_pending: 1, card_grace: 1 },
+    });
+    assert.deepEqual(await Promise.all([callback, card].map(stateOf)), protectedState);
+    assert.deepEqual(await Promise.all([callback, card].map(releaseCount)), [0, 0]);
+    await admin.query(
+      "update inventory_reservations set expires_at = now() - interval '61 minutes' where id = $1",
+      [card.id]
+    );
+    assert.deepEqual(await expirePendingOrders(scoped), {
+      ok: true, expiredCount: 1, expired: [{ reservation_id: card.id, status: 'expired' }],
+      skipped: { ...skipped, callback_pending: 1 },
+    });
+    assert.equal(await releaseCount(card), 1);
+    assert.deepEqual(await stateOf(callback), protectedState[0]);
+
+    const { execFileSync } = require('node:child_process');
+    const runCli = (script, ...args) => JSON.parse(execFileSync(process.execPath, [
+      path.join(__dirname, '..', '..', 'scripts', script), ...args,
+    ], {
+      encoding: 'utf8',
+      timeout: 15_000,
+      env: {
+        ...process.env,
+        NODE_ENV: 'test',
+        SYSTEM_DATABASE_URL: urlWithUser(ADMIN_URL, 'panelya_system_runtime', PASSWORDS.system),
+        INVENTORY_EXPIRY_IBAN_GRACE_MINUTES: '60',
+        INVENTORY_EXPIRY_CARD_GRACE_MINUTES: '60',
+      },
+    }));
+    for (const script of ['expire-inventory-reservations.js', 'expire-pending-orders.js']) {
+      const item = await seedReservation(orgB, path.basename(script, '.js'), { expired: true });
+      const beforeCli = await snapshot();
+      assert.deepEqual(runCli(script), { due: 1, skipped: { ...skipped, callback_pending: 1 } });
+      assert.deepEqual(await snapshot(), beforeCli, `${script} preview must change no rows`);
+      const applied = runCli(script, '--apply');
+      assert.equal(applied.ok, true);
+      assert.equal(applied.expiredCount, 1);
+      assert.deepEqual(applied.reservationIds ?? applied.expired.map(({ reservation_id }) => reservation_id), [item.id]);
+      assert.equal((await stateOf(item)).reservation.status, 'expired');
+      assert.equal(await releaseCount(item), 1);
+      assert.deepEqual((await snapshot()).inventory_worker_health, beforeCli.inventory_worker_health);
+    }
   });
 
   test('safe rollback retains tenant columns; cross-tenant corruption blocks reapply', async () => {

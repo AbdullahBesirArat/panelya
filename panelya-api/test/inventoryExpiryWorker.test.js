@@ -25,6 +25,10 @@ test('R10: interval, batch limit and dry-run are parsed and clamped', () => {
   assert.equal(defaults.limit, 100);
   assert.equal(defaults.dryRun, false);
   assert.equal(defaults.graceMinutes, 1440);
+  assert.equal(defaults.cardGrace, 60);
+  assert.equal(workerConfig({ INVENTORY_EXPIRY_CARD_GRACE_MINUTES: '0' }).cardGrace, 60);
+  assert.equal(workerConfig({ INVENTORY_EXPIRY_CARD_GRACE_MINUTES: '0.5' }).cardGrace, 1);
+  assert.equal(workerConfig({ INVENTORY_EXPIRY_CARD_GRACE_MINUTES: '999999' }).cardGrace, 1440);
   assert.equal(workerConfig({ INVENTORY_EXPIRY_IBAN_GRACE_MINUTES: '0' }).graceMinutes, 1440);
   assert.equal(workerConfig({ INVENTORY_EXPIRY_IBAN_GRACE_MINUTES: '0.5' }).graceMinutes, 1);
   assert.equal(workerConfig({ INVENTORY_EXPIRY_IBAN_GRACE_MINUTES: '999999' }).graceMinutes, 10080);
@@ -151,4 +155,18 @@ test('R10: start schedules an unref-ed interval when enabled', () => {
 test('R10: server.js starts the worker', () => {
   const source = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
   assert.match(source, /startInventoryExpiryWorker\(\);/);
+});
+
+test('R10: both expiry CLIs refuse production apply before database setup', () => {
+  const { spawnSync } = require('node:child_process');
+  for (const script of ['expire-inventory-reservations.js', 'expire-pending-orders.js']) {
+    const result = spawnSync(process.execPath, [path.join(__dirname, '..', 'scripts', script), '--apply'], {
+      encoding: 'utf8',
+      env: { ...process.env, NODE_ENV: 'production', INVENTORY_EXPIRY_CLI_ALLOW_PRODUCTION: 'false' },
+      timeout: 5000,
+    });
+    assert.equal(result.status, 1);
+    assert.equal(result.stdout, '');
+    assert.match(result.stderr, /--apply in production requires INVENTORY_EXPIRY_CLI_ALLOW_PRODUCTION=true/);
+  }
 });

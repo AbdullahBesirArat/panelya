@@ -1,5 +1,6 @@
 const db = require('../db');
 const {
+  cardGraceMinutes,
   countReservationExpiry,
   expireInventoryReservationsWithReport,
   ibanGraceMinutes,
@@ -33,6 +34,7 @@ function workerConfig(env = process.env) {
     enabled: env.INVENTORY_EXPIRY_WORKER_ENABLED === 'true',
     dryRun: env.INVENTORY_EXPIRY_DRY_RUN === 'true',
     graceMinutes: ibanGraceMinutes(env.INVENTORY_EXPIRY_IBAN_GRACE_MINUTES ?? ''),
+    cardGrace: cardGraceMinutes(env.INVENTORY_EXPIRY_CARD_GRACE_MINUTES ?? ''),
     intervalMs: clampInt(env.INVENTORY_EXPIRY_INTERVAL_MS, 60_000, 10_000, 3_600_000),
     limit: clampInt(env.INVENTORY_RESERVATION_EXPIRE_LIMIT, 100, 1, 500),
   };
@@ -44,8 +46,12 @@ async function countDueReservations(pool = db.getSystemPool()) {
 
 async function runExpiryOnce({
   config = workerConfig(),
-  expire = (options) => expireInventoryReservationsWithReport({ ...options, graceMinutes: config.graceMinutes }),
-  count = () => countReservationExpiry(db.getSystemPool(), { graceMinutes: config.graceMinutes }),
+  expire = (options) => expireInventoryReservationsWithReport({
+    ...options, graceMinutes: config.graceMinutes, cardGrace: config.cardGrace,
+  }),
+  count = () => countReservationExpiry(db.getSystemPool(), {
+    graceMinutes: config.graceMinutes, cardGrace: config.cardGrace,
+  }),
   logger = console,
 } = {}) {
   if (running) return { skipped: true };

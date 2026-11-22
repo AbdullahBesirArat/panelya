@@ -142,11 +142,13 @@ If checkout sends `payment_method=iban` or `paymentMethod=iban`, Panelya creates
 
 Order/payment changes and stock changes are coupled. Product stock is reserved when an order/payment starts, returned when an order is cancelled, and reserved again if a cancelled order returns to an active status.
 
-Expire stale pending payments:
+Preview expiry across tenants on the configured database. The JSON report gives eligible and skipped counts.
 
 ```bash
 npm --prefix panelya-api run orders:expire-pending
 ```
+
+After reviewing the target database and preview, append `-- --apply` to cancel eligible orders and release their stock. The `inventory:expire-reservations` command uses the same preview and apply controls. In production mode, apply also requires `INVENTORY_EXPIRY_CLI_ALLOW_PRODUCTION=true`.
 
 ## Validation
 
