@@ -5936,6 +5936,119 @@ const integrationService = require('../../modules/integrations/service');
     assert.deepEqual(health.rows[0], { succeeded: true, last_error: null });
   });
 
+  test('R10 readiness: a dry run is a strict no-op across tenants, parallel workers expire each reservation exactly once, repeats are idempotent and a failed tick never wedges the worker', async () => {
+    const { runExpiryOnce, countDueReservations } = require('../../services/inventoryExpiryWorker');
+    const quiet = { info() {}, warn() {} };
+    const stamp = Date.now();
+    const fixtureOf = (org) => (org === orgA ? fixtures.a : fixtures.b);
+
+    // Start from a known state: nothing due anywhere (earlier tests may have left rows).
+    await admin.query("update inventory_reservations set expires_at = now() + interval '1 day' where status = 'active' and expires_at <= now()");
+    assert.equal(await countDueReservations(systemPool), 0);
+    const empty = await runExpiryOnce({ config: { dryRun: false, limit: 500 }, logger: quiet });
+    assert.equal(empty.expired, 0, 'an empty database is a clean no-op');
+
+    async function seedReservation(org, tag, { expired }) {
+      const seeded = await seedCartProduct(org, `r10ready-${tag}`, { price: 100, stock: 5 });
+      const order = await admin.query(
+        "insert into orders (organization_id, order_code, customer_id, total, status) values ($1,$2,$3,100,'payment_pending') returning id",
+        [org, `R10R-${tag}-${stamp}`, fixtureOf(org).customerId]
+      );
+      await admin.query(
+        `insert into order_items (organization_id, order_id, product_id, variant_id, product_name, quantity, unit_price)
+         values ($1,$2,$3,$4,'R10 readiness item',2,100)`,
+        [org, order.rows[0].id, seeded.productId, seeded.variantId]
+      );
+      const reservation = await asTenant(runtimePool, org, (client) => createInventoryReservation(client, {
+        organizationId: org,
+        orderId: order.rows[0].id,
+        customerId: fixtureOf(org).customerId,
+        items: [{ product_id: seeded.productId, variant_id: seeded.variantId, quantity: 2, unit_price: 100 }],
+        idempotencyKey: `r10-ready-${tag}-${stamp}`,
+        ttlMinutes: 15,
+      }));
+      if (expired) {
+        await admin.query("update inventory_reservations set expires_at = now() - interval '1 minute' where id = $1", [reservation.reservation.id]);
+      }
+      return { org, id: reservation.reservation.id, orderId: order.rows[0].id, variantId: seeded.variantId };
+    }
+
+    const due = [
+      await seedReservation(orgA, 'a-due-1', { expired: true }),
+      await seedReservation(orgA, 'a-due-2', { expired: true }),
+      await seedReservation(orgB, 'b-due-1', { expired: true }),
+    ];
+    const live = await seedReservation(orgA, 'a-live', { expired: false });
+    const all = [...due, live];
+
+    // A deterministic fingerprint of every table the job could touch.
+    const snapshot = async () => (await admin.query(
+      `select
+         (select coalesce(md5(string_agg(id::text || status || coalesce(expires_at::text, ''), ',' order by id)), '') from inventory_reservations) as reservations,
+         (select coalesce(md5(string_agg(id::text || status, ',' order by id)), '') from orders) as orders,
+         (select coalesce(md5(string_agg(id::text || on_hand::text || reserved::text || inventory_version::text, ',' order by id)), '') from product_variants) as variants,
+         (select count(*)::int from inventory_movements) as movements,
+         (select count(*)::int from coupon_redemptions) as coupons,
+         (select count(*)::int from audit_logs) as audits,
+         (select count(*)::int from inventory_worker_health) as heartbeats`
+  )).rows[0];
+
+    // 1. Dry run: counts the due reservations of ALL tenants and changes nothing at all.
+    await admin.query("delete from inventory_worker_health where job_name = 'inventory_reservation_expiry'");
+    const before = await snapshot();
+    const dry = await runExpiryOnce({ config: { dryRun: true, limit: 500 }, logger: quiet });
+    assert.equal(dry.dryRun, true);
+    assert.equal(dry.due, 3, 'two tenant-A and one tenant-B reservation are due; the live one is not');
+    assert.deepEqual(await snapshot(), before, 'a dry run must not change a single row');
+
+    // 2. Two workers racing: for update skip locked splits the work; nothing is processed twice.
+    const results = await Promise.all([
+      expireInventoryReservations({ pool: systemPool, limit: 500 }),
+      expireInventoryReservations({ pool: systemPool, limit: 500 }),
+    ]);
+    const processed = results.flat();
+    assert.equal(processed.length, 3, 'every due reservation is processed');
+    assert.equal(new Set(processed).size, 3, 'and none of them twice');
+    assert.deepEqual([...processed].sort(), due.map((item) => item.id).sort());
+
+    // 3. Effects: due reservations expired + their pending orders cancelled + stock released once;
+    //    the live reservation and its order are untouched. Each tenant only lost its own stock.
+    for (const item of due) {
+      const state = (await admin.query(
+        `select r.status as reservation, o.status as order_status, v.reserved
+           from inventory_reservations r
+           join orders o on o.organization_id = r.organization_id and o.id = r.order_id
+           join product_variants v on v.id = $2
+          where r.id = $1`, [item.id, item.variantId]
+      )).rows[0];
+      assert.deepEqual({ reservation: state.reservation, order_status: state.order_status, reserved: Number(state.reserved) }, { reservation: 'expired', order_status: 'cancelled', reserved: 0 });
+    }
+    const liveState = (await admin.query(
+      `select r.status as reservation, o.status as order_status, v.reserved
+         from inventory_reservations r join orders o on o.organization_id = r.organization_id and o.id = r.order_id
+         join product_variants v on v.id = $2 where r.id = $1`, [live.id, live.variantId]
+    )).rows[0];
+    assert.deepEqual({ reservation: liveState.reservation, order_status: liveState.order_status, reserved: Number(liveState.reserved) }, { reservation: 'active', order_status: 'payment_pending', reserved: 2 });
+
+    // 4. Repeat ticks are idempotent: nothing left to do, nothing changes.
+    const settled = await snapshot();
+    const again = await runExpiryOnce({ config: { dryRun: false, limit: 500 }, logger: quiet });
+    assert.equal(again.expired, 0);
+    assert.deepEqual({ ...(await snapshot()), heartbeats: 0 }, { ...settled, heartbeats: 0 }, 'a repeat tick changes no business row');
+
+    // 5. A failing tick reports an error without wedging the next one.
+    const failed = await runExpiryOnce({
+      config: { dryRun: false, limit: 500 },
+      expire: async () => { throw new Error('simulated transient database failure'); },
+      logger: quiet,
+    });
+    assert.deepEqual(failed, { error: true });
+    await admin.query("update inventory_reservations set expires_at = now() - interval '1 minute' where id = $1", [live.id]);
+    const recovered = await runExpiryOnce({ config: { dryRun: false, limit: 500 }, logger: quiet });
+    assert.equal(recovered.expired, 1, 'the worker recovers on the next tick');
+    assert.equal(all.length, 4);
+  });
+
   test('safe rollback retains tenant columns; cross-tenant corruption blocks reapply', async () => {
     // A34's five FORCE-RLS policies also depend on the helper introduced in 038.
     await runRollback({ pool: migratorPool, target: '072_instagram_ai_catalog_ingestion.sql', logger: { log() {}, warn() {} } });

@@ -70,7 +70,7 @@ async function main() {
       MFA_SECRET_ENCRYPTION_KEY: crypto.randomBytes(32).toString('hex'),
     };
 
-    const result = spawnSync(process.execPath, ['--test', 'test/integration/tenant-rls.test.js'], {
+    const result = spawnSync(process.execPath, ['--test', ...(process.env.TEST_NAME_PATTERN ? ['--test-name-pattern', process.env.TEST_NAME_PATTERN] : []), 'test/integration/tenant-rls.test.js'], {
       cwd: require('node:path').join(__dirname, '..'),
       env,
       stdio: 'inherit',
