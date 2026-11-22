@@ -5938,6 +5938,7 @@ const integrationService = require('../../modules/integrations/service');
 
   test('R10 readiness: a dry run is a strict no-op across tenants, parallel workers expire each reservation exactly once, repeats are idempotent and a failed tick never wedges the worker', async () => {
     const { runExpiryOnce, countDueReservations } = require('../../services/inventoryExpiryWorker');
+    const { expireInventoryReservationsWithReport } = require('../../services/inventoryReservations');
     const quiet = { info() {}, warn() {} };
     const stamp = Date.now();
     const fixtureOf = (org) => (org === orgA ? fixtures.a : fixtures.b);
@@ -5948,11 +5949,11 @@ const integrationService = require('../../modules/integrations/service');
     const empty = await runExpiryOnce({ config: { dryRun: false, limit: 500 }, logger: quiet });
     assert.equal(empty.expired, 0, 'an empty database is a clean no-op');
 
-    async function seedReservation(org, tag, { expired }) {
+    async function seedReservation(org, tag, { expired, paymentMethod = 'card' }) {
       const seeded = await seedCartProduct(org, `r10ready-${tag}`, { price: 100, stock: 5 });
       const order = await admin.query(
-        "insert into orders (organization_id, order_code, customer_id, total, status) values ($1,$2,$3,100,'payment_pending') returning id",
-        [org, `R10R-${tag}-${stamp}`, fixtureOf(org).customerId]
+        "insert into orders (organization_id, order_code, customer_id, total, status, payment_method) values ($1,$2,$3,100,'payment_pending',$4) returning id",
+        [org, `R10R-${tag}-${stamp}`, fixtureOf(org).customerId, paymentMethod]
       );
       await admin.query(
         `insert into order_items (organization_id, order_id, product_id, variant_id, product_name, quantity, unit_price)
@@ -5978,20 +5979,24 @@ const integrationService = require('../../modules/integrations/service');
       await seedReservation(orgA, 'a-due-2', { expired: true }),
       await seedReservation(orgB, 'b-due-1', { expired: true }),
     ];
-    const live = await seedReservation(orgA, 'a-live', { expired: false });
+    const live = await seedReservation(orgB, 'b-live', { expired: false });
     const all = [...due, live];
 
     // A deterministic fingerprint of every table the job could touch.
-    const snapshot = async () => (await admin.query(
-      `select
-         (select coalesce(md5(string_agg(id::text || status || coalesce(expires_at::text, ''), ',' order by id)), '') from inventory_reservations) as reservations,
-         (select coalesce(md5(string_agg(id::text || status, ',' order by id)), '') from orders) as orders,
-         (select coalesce(md5(string_agg(id::text || on_hand::text || reserved::text || inventory_version::text, ',' order by id)), '') from product_variants) as variants,
-         (select count(*)::int from inventory_movements) as movements,
-         (select count(*)::int from coupon_redemptions) as coupons,
-         (select count(*)::int from audit_logs) as audits,
-         (select count(*)::int from inventory_worker_health) as heartbeats`
-  )).rows[0];
+    const tables = [
+      'inventory_reservations', 'inventory_reservation_items', 'orders', 'products',
+      'product_variants', 'inventory_movements', 'coupon_redemptions', 'order_events',
+      'audit_logs', 'inventory_worker_health',
+    ];
+    const snapshot = async () => Object.fromEntries((await admin.query(tables.map((table) => `
+      select '${table}' as name, count(*)::int as count,
+             md5(coalesce(string_agg(to_jsonb(t)::text, E'\\n' order by to_jsonb(t)::text collate "C"), '')) as checksum
+        from ${table} t`
+    ).join(' union all '))).rows.map(({ name, ...state }) => [name, state]));
+    const businessSnapshot = async () => {
+      const { inventory_worker_health, ...business } = await snapshot();
+      return business;
+    };
 
     // 1. Dry run: counts the due reservations of ALL tenants and changes nothing at all.
     await admin.query("delete from inventory_worker_health where job_name = 'inventory_reservation_expiry'");
@@ -6031,10 +6036,10 @@ const integrationService = require('../../modules/integrations/service');
     assert.deepEqual({ reservation: liveState.reservation, order_status: liveState.order_status, reserved: Number(liveState.reserved) }, { reservation: 'active', order_status: 'payment_pending', reserved: 2 });
 
     // 4. Repeat ticks are idempotent: nothing left to do, nothing changes.
-    const settled = await snapshot();
+    const settled = await businessSnapshot();
     const again = await runExpiryOnce({ config: { dryRun: false, limit: 500 }, logger: quiet });
     assert.equal(again.expired, 0);
-    assert.deepEqual({ ...(await snapshot()), heartbeats: 0 }, { ...settled, heartbeats: 0 }, 'a repeat tick changes no business row');
+    assert.deepEqual(await businessSnapshot(), settled, 'a repeat tick changes no business row');
 
     // 5. A failing tick reports an error without wedging the next one.
     const failed = await runExpiryOnce({
@@ -6047,6 +6052,98 @@ const integrationService = require('../../modules/integrations/service');
     const recovered = await runExpiryOnce({ config: { dryRun: false, limit: 500 }, logger: quiet });
     assert.equal(recovered.expired, 1, 'the worker recovers on the next tick');
     assert.equal(all.length, 4);
+
+    const advanced = await seedReservation(orgA, 'advanced', { expired: true });
+    const authorized = await seedReservation(orgA, 'authorized', { expired: true, paymentMethod: 'iban' });
+    const recorded = await seedReservation(orgA, 'recorded', { expired: true, paymentMethod: 'iban' });
+    const withinGrace = await seedReservation(orgA, 'grace', { expired: true, paymentMethod: 'iban' });
+    const unpaid = await seedReservation(orgA, 'unpaid', { expired: true, paymentMethod: 'iban' });
+    const foreign = await seedReservation(orgB, 'foreign', { expired: true });
+    const oldDue = [advanced.id, authorized.id, recorded.id, unpaid.id];
+    await admin.query(
+      "update inventory_reservations set expires_at = now() - interval '2 hours' where id = any($1::uuid[])",
+      [oldDue]
+    );
+    await admin.query("update orders set status = 'paid' where organization_id = $1 and id = $2", [orgA, advanced.orderId]);
+    await admin.query("update orders set payment_status = 'authorized' where organization_id = $1 and id = $2", [orgA, authorized.orderId]);
+    await admin.query("update orders set payment_id = 'r10-bank-reference' where organization_id = $1 and id = $2", [orgA, recorded.orderId]);
+    const coupon = (await admin.query(
+      "insert into coupons (organization_id, code, name, discount_type, value) values ($1,$2,'R10 expiry','fixed',10) returning id",
+      [orgA, `R10-${stamp}`]
+    )).rows[0];
+    for (const item of [advanced, unpaid]) {
+      await admin.query(
+        "insert into coupon_redemptions (organization_id, coupon_id, order_id, discount_amount) values ($1,$2,$3,10)",
+        [orgA, coupon.id, item.orderId]
+      );
+    }
+    const stateOf = async (item) => (await admin.query(
+      `select to_jsonb(r) as reservation, to_jsonb(o) as "order", to_jsonb(v) as variant,
+              to_jsonb(c) as redemption
+         from inventory_reservations r
+         join orders o on o.organization_id = r.organization_id and o.id = r.order_id
+         join product_variants v on v.organization_id = r.organization_id and v.id = $3
+         left join coupon_redemptions c on c.organization_id = o.organization_id and c.order_id = o.id
+        where r.organization_id = $1 and r.id = $2`, [item.org, item.id, item.variantId]
+    )).rows[0];
+    const releaseCount = async (item) => (await admin.query(
+      `select count(*)::int as n from inventory_movements
+        where organization_id = $1 and reference_id = $2 and movement_type = 'reservation_release'`,
+      [item.org, item.id]
+    )).rows[0].n;
+    assert.deepEqual(await Promise.all(due.map(releaseCount)), [1, 1, 1]);
+    const skippedFixtures = [advanced, authorized, recorded, withinGrace, foreign];
+    const untouched = await Promise.all(skippedFixtures.map(stateOf));
+    const skipped = { order_not_pending: 1, payment_state: 2, iban_grace: 1 };
+    const beforeClassifiedDryRun = await snapshot();
+    assert.deepEqual(await runExpiryOnce({
+      config: { dryRun: true, graceMinutes: 60, limit: 1 }, logger: quiet,
+    }), { dryRun: true, due: 2, skipped });
+    assert.deepEqual(await snapshot(), beforeClassifiedDryRun);
+    assert.deepEqual(await expireInventoryReservationsWithReport({
+      pool: systemPool, organizationId: orgA, graceMinutes: 60, limit: 1,
+    }), { expired: [unpaid.id], skipped });
+    assert.deepEqual(await Promise.all(skippedFixtures.map(stateOf)), untouched);
+    assert.deepEqual(await Promise.all(skippedFixtures.map(releaseCount)), [0, 0, 0, 0, 0]);
+    const expiredUnpaid = await stateOf(unpaid);
+    assert.equal(expiredUnpaid.order.status, 'cancelled');
+    assert.equal(expiredUnpaid.reservation.status, 'expired');
+    assert.equal(expiredUnpaid.variant.reserved, 0);
+    assert.equal(expiredUnpaid.redemption.status, 'released');
+    assert.equal(await releaseCount(unpaid), 1);
+
+    const retry = await seedReservation(orgB, 'retry', { expired: true });
+    const beforeFault = await businessSnapshot();
+    let releasesBeforeFault = 0;
+    const failurePool = {
+      query: (...args) => systemPool.query(...args),
+      async connect() {
+        const client = await systemPool.connect();
+        return {
+          release: () => client.release(),
+          async query(sql, params) {
+            const result = await client.query(sql, params);
+            if (/^update inventory_reservations\s/.test(sql) && ++releasesBeforeFault === 2) {
+              assert.equal(result.rowCount, 1, 'the second stock release mutated the transaction');
+              throw new Error('injected R10 failure after reservation release');
+            }
+            return result;
+          },
+        };
+      },
+    };
+    await assert.rejects(expireInventoryReservations({ pool: failurePool, graceMinutes: 60 }), /injected R10 failure/);
+    assert.equal(releasesBeforeFault, 2);
+    assert.deepEqual(await businessSnapshot(), beforeFault, 'the whole batch rolled back');
+    const failureHealth = (await admin.query(
+      "select last_failed_at, last_error from inventory_worker_health where job_name = 'inventory_reservation_expiry'"
+    )).rows[0];
+    assert.ok(failureHealth.last_failed_at);
+    assert.match(failureHealth.last_error, /injected R10 failure/);
+    const retried = await expireInventoryReservations({ pool: systemPool, graceMinutes: 60 });
+    assert.deepEqual(retried.sort(), [foreign.id, retry.id].sort());
+    assert.deepEqual(await Promise.all([foreign, retry].map(releaseCount)), [1, 1]);
+    assert.deepEqual(await expireInventoryReservations({ pool: systemPool, graceMinutes: 60 }), []);
   });
 
   test('safe rollback retains tenant columns; cross-tenant corruption blocks reapply', async () => {

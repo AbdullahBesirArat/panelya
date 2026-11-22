@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const { expireInventoryReservationsWithReport } = require('../services/inventoryReservations');
 
 const {
   workerConfig,
@@ -23,6 +24,10 @@ test('R10: interval, batch limit and dry-run are parsed and clamped', () => {
   assert.equal(defaults.intervalMs, 60_000);
   assert.equal(defaults.limit, 100);
   assert.equal(defaults.dryRun, false);
+  assert.equal(defaults.graceMinutes, 1440);
+  assert.equal(workerConfig({ INVENTORY_EXPIRY_IBAN_GRACE_MINUTES: '0' }).graceMinutes, 1440);
+  assert.equal(workerConfig({ INVENTORY_EXPIRY_IBAN_GRACE_MINUTES: '0.5' }).graceMinutes, 1);
+  assert.equal(workerConfig({ INVENTORY_EXPIRY_IBAN_GRACE_MINUTES: '999999' }).graceMinutes, 10080);
   assert.equal(workerConfig({ INVENTORY_EXPIRY_INTERVAL_MS: '1' }).intervalMs, 10_000);
   assert.equal(workerConfig({ INVENTORY_EXPIRY_INTERVAL_MS: '999999999' }).intervalMs, 3_600_000);
   assert.equal(workerConfig({ INVENTORY_EXPIRY_INTERVAL_MS: 'abc' }).intervalMs, 60_000);
@@ -31,6 +36,32 @@ test('R10: interval, batch limit and dry-run are parsed and clamped', () => {
   assert.equal(workerConfig({ INVENTORY_RESERVATION_EXPIRE_LIMIT: '99999' }).limit, 500);
   assert.equal(workerConfig({ INVENTORY_EXPIRY_DRY_RUN: 'true' }).dryRun, true);
   assert.equal(workerConfig({ INVENTORY_EXPIRY_DRY_RUN: 'yes' }).dryRun, false);
+});
+
+test('R10: a missed cancellation leaves stock and promotion untouched and logs the skip', async () => {
+  const queries = [];
+  const output = [];
+  const client = {
+    async query(sql) {
+      queries.push(sql);
+      if (sql.startsWith('select eligibility.reason')) return { rows: [] };
+      if (sql.startsWith('select r.id')) {
+        return { rows: [{ id: 'reservation', organization_id: 'tenant', order_id: 'order' }] };
+      }
+      if (sql.startsWith('update orders')) return { rowCount: 0 };
+      assert.ok(['begin', 'commit'].includes(sql), `unexpected SQL: ${sql}`);
+    },
+    release() {},
+  };
+  const result = await runExpiryOnce({
+    expire: () => expireInventoryReservationsWithReport({
+      pool: { connect: async () => client }, organizationId: 'tenant',
+    }),
+    logger: { info: (message) => output.push(message), warn: assert.fail },
+  });
+  assert.deepEqual(result, { expired: 0, skipped: { cancel_update_missed: 1 } });
+  assert.equal(queries.at(-1), 'commit');
+  assert.match(output[0], /skipped=1.*cancel_update_missed/);
 });
 
 test('R10: a real run expires with the configured batch size and reports the count', async () => {

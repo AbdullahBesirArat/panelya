@@ -288,65 +288,115 @@ async function transitionOrderInventory(client, orderId, previousStatus, nextSta
   return { changed: false };
 }
 
-// organizationId (optional) confines the run to one tenant. The unscoped form is the
-// system worker/CLI; a tenant-triggered run must always pass it, because this function
-// uses the system pool (which sees every tenant) and must not act across tenants.
-// Scoped runs also leave the global worker heartbeat alone so they cannot mask a dead worker.
-async function expireInventoryReservations({ pool = db.getSystemPool(), limit = 100, organizationId = null } = {}) {
-  const scoped = organizationId !== null && organizationId !== undefined && organizationId !== '';
-  if (!scoped) await pool.query(
-    `insert into inventory_worker_health (job_name, last_started_at, updated_at)
-     values ('inventory_reservation_expiry', now(), now())
-     on conflict (job_name) do update set last_started_at = now(), updated_at = now()`
+function ibanGraceMinutes(value = process.env.INVENTORY_EXPIRY_IBAN_GRACE_MINUTES) {
+  const minutes = Number(value);
+  if (!Number.isFinite(minutes) || minutes <= 0) return 1440;
+  return Math.min(Math.max(Math.floor(minutes), 1), 10080);
+}
+
+// Shared by the claim and the read-only count. Manual checkout has no transfer-notice
+// record. Protect recorded payment evidence and give unrecorded transfers a grace window.
+const dueReservations = `
+  from inventory_reservations r
+  join orders o on o.organization_id = r.organization_id and o.id = r.order_id
+  cross join lateral (
+    select case
+      when o.status <> 'payment_pending' or o.order_status <> 'pending_payment'
+        or o.fulfillment_status <> 'unfulfilled' then 'order_not_pending'
+      when o.payment_status not in ('pending', 'manual_pending')
+        or nullif(btrim(o.payment_id), '') is not null then 'payment_state'
+      when o.payment_method = 'iban'
+        and r.expires_at + ($1::int * interval '1 minute') > now() then 'iban_grace'
+    end as reason
+  ) eligibility
+  where r.status = 'active' and r.expires_at <= now()
+    and ($2::uuid is null or r.organization_id = $2)`;
+
+async function countReservationExpiry(client, { organizationId = null, graceMinutes = ibanGraceMinutes() } = {}) {
+  const { rows } = await client.query(
+    `select eligibility.reason, count(*)::int as count
+       ${dueReservations}
+      group by eligibility.reason`,
+    [graceMinutes, organizationId]
   );
-  const client = await pool.connect();
+  return {
+    due: rows.find(({ reason }) => reason === null)?.count ?? 0,
+    skipped: Object.fromEntries(rows.filter(({ reason }) => reason !== null).map(({ reason, count }) => [reason, count])),
+  };
+}
+
+// The global worker and CLI use the system pool. Tenant-triggered runs supply
+// organizationId and leave the global heartbeat alone.
+async function expireInventoryReservationsWithReport({
+  pool = db.getSystemPool(), limit = 100, organizationId = null, graceMinutes = ibanGraceMinutes(),
+} = {}) {
+  const scope = organizationId || null;
+  let client;
   const expired = [];
   try {
+    if (!scope) await pool.query(
+      `insert into inventory_worker_health (job_name, last_started_at, updated_at)
+       values ('inventory_reservation_expiry', now(), now())
+       on conflict (job_name) do update set last_started_at = now(), updated_at = now()`
+    );
+    client = await pool.connect();
     await client.query('begin');
+    const { skipped } = await countReservationExpiry(client, { organizationId: scope, graceMinutes });
+    // Payment/admin transitions can already hold the order while acquiring the reservation.
+    // Skip contention on either row, so expiry never waits for an order while holding its reservation.
     const selected = await client.query(
-      `select id, organization_id, order_id
-         from inventory_reservations
-        where status = 'active' and expires_at <= now()
-          ${scoped ? 'and organization_id = $2' : ''}
-        order by expires_at, id
-        limit $1
-        for update skip locked`,
-      scoped
-        ? [Math.min(Math.max(Number(limit) || 100, 1), 500), String(organizationId)]
-        : [Math.min(Math.max(Number(limit) || 100, 1), 500)]
+      `select r.id, r.organization_id, r.order_id
+         ${dueReservations}
+          and eligibility.reason is null
+        order by r.expires_at, r.id
+        limit $3
+        for update of r, o skip locked`,
+      [graceMinutes, scope, Math.floor(Math.min(Math.max(Number(limit) || 100, 1), 500))]
     );
     for (const reservation of selected.rows) {
+      const cancelled = await client.query(
+        `update orders
+            set status = 'cancelled',
+                payment_error = coalesce(payment_error, 'Stok rezervasyonu zaman aşımına uğradı'),
+                updated_at = now()
+          where organization_id = $2 and id = $3 and status = 'payment_pending'
+            and exists (
+              select 1 ${dueReservations}
+                and r.id = $4 and eligibility.reason is null
+            )`,
+        [graceMinutes, reservation.organization_id, reservation.order_id, reservation.id]
+      );
+      if (cancelled.rowCount !== 1) {
+        skipped.cancel_update_missed = (skipped.cancel_update_missed || 0) + 1;
+        continue;
+      }
       const result = await releaseReservation(client, {
         organizationId: reservation.organization_id,
         reservationId: reservation.id,
         expired: true,
       });
-      if (!result.changed) continue;
-      await client.query(
-        `update orders
-            set status = 'cancelled',
-                payment_error = coalesce(payment_error, 'Stok rezervasyonu zaman aşımına uğradı'),
-                updated_at = now()
-          where organization_id = $1 and id = $2 and status = 'payment_pending'`,
-        [reservation.organization_id, reservation.order_id]
-      );
+      if (!result.changed) throw new Error('Cancelled order reservation could not be released');
       await transitionOrderPromotion(client, reservation.order_id, 'payment_pending', 'cancelled', {
         organizationId: reservation.organization_id,
       });
       expired.push(reservation.id);
     }
-    await client.query('commit');
-    if (!scoped) await pool.query(
+    if (!scope) await client.query(
       `update inventory_worker_health
-          set last_succeeded_at = now(), last_error = null,
-              processed_count = $2, updated_at = now()
+          set last_succeeded_at = clock_timestamp(), last_error = null,
+              processed_count = $2, updated_at = clock_timestamp()
         where job_name = $1`,
       ['inventory_reservation_expiry', expired.length]
     );
-    return expired;
+    await client.query('commit');
+    return { expired, skipped };
   } catch (error) {
-    await client.query('rollback').catch(() => {});
-    if (!scoped) await pool.query(
+    if (client) {
+      await client.query('rollback').catch(() => {});
+      client.release();
+      client = null;
+    }
+    if (!scope) await pool.query(
       `insert into inventory_worker_health
          (job_name, last_failed_at, last_error, updated_at)
        values ('inventory_reservation_expiry', now(), $1, now())
@@ -356,15 +406,22 @@ async function expireInventoryReservations({ pool = db.getSystemPool(), limit = 
     ).catch(() => {});
     throw error;
   } finally {
-    client.release();
+    client?.release();
   }
+}
+
+async function expireInventoryReservations(options) {
+  return (await expireInventoryReservationsWithReport(options)).expired;
 }
 
 module.exports = {
   consumeReservation,
+  countReservationExpiry,
   createInventoryReservation,
   expireInventoryReservations,
+  expireInventoryReservationsWithReport,
   guestReferenceHash,
+  ibanGraceMinutes,
   reactivateReservation,
   releaseReservation,
   reservationItems,

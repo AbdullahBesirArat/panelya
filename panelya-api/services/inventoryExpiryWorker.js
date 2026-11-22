@@ -1,5 +1,9 @@
 const db = require('../db');
-const { expireInventoryReservations } = require('./inventoryReservations');
+const {
+  countReservationExpiry,
+  expireInventoryReservationsWithReport,
+  ibanGraceMinutes,
+} = require('./inventoryReservations');
 
 // In-process scheduler for the inventory reservation expiry job (R10).
 //
@@ -10,8 +14,7 @@ const { expireInventoryReservations } = require('./inventoryReservations');
 //
 // Safety:
 //  - OFF by default: it only starts when INVENTORY_EXPIRY_WORKER_ENABLED=true, because
-//    turning it on cancels every payment_pending order whose reservation has already
-//    expired. Enable it deliberately, after a dry run.
+//    turning it on cancels eligible unpaid orders. Enable it deliberately, after a dry run.
 //  - INVENTORY_EXPIRY_DRY_RUN=true only counts due reservations and logs the number; it
 //    changes nothing and does not touch the worker heartbeat.
 //  - The job is multi-instance safe (for update skip locked); this process also never lets
@@ -29,39 +32,39 @@ function workerConfig(env = process.env) {
   return {
     enabled: env.INVENTORY_EXPIRY_WORKER_ENABLED === 'true',
     dryRun: env.INVENTORY_EXPIRY_DRY_RUN === 'true',
+    graceMinutes: ibanGraceMinutes(env.INVENTORY_EXPIRY_IBAN_GRACE_MINUTES ?? ''),
     intervalMs: clampInt(env.INVENTORY_EXPIRY_INTERVAL_MS, 60_000, 10_000, 3_600_000),
     limit: clampInt(env.INVENTORY_RESERVATION_EXPIRE_LIMIT, 100, 1, 500),
   };
 }
 
 async function countDueReservations(pool = db.getSystemPool()) {
-  const result = await pool.query(
-    `select count(*)::int as n
-       from inventory_reservations
-      where status = 'active' and expires_at <= now()`
-  );
-  return result.rows[0].n;
+  return (await countReservationExpiry(pool)).due;
 }
 
 async function runExpiryOnce({
   config = workerConfig(),
-  expire = expireInventoryReservations,
-  count = countDueReservations,
+  expire = (options) => expireInventoryReservationsWithReport({ ...options, graceMinutes: config.graceMinutes }),
+  count = () => countReservationExpiry(db.getSystemPool(), { graceMinutes: config.graceMinutes }),
   logger = console,
 } = {}) {
   if (running) return { skipped: true };
   running = true;
   try {
     if (config.dryRun) {
-      const due = await count();
-      logger.info(`Stok rezervasyonu suresi dolma (DRY RUN): ${due} rezervasyon vadesi dolmus, degisiklik yapilmadi`);
-      return { dryRun: true, due };
+      const report = await count();
+      const { due, skipped = {} } = typeof report === 'number' ? { due: report } : report;
+      const skippedCount = Object.values(skipped).reduce((total, value) => total + value, 0);
+      logger.info(`Inventory reservation expiry (DRY RUN): eligible=${due} skipped=${skippedCount} reasons=${JSON.stringify(skipped)}`);
+      return { dryRun: true, due, skipped };
     }
-    const expired = await expire({ limit: config.limit });
-    if (expired.length > 0) {
-      logger.info(`Stok rezervasyonu suresi doldu: ${expired.length} rezervasyon serbest birakildi`);
+    const report = await expire({ limit: config.limit });
+    const { expired, skipped = {} } = Array.isArray(report) ? { expired: report } : report;
+    const skippedCount = Object.values(skipped).reduce((total, value) => total + value, 0);
+    if (expired.length > 0 || skippedCount > 0) {
+      logger.info(`Inventory reservation expiry: expired=${expired.length} skipped=${skippedCount} reasons=${JSON.stringify(skipped)}`);
     }
-    return { expired: expired.length };
+    return { expired: expired.length, skipped };
   } catch (error) {
     logger.warn(`Stok rezervasyonu suresi dolma islenemedi: ${error.message}`);
     return { error: true };
