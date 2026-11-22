@@ -12,6 +12,21 @@ const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 
 const KEY_PATTERN = /^[a-z0-9][a-z0-9/_-]*\.[a-z0-9]+$/;
 
+function classifyStorageError(error) {
+  const status = error?.$metadata?.httpStatusCode;
+  const codes = [error?.name, error?.Code, error?.code];
+  const hasCode = (...values) => codes.some(code => values.includes(code));
+
+  if (status === 301 || status === 307
+    || hasCode('AuthorizationHeaderMalformed', 'PermanentRedirect', 'InvalidBucketName', 'NoSuchBucket')) return 'config';
+  if (status === 404 || error?.status === 404 || hasCode('NoSuchKey', 'NotFound')) return 'not_found';
+  if (status === 401 || status === 403
+    || hasCode('SignatureDoesNotMatch', 'InvalidAccessKeyId', 'AccessDenied', 'ExpiredToken')) return 'auth';
+  if (hasCode('ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'TimeoutError', 'RequestTimeout')) return 'network';
+  if ((status >= 500 && status < 600) || hasCode('SlowDown', 'ServiceUnavailable', 'InternalError')) return 'upstream';
+  return 'unknown';
+}
+
 function normalizeProvider(value = process.env.OBJECT_STORAGE_PROVIDER) {
   return String(value || '').trim().toLowerCase();
 }
@@ -295,6 +310,7 @@ function createMemoryStorage({ failPutAt = 0, failDelete = false } = {}) {
 }
 
 module.exports = {
+  classifyStorageError,
   assertObjectKey,
   assertSameTenantKeys,
   assertStoredObjectKey,
