@@ -6114,4 +6114,150 @@ const integrationService = require('../../modules/integrations/service');
     await admin.query('update products set category_id = null where id = $1', [corrupt.rows[0].id]);
     await runMigrations({ pool: migratorPool, logger: { log() {}, warn() {} } });
   });
+  test('checkout idempotency over HTTP: exact retries replay one order, changed requests conflict, tenants and routes stay separate', async () => {
+    const express = require('express');
+    const app = express();
+    app.use(express.json());
+    app.use(appDb.requestContextMiddleware);
+    app.use('/api/orders', require('../../routes/orders'));
+    app.use('/api/payment', require('../../routes/payment'));
+    app.use((err, _req, res, _next) => res.status(err.status || 500).json({ error: String(err.message || err), code: err.code }));
+    const server = await new Promise((resolve) => { const s2 = app.listen(0, '127.0.0.1', () => resolve(s2)); });
+    const base = `http://127.0.0.1:${server.address().port}/api`;
+
+    try {
+      const tokenOf = async (orgId) => (await admin.query('select public_access_token from organizations where id = $1', [orgId])).rows[0].public_access_token;
+      const tokenA = await tokenOf(orgA);
+      const tokenB = await tokenOf(orgB);
+      const fixtureA = await seedCartProduct(orgA, 'idem-a', { price: 100, stock: 20 });
+      const fixtureB = await seedCartProduct(orgB, 'idem-b', { price: 100, stock: 20 });
+      const orderBody = (fixture, overrides = {}) => ({
+        customer: { name: 'Idem Musteri', email: 'idem@example.test', phone: '05551112233', address: 'Test Sokak 1', city: 'Istanbul', district: 'Kadikoy', country: 'TR' },
+        items: [{ product_id: fixture.productId, variant_id: fixture.variantId, quantity: 1 }],
+        paymentMethod: 'iban',
+        invoice: { type: 'individual', full_name: 'Idem Musteri', invoice_address: 'Test Sokak 1', email: 'idem@example.test' },
+        note: 'ilk not',
+        ...overrides,
+      });
+      const post = async (route, token, key, body) => {
+        const response = await fetch(`${base}${route}`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'x-public-access-token': token, 'idempotency-key': key },
+          body: JSON.stringify(body),
+        });
+        const text = await response.text();
+        let json = null;
+        try { json = JSON.parse(text); } catch (_) { /* not json */ }
+        return { status: response.status, json, text };
+      };
+      const ordersFor = async (orgId, key) => (await admin.query(
+        'select id, checkout_request_fingerprint from orders where organization_id = $1 and checkout_idempotency_key = $2', [orgId, key]
+      )).rows;
+      const reservedOf = async (fixture) => Number((await admin.query('select reserved from product_variants where id = $1', [fixture.variantId])).rows[0].reserved);
+      const stamp = Date.now();
+      const K1 = `idem-http-${stamp}-1`;
+
+      // 1. First request creates exactly one order and stores a fingerprint.
+      const first = await post('/orders', tokenA, K1, orderBody(fixtureA));
+      assert.ok(first.status === 200 || first.status === 201, `first create: ${first.status} ${first.text.slice(0, 200)}`);
+      assert.notEqual(first.json.idempotentReplay, true);
+      const created = await ordersFor(orgA, K1);
+      assert.equal(created.length, 1);
+      assert.match(created[0].checkout_request_fingerprint, /^v1:[0-9a-f]{64}$/);
+      const reservedAfterFirst = await reservedOf(fixtureA);
+      assert.equal(reservedAfterFirst, 1);
+
+      // 2. Exact retry (lost response) replays the same order; nothing else changes; no fingerprint leaks.
+      const retry = await post('/orders', tokenA, K1, orderBody(fixtureA));
+      assert.equal(retry.status, 200);
+      assert.equal(retry.json.idempotentReplay, true);
+      assert.equal(String(retry.json.id), String(created[0].id));
+      assert.equal(retry.text.includes('checkout_request_fingerprint'), false);
+      assert.equal(retry.text.includes(created[0].checkout_request_fingerprint), false);
+      assert.equal((await ordersFor(orgA, K1)).length, 1);
+      assert.equal(await reservedOf(fixtureA), reservedAfterFirst);
+
+      // 3. Semantically equal retry (property order, whitespace, blank vs omitted) replays too.
+      const equivalent = orderBody(fixtureA);
+      const reordered = { note: '  ilk not ', invoice: { ...equivalent.invoice, vkn: '' }, paymentMethod: 'iban', items: equivalent.items, customer: Object.fromEntries(Object.entries(equivalent.customer).reverse()) };
+      const equal = await post('/orders', tokenA, K1, reordered);
+      assert.equal(equal.status, 200);
+      assert.equal(equal.json.idempotentReplay, true);
+
+      // 4. Any material change under the same key is a clean 409 and writes nothing.
+      const changes = {
+        coupon: { couponCode: 'NEWCOUPON' },
+        note: { note: 'degisen not' },
+        'invoice tax id': { invoice: { ...orderBody(fixtureA).invoice, vkn: '1234567890' } },
+        'customer phone': { customer: { ...orderBody(fixtureA).customer, phone: '05559998877' } },
+        quantity: { items: [{ product_id: fixtureA.productId, variant_id: fixtureA.variantId, quantity: 2 }] },
+        'cart version': { cart_version: 99 },
+      };
+      for (const [label, override] of Object.entries(changes)) {
+        const refused = await post('/orders', tokenA, K1, orderBody(fixtureA, override));
+        assert.equal(refused.status, 409, `${label}: ${refused.status} ${refused.text.slice(0, 160)}`);
+        assert.equal(refused.json.code, 'IDEMPOTENCY_KEY_REUSED', label);
+        assert.equal(refused.text.includes('NEWCOUPON'), false);
+      }
+      assert.equal((await ordersFor(orgA, K1)).length, 1);
+      assert.equal(await reservedOf(fixtureA), reservedAfterFirst);
+
+      // 5. The same key in another tenant is an independent order; nothing crosses tenants.
+      const other = await post('/orders', tokenB, K1, orderBody(fixtureB));
+      assert.ok(other.status === 200 || other.status === 201, `tenant B: ${other.status} ${other.text.slice(0, 160)}`);
+      assert.notEqual(other.json.idempotentReplay, true);
+      assert.equal((await ordersFor(orgA, K1)).length, 1);
+      assert.equal((await ordersFor(orgB, K1)).length, 1);
+      assert.notEqual(String((await ordersFor(orgB, K1))[0].id), String(created[0].id));
+
+      // 6. The same key on the other creation route never replays the wrong response.
+      const crossRoute = await post('/payment/initialize', tokenA, K1, orderBody(fixtureA));
+      assert.equal(crossRoute.status, 409);
+      assert.equal(crossRoute.json.code, 'IDEMPOTENCY_KEY_REUSED');
+      assert.equal((await ordersFor(orgA, K1)).length, 1);
+
+      // 7a. Concurrent identical submissions: one create, one replay, one reservation.
+      const K2 = `idem-http-${stamp}-2`;
+      const reservedBeforeRace = await reservedOf(fixtureA);
+      const same = await Promise.all([post('/orders', tokenA, K2, orderBody(fixtureA)), post('/orders', tokenA, K2, orderBody(fixtureA))]);
+      assert.ok(same.every((r) => r.status === 200 || r.status === 201), JSON.stringify(same.map((r) => [r.status, r.text.slice(0, 120)])));
+      assert.equal(same.filter((r) => r.json && r.json.idempotentReplay === true).length, 1);
+      assert.equal((await ordersFor(orgA, K2)).length, 1);
+      assert.equal(await reservedOf(fixtureA), reservedBeforeRace + 1);
+
+      // 7b. Concurrent submissions with different payloads: one create, one clean conflict.
+      const K3 = `idem-http-${stamp}-3`;
+      const reservedBeforeMixed = await reservedOf(fixtureA);
+      const mixed = await Promise.all([
+        post('/orders', tokenA, K3, orderBody(fixtureA)),
+        post('/orders', tokenA, K3, orderBody(fixtureA, { note: 'baska' })),
+      ]);
+      assert.equal(mixed.filter((r) => r.status === 200 || r.status === 201).length, 1, JSON.stringify(mixed.map((r) => [r.status, r.text.slice(0, 120)])));
+      assert.equal(mixed.filter((r) => r.status === 409).length, 1);
+      assert.equal((await ordersFor(orgA, K3)).length, 1);
+      assert.equal(await reservedOf(fixtureA), reservedBeforeMixed + 1);
+
+      // 8. Legacy rows (no fingerprint, created before migration 073) keep the historical replay.
+      await admin.query('update orders set checkout_request_fingerprint = null where id = $1', [created[0].id]);
+      const legacy = await post('/orders', tokenA, K1, orderBody(fixtureA, { note: 'legacy retry' }));
+      assert.equal(legacy.status, 200);
+      assert.equal(legacy.json.idempotentReplay, true);
+      assert.equal(legacy.text.includes('checkout_request_fingerprint'), false);
+
+      // 9. No key: the order is created without a key and without a fingerprint.
+      const noKeyResponse = await fetch(`${base}/orders`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-public-access-token': tokenA },
+        body: JSON.stringify(orderBody(fixtureA)),
+      });
+      assert.ok(noKeyResponse.status === 200 || noKeyResponse.status === 201);
+      const noKeyRow = (await admin.query(
+        'select checkout_idempotency_key, checkout_request_fingerprint from orders where organization_id = $1 order by created_at desc limit 1', [orgA]
+      )).rows[0];
+      assert.equal(noKeyRow.checkout_idempotency_key, null);
+      assert.equal(noKeyRow.checkout_request_fingerprint, null);
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
 }
