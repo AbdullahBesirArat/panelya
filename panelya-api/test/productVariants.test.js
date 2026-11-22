@@ -20,7 +20,7 @@ test('variant synchronization locks and scopes the canonical rows by tenant', ()
 });
 
 test('variant metadata writes never directly mutate stock balances', () => {
-  const metadataUpdate = variantService.match(/`update product_variants[\s\S]*?`,\n\s*\[/)?.[0] || '';
+  const metadataUpdate = variantService.match(/`update product_variants[\s\S]*?`,\r?\n\s*\[/)?.[0] || '';
   assert.match(metadataUpdate, /set sku = \$1/);
   assert.doesNotMatch(metadataUpdate, /stock\s*=/);
   assert.doesNotMatch(metadataUpdate, /on_hand\s*=/);

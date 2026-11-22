@@ -58,7 +58,7 @@ test('042 migration defines expiring tenant reservations and a multi-instance wo
   assert.match(up, /idx_inventory_reservations_org_idempotency/);
   assert.match(up, /inventory_reservation_items_variant_org_fk/);
   assert.match(up, /inventory_worker_health/);
-  assert.match(service, /order by expires_at, id[\s\S]*for update skip locked/);
+  assert.match(service, /order by r\.expires_at, r\.id[\s\S]*for update of r, o skip locked/);
   assert.match(service, /order by item\.variant_id/);
   assert.match(service, /consume:\$\{reservation\.id\}:revision:/);
   assert.match(down, /drop table if exists inventory_reservation_items/);
