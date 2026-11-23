@@ -82,7 +82,7 @@ const webVitalsRoutes = require('./routes/webVitals');
 const v1Routes = require('./routes/v1');
 const { startWebhookWorker } = require('./modules/integrations/worker');
 const { startImportWorker } = require('./modules/imports/worker');
-const { startInventoryExpiryWorker } = require('./services/inventoryExpiryWorker');
+const { startInventoryExpiryWorker, workerConfig } = require('./services/inventoryExpiryWorker');
 const { startAbandonedCartWorker } = require('./modules/cart/abandoned');
 const { startNotificationOutboxWorker } = require('./modules/notifications/worker');
 const { startSubscriptionLifecycleWorker } = require('./services/subscriptionWorker');
@@ -135,6 +135,8 @@ app.disable('x-powered-by');
  *                   type: string
  *                   example: staging
  */
+const expiryHealthConfig = workerConfig();
+
 async function reservationWorkerHealth() {
   try {
     const result = await db.systemQuery(
@@ -143,9 +145,9 @@ async function reservationWorkerHealth() {
         where job_name = 'inventory_reservation_expiry'
         limit 1`
     );
-    return inventoryWorkerHealthSnapshot(result.rows[0]);
+    return inventoryWorkerHealthSnapshot(result.rows[0], { config: expiryHealthConfig });
   } catch (_) {
-    return { status: 'unavailable', healthy: false };
+    return inventoryWorkerHealthSnapshot(null, { config: expiryHealthConfig, unavailable: true });
   }
 }
 

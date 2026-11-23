@@ -8,7 +8,7 @@ async function runInventoryExpiryCli({ pendingOrders = false } = {}) {
   }
 
   const db = require('../db');
-  const { countReservationExpiry, expireInventoryReservations } = require('../services/inventoryReservations');
+  const { countReservationExpiry, expireInventoryReservationsWithReport } = require('../services/inventoryReservations');
   let pool;
   try {
     pool = db.getSystemPool();
@@ -18,8 +18,9 @@ async function runInventoryExpiryCli({ pendingOrders = false } = {}) {
     } else {
       const legacyLimit = pendingOrders ? process.env.PAYMENT_PENDING_EXPIRE_LIMIT : undefined;
       const limit = Number(process.env.INVENTORY_RESERVATION_EXPIRE_LIMIT || legacyLimit || 100);
-      const reservationIds = await expireInventoryReservations({ pool, limit, updateHeartbeat: false });
-      report = { ok: true, expiredCount: reservationIds.length };
+      const { expired: reservationIds, methods, due, skipped, byMethod } =
+        await expireInventoryReservationsWithReport({ pool, limit, updateHeartbeat: false });
+      report = { ok: true, expiredCount: reservationIds.length, methods, due, skipped, byMethod };
       if (pendingOrders) {
         report.expired = reservationIds.map((reservationId) => ({
           reservation_id: reservationId,
