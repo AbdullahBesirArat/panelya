@@ -1,3 +1,5 @@
+STAGE A (code only): migration 074 is not part of this change.
+
 # Activity log row-level security
 
 Migration 074 enables and forces PostgreSQL row-level security on `public.activity_logs`. It changes policies and grants without rewriting rows. Existing tenant and NULL-organization history stays available to the system role.

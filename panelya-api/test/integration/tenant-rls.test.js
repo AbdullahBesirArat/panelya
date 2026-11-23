@@ -245,10 +245,7 @@ if (!ADMIN_URL) {
 
     await admin.query('revoke create on schema public from public');
     await admin.query('grant usage on schema public to panelya_runtime, panelya_system_runtime');
-    await admin.query(`
-      grant select, insert, update, delete on all tables in schema public to panelya_runtime, panelya_system_runtime;
-      revoke update, delete on public.activity_logs from panelya_runtime;
-    `);
+    await admin.query('grant select, insert, update, delete on all tables in schema public to panelya_runtime, panelya_system_runtime');
     await admin.query('grant usage, select on all sequences in schema public to panelya_runtime, panelya_system_runtime');
 
     const first = await admin.query("insert into organizations (name, slug) values ('Org A', $1) returning id", [`org-a-${Date.now()}`]);
@@ -310,165 +307,19 @@ if (!ADMIN_URL) {
        values ($1, 'TEST', 'activity_rls', $2, clock_timestamp()) returning id`,
       [organizationId, marker]
     );
-    const rows = async (store, predicate = '', params = []) => (await store.query(
-      `select organization_id from activity_logs where entity_id = $1 ${predicate}`,
-      [marker, ...params]
-    )).rows.map((row) => row.organization_id);
-    const snapshot = async (store = systemPool) => (await store.query(
-      'select id, md5(to_jsonb(al)::text) as hash from activity_logs al where entity_id = $1 order by id',
-      [marker]
-    )).rows;
     try {
       const ids = [];
       for (const org of [orgA, orgB, null]) {
         ids.push((await insert(systemPool, org)).rows[0].id);
       }
-      await fn({ marker, insert, rows, snapshot, ids });
+      await fn({ marker, insert, ids });
     } finally {
       await systemPool.query('delete from activity_logs where entity_id = $1', [marker]);
     }
   }
 
-  test('activity_logs catalog forces RLS and grants only the expected runtime access', async () => {
-    const { rows: [flags] } = await admin.query(
-      "select relrowsecurity, relforcerowsecurity from pg_class where oid = 'public.activity_logs'::regclass"
-    );
-    assert.deepEqual(flags, { relrowsecurity: true, relforcerowsecurity: true });
-
-    const policies = await admin.query(`
-      select policyname, cmd from pg_policies
-      where schemaname = 'public' and tablename = 'activity_logs'
-      order by policyname
-    `);
-    assert.deepEqual(policies.rows, [
-      { policyname: 'activity_logs_system_delete', cmd: 'DELETE' },
-      { policyname: 'activity_logs_tenant_insert', cmd: 'INSERT' },
-      { policyname: 'activity_logs_tenant_select', cmd: 'SELECT' },
-    ]);
-    const privileges = await admin.query(`
-      select rolname, rolbypassrls, rolsuper, pg_has_role(oid, 'panelya_rls_bypass', 'MEMBER') as marker,
-             has_table_privilege(oid, 'public.activity_logs', 'SELECT') as can_select,
-             has_table_privilege(oid, 'public.activity_logs', 'INSERT') as can_insert,
-             has_table_privilege(oid, 'public.activity_logs', 'UPDATE') as can_update,
-             has_table_privilege(oid, 'public.activity_logs', 'DELETE') as can_delete
-      from pg_roles where rolname in ('panelya_runtime', 'panelya_system_runtime') order by rolname
-    `);
-    assert.deepEqual(privileges.rows[0], {
-      rolname: 'panelya_runtime', rolbypassrls: false, rolsuper: false, marker: false,
-      can_select: true, can_insert: true, can_update: false, can_delete: false,
-    });
-    const { can_update: _systemUpdateGrant, ...systemPrivileges } = privileges.rows[1];
-    assert.deepEqual(systemPrivileges, {
-      rolname: 'panelya_system_runtime', rolbypassrls: false, rolsuper: false, marker: true,
-      can_select: true, can_insert: true, can_delete: true,
-    });
-    await withActivityFixtures(async ({ rows }) => assert.deepEqual(await rows(migratorPool), []));
-  });
-
-  test('activity_logs tenant reads and inserts are reciprocal and runtime rows are append-only', async () => {
-    await withActivityFixtures(async ({ insert, rows, snapshot, ids }) => {
-      for (const [own, other, ownId, otherId] of [[orgA, orgB, ids[0], ids[1]], [orgB, orgA, ids[1], ids[0]]]) {
-        await asTenant(runtimePool, own, async (client) => {
-          assert.deepEqual(await rows(client), [own]);
-          assert.deepEqual(await rows(client, 'and organization_id = $2', [other]), []);
-          assert.deepEqual(await rows(client, 'and organization_id is null'), []);
-          assert.equal((await insert(client, own)).rowCount, 1);
-        });
-        for (const forbidden of [other, null]) {
-          await assert.rejects(asTenant(runtimePool, own, (client) => insert(client, forbidden)), { code: '42501' });
-        }
-        const before = await snapshot();
-        for (const id of [ownId, otherId]) {
-          for (const sql of ["update activity_logs set action = 'changed' where id = $1",
-            'delete from activity_logs where id = $1']) {
-            await assert.rejects(asTenant(runtimePool, own, (client) => client.query(sql, [id])), { code: '42501' });
-          }
-        }
-        assert.deepEqual(await snapshot(), before);
-      }
-    });
-  });
-
-  test('activity_logs rejects missing or malformed context and a size-one pool can reuse its connection', async () => {
-    const pool = new Pool({ connectionString: urlWithUser(ADMIN_URL, 'panelya_runtime', PASSWORDS.runtime), max: 1 });
-    try {
-      await withActivityFixtures(async ({ insert, rows }) => {
-        assert.deepEqual(await rows(pool), []);
-        await assert.rejects(insert(pool, orgA), { code: '42501' });
-        await asTenant(pool, orgA, async (client) => assert.deepEqual(await rows(client), [orgA]));
-        assert.deepEqual(await rows(pool), []);
-        const abort = new Error('intentional rollback');
-        await assert.rejects(asTenant(pool, orgA, async (client) => {
-          await insert(client, orgA);
-          throw abort;
-        }), abort);
-        await asTenant(pool, orgA, async (client) => assert.deepEqual(await rows(client), [orgA]));
-        assert.deepEqual(await rows(pool), []);
-        await assert.rejects(asTenant(pool, 'malformed', rows), { code: '22P02' });
-        await assert.rejects(asTenant(pool, 'malformed', (client) => insert(client, orgA)), { code: '22P02' });
-        // A query error makes asTenant discard that connection, so the pool may open a fresh
-        // backend; what matters is that it never exceeds one connection and that no tenant
-        // context from the failed transactions is visible to the next user of the pool.
-        await asTenant(pool, orgB, async (client) => {
-          assert.ok(pool.totalCount <= 1, 'a size-one pool never holds more than one connection');
-          assert.deepEqual(await rows(client), [orgB]);
-        });
-        assert.deepEqual(await rows(pool), []);
-        assert.ok(pool.totalCount - pool.idleCount === 0, 'no connection stays checked out');
-      });
-    } finally {
-      await pool.end();
-    }
-  });
-
-  test('activity_logs system and tenant reader query shapes and scoped seed maintenance', async () => {
-    await withActivityFixtures(async ({ marker, insert, rows, ids }) => {
-      assert.deepEqual(new Set(await rows(systemPool)), new Set([orgA, orgB, null]));
-      assert.equal((await insert(systemPool, orgA)).rowCount, 1);
-      const global = await insert(systemPool, null);
-      assert.equal((await systemPool.query('delete from activity_logs where id = $1', [global.rows[0].id])).rowCount, 1);
-      // No UPDATE policy exists: even the system role (which keeps the table grant) cannot rewrite
-      // an audit row, and the runtime role cannot switch into the system role to try.
-      const victim = await insert(systemPool, orgA);
-      const rewritten = await systemPool.query(
-        "update activity_logs set action = 'TAMPERED' where id = $1", [victim.rows[0].id]
-      );
-      assert.equal(rewritten.rowCount, 0);
-      assert.notEqual(
-        (await systemPool.query('select action from activity_logs where id = $1', [victim.rows[0].id])).rows[0].action,
-        'TAMPERED'
-      );
-      await assert.rejects(runtimePool.query('set role panelya_system_runtime'), /permission denied|must be member/i);
-      await systemPool.query('delete from activity_logs where id = $1', [victim.rows[0].id]);
-      // The CASE system branch works even if a caller has set a malformed GUC.
-      await asTenant(systemPool, 'malformed', async (client) => {
-        assert.deepEqual(new Set(await rows(client)), new Set([orgA, orgB, null]));
-      });
-
-      const summary = await asTenant(runtimePool, orgA, (client) => client.query(`
-        select al.id, al.entity_id, coalesce(nullif(u.name, ''), u.email, 'Workspace') as actor_name
-        from activity_logs al left join app_users u on u.id = al.actor_user_id
-        where al.organization_id = $1 order by al.created_at desc limit 8
-      `, [orgA]));
-      assert.equal(summary.rows.filter((row) => row.entity_id === marker).length, 2);
-      const overview = await systemPool.query(`
-        select al.entity_id, o.slug as organization_slug
-        from activity_logs al left join organizations o on o.id = al.organization_id
-        order by al.created_at desc limit 15
-      `);
-      const list = await systemPool.query(`
-        select al.id, al.entity_id, o.slug as organization_slug, u.email as actor_email
-        from activity_logs al left join organizations o on o.id = al.organization_id
-        left join app_users u on u.id = al.actor_user_id
-        order by al.created_at desc limit $1 offset $2
-      `, [15, 0]);
-      for (const result of [overview, list]) {
-        const matches = result.rows.filter((row) => row.entity_id === marker);
-        assert.equal(matches.length, 4);
-        assert.equal(new Set(matches.map((row) => row.organization_slug)).size, 3);
-        assert.ok(matches.some((row) => row.organization_slug === null));
-      }
-
+  test('activity_logs seed maintenance deletes only the target workspace activity', async () => {
+    await withActivityFixtures(async ({ marker, insert, ids }) => {
       // Exercise the seed's exact delete without removing unrelated shared fixture rows.
       const workspace = await admin.query("insert into organizations (name, slug) values ('Seed test', $1) returning id", [marker]);
       const workspaceId = workspace.rows[0].id;
@@ -484,50 +335,11 @@ if (!ADMIN_URL) {
     });
   });
 
-  test('activity_logs migration can be reapplied and unwound without rewriting history', async () => {
-    await withActivityFixtures(async ({ marker, snapshot }) => {
-      const readSql = (suffix) => fs.readFileSync(
-        path.join(__dirname, '../../db/migrations', `074_activity_logs_rls${suffix}.sql`), 'utf8'
-      );
-      const forward = readSql('');
-      const down = readSql('.down');
-      const before = await snapshot();
-      const verify = async (enabled) => {
-        const { rows: [state] } = await admin.query(`
-          select relrowsecurity, relforcerowsecurity,
-                 has_table_privilege('panelya_runtime', oid, 'UPDATE') as can_update,
-                 has_table_privilege('panelya_runtime', oid, 'DELETE') as can_delete,
-                 (select count(*)::int from pg_policy where polrelid = pg_class.oid) as policies
-          from pg_class where oid = 'public.activity_logs'::regclass
-        `);
-        assert.deepEqual(state, {
-          relrowsecurity: enabled, relforcerowsecurity: enabled,
-          can_update: !enabled, can_delete: !enabled, policies: enabled ? 3 : 0,
-        });
-      };
-      try {
-        // The fixture superuser can inspect all rows with FORCE enabled while holding the DDL lock.
-        await admin.query('begin');
-        for (const sql of [forward, forward, down, forward]) {
-          await admin.query(sql);
-          const enabled = sql === forward;
-          await verify(enabled);
-          assert.deepEqual(await snapshot(admin), before);
-        }
-      } finally {
-        await admin.query('rollback');
-      }
-      const after = await snapshot();
-      assert.equal(after.length, 3, marker);
-      assert.deepEqual(after, before);
-    });
-  });
-
   test('activity_logs central writer scopes tenant and global events and protects active transactions', async (t) => {
     const previousPoolMax = appDb.pool.options.max;
     appDb.pool.options.max = 1;
     t.after(() => { appDb.pool.options.max = previousPoolMax; });
-    await withActivityFixtures(async ({ marker, rows }) => {
+    await withActivityFixtures(async ({ marker }) => {
       const req = { auth: { actorType: 'app' }, get: () => 'integration-agent' };
       const entry = { resourceType: 'test', resourceId: marker };
       assert.equal((await appDb.pool.query('select current_user')).rows[0].current_user, 'panelya_runtime');
@@ -586,8 +398,6 @@ if (!ADMIN_URL) {
         await auditLog(req, { ...entry, action: 'request-close', organizationId: orgA });
       });
       await cleanContext(appDb.pool);
-      await inRequest(orgB, 'finish', async (client) => assert.deepEqual(await rows(client), [orgB]));
-      await cleanContext(appDb.pool);
 
       const categorySlug = `audit-rls-${marker}`;
       try {
@@ -612,7 +422,6 @@ if (!ADMIN_URL) {
           { action: 'request-match', organization_id: orgA },
           { action: 'standalone', organization_id: orgA },
         ]);
-        assert.deepEqual(await rows(runtimePool), []);
       } finally {
         await admin.query('delete from categories where organization_id = $1 and slug = $2', [orgA, categorySlug]);
       }
@@ -7032,7 +6841,7 @@ const integrationService = require('../../modules/integrations/service');
     }
   });
 
-  test('activity_logs RLS preserves app auth and coupon audit events over HTTP', async (t) => {
+  test('activity_logs records app auth and coupon audit events over HTTP', async (t) => {
     const express = require('express');
     const jwt = require('jsonwebtoken');
     const { attachAuthIfPresent } = require('../../middleware/auth');
@@ -7252,7 +7061,6 @@ const integrationService = require('../../modules/integrations/service');
   });
 
   test('safe rollback retains tenant columns; cross-tenant corruption blocks reapply', async () => {
-    await runRollback({ pool: migratorPool, target: '074_activity_logs_rls.sql', logger: { log() {}, warn() {} } });
     // A34's five FORCE-RLS policies also depend on the helper introduced in 038.
     await runRollback({ pool: migratorPool, target: '072_instagram_ai_catalog_ingestion.sql', logger: { log() {}, warn() {} } });
     // A30's tenant policy depends on the RLS helper introduced in 038, so additive A30
