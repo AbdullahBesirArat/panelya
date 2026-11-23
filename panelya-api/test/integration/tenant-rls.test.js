@@ -1,5 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { setTimeout: delay } = require('node:timers/promises');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
@@ -265,14 +266,55 @@ if (!ADMIN_URL) {
   });
 
   test.after(async () => {
-    await Promise.allSettled([
-      runtimePool?.end(),
-      systemPool?.end(),
-      migratorPool?.end(),
-      appDb.pool.end(),
-      appDb.getSystemPool().end(),
-    ]);
-    if (admin) await admin.end();
+    const failures = [];
+    const pools = [
+      ['runtimePool', runtimePool],
+      ['systemPool', systemPool],
+      ['migratorPool', migratorPool],
+      ['appDb.pool', appDb.pool],
+    ];
+    try {
+      pools.push(['appDb.getSystemPool()', appDb.getSystemPool()]);
+    } catch {
+      failures.push('appDb.getSystemPool(): could not obtain pool for teardown');
+    }
+    const activePools = pools.filter(([, pool]) => pool);
+    function findOffenders() {
+      return activePools.flatMap(([name, pool]) => {
+        const checkedOut = pool.totalCount - pool.idleCount;
+        const waiting = pool.waitingCount;
+        return checkedOut > 0 || waiting > 0 ? [`${name} (checkedOut=${checkedOut}, waiting=${waiting})`] : [];
+      });
+    }
+    // Request finish/close handlers can still be committing and releasing clients.
+    const settleDeadline = performance.now() + 2_000;
+    let offenders = findOffenders();
+    while (offenders.length && performance.now() < settleDeadline) {
+      await delay(50);
+      offenders = findOffenders();
+    }
+    if (offenders.length) failures.push(`Connection leak guard: ${offenders.join(', ')}`);
+
+    async function endWithTimeout(name, connection, operation, timeoutMessage) {
+      const timer = new AbortController();
+      try {
+        await Promise.race([
+          Promise.resolve().then(() => connection.end()),
+          delay(10_000, undefined, { signal: timer.signal }).then(() => {
+            failures.push(`${name}: ${timeoutMessage}`);
+          }),
+        ]);
+      } catch {
+        failures.push(`${name}: ${operation} failed`);
+      } finally {
+        timer.abort();
+      }
+    }
+    await Promise.all(activePools.map(([name, pool]) => endWithTimeout(
+      name, pool, 'pool.end()', 'pool.end() did not complete: a connection was never released'
+    )));
+    if (admin) await endWithTimeout('admin', admin, 'admin.end()', 'admin.end() did not complete');
+    if (failures.length) assert.fail(failures.join('\n'));
   });
 
   test('runtime and system roles are non-owner, non-superuser and non-BYPASSRLS', async () => {
@@ -6293,9 +6335,8 @@ const integrationService = require('../../modules/integrations/service');
     }));
   }
 
-  async function exerciseExpiryHttp({ lifecycle = false } = {}) {
+  async function exerciseExpiryHttp({ lifecycle = false, auditIsolation = false } = {}) {
     const express = require('express');
-    const { setTimeout: delay } = require('node:timers/promises');
     const { attachAuthIfPresent } = require('../../middleware/auth');
     const { attachSession } = require('../../middleware/authSession');
     const { createAppAccessToken, createAdminAccessToken } = require('../../services/authTokens');
@@ -6329,7 +6370,7 @@ const integrationService = require('../../modules/integrations/service');
           ...headers,
         },
         body: JSON.stringify(body),
-        signal: lifecycle ? AbortSignal.timeout(25000) : undefined,
+        signal: lifecycle || auditIsolation ? AbortSignal.timeout(25000) : undefined,
       });
       return { status: response.status, body: await response.json() };
     }
@@ -6408,6 +6449,28 @@ const integrationService = require('../../modules/integrations/service');
         await delay(20);
       }
       assert.fail(`Expected ${expectedCount} committed EXPIRE_PENDING log row(s)`);
+    }
+    async function checkAuditIsolation() {
+      const userAgent = `expiry-audit-isolation-${stamp}`;
+      assertReport(await post({ headers: { 'user-agent': userAgent } }), []);
+      const rows = await committedRows(
+        `select id, organization_id from activity_logs
+          where action = 'EXPIRE_PENDING' and (user_agent = $1 or organization_id = $2)`,
+        [userAgent, foreignTenant.id], 1
+      );
+      assert.equal(rows.length, 1);
+      assert.equal(rows[0].organization_id, tenant.id);
+      // activity_logs is NOT row-level-security protected today (migration 038 limits RLS to the
+      // commerce graph and leaves other tables for a later rollout). Tenant isolation of audit
+      // rows is therefore enforced by the organization_id filter that every tenant-facing query
+      // applies (see routes/organizations.js). Assert that contract, not an RLS guarantee that
+      // does not exist; when RLS is added to activity_logs, tighten this to a withTenantContext read.
+      const tenantFacing = (organizationId) => admin.query(
+        `select id, organization_id from activity_logs
+          where organization_id = $1 and action = 'EXPIRE_PENDING'`, [organizationId]
+      );
+      assert.deepEqual((await tenantFacing(foreignTenant.id)).rows, []);
+      assert.deepEqual((await tenantFacing(tenant.id)).rows, rows);
     }
     async function assertPoolsDrained() {
       const pools = [appDb.pool, appDb.getSystemPool()];
@@ -6612,6 +6675,10 @@ const integrationService = require('../../modules/integrations/service');
       });
       if (lifecycle) {
         await checkLifecycle();
+        return;
+      }
+      if (auditIsolation) {
+        await checkAuditIsolation();
         return;
       }
       const heartbeatInsert = await admin.query(
@@ -6879,7 +6946,11 @@ const integrationService = require('../../modules/integrations/service');
           await admin.query(`delete from ${table} where organization_id = any($1::uuid[])`, [tenantIds]);
         }
         if (user) await admin.query('delete from app_users where id = $1', [user.id]);
-        await admin.query("update organizations set status = 'suspended' where id = any($1::uuid[])", [tenantIds]);
+        if (auditIsolation) {
+          await admin.query('delete from organizations where id = any($1::uuid[])', [tenantIds]);
+        } else {
+          await admin.query("update organizations set status = 'suspended' where id = any($1::uuid[])", [tenantIds]);
+        }
         await admin.query('commit');
       } catch (error) {
         await admin.query('rollback');
@@ -6892,6 +6963,7 @@ const integrationService = require('../../modules/integrations/service');
     () => exerciseExpiryHttp({ lifecycle: true }));
   test('R10 expire-pending over HTTP: auth, tenant isolation, grace, stock, audit, heartbeat and limits',
     () => exerciseExpiryHttp());
+  test('audit tenant isolation for expire-pending', () => exerciseExpiryHttp({ auditIsolation: true }));
 
   test('safe rollback retains tenant columns; cross-tenant corruption blocks reapply', async () => {
     // A34's five FORCE-RLS policies also depend on the helper introduced in 038.

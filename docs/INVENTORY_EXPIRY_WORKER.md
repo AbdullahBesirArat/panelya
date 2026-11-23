@@ -81,3 +81,7 @@ claims, tenant scope, callback and grace holds, the scoped expiry report, repeat
 after an injected mid-batch failure.
 The "R10 expire-pending over HTTP" case exercises the endpoint through its authentication and tenant
 middleware and verifies the response, audit records, and inventory effects against PostgreSQL.
+The focused audit isolation case checks that the owner request writes an activity log for its tenant
+and that the runtime role can read the row only under that tenant's context. Suite teardown waits
+briefly for request finalizers, then fails on outstanding pool checkouts, queued waiters, or shutdown
+timeouts before the runner can force-exit.
