@@ -5,15 +5,19 @@ const { EventEmitter } = require('node:events');
 const db = require('../db');
 
 function mockClient() {
-  const client = {
+  const client = Object.assign(new EventEmitter(), {
     calls: [],
     released: false,
     query(text, params) {
       client.calls.push({ text, params });
       return Promise.resolve({ rows: [] });
     },
-    release() { client.released = true; },
-  };
+    release(error) {
+      assert.equal(client.released, false);
+      client.released = true;
+      client.releaseError = error;
+    },
+  });
   return client;
 }
 
@@ -112,4 +116,52 @@ test('request context rolls back on an error response and refuses tenant switchi
 
   assert.equal(client.calls.at(-1).text, 'rollback');
   assert.equal(client.released, true);
+});
+
+test('request context releases its client if the response closes during tenant activation', async () => {
+  const client = mockClient();
+  const response = new EventEmitter();
+  const query = client.query;
+  client.query = (text, params) => {
+    if (text.startsWith('select set_config')) response.emit('close');
+    return query(text, params);
+  };
+
+  await withMockedConnect(client, () => new Promise((resolve, reject) => {
+    db.requestContextMiddleware({}, response, () => {
+      void (async () => {
+        assert.equal(await db.activateTenantContext('org-a'), false);
+        assert.equal(await db.activateTenantContext('org-a'), false);
+      })().then(resolve, reject);
+    });
+  }));
+
+  assert.deepEqual(client.calls.map(({ text }) => text), [
+    'begin', "select set_config('app.current_organization_id', $1, true)", 'rollback',
+  ]);
+  assert.equal(client.released, true);
+  assert.equal(client.listenerCount('error'), 0);
+});
+
+test('request context discards a client when tenant activation fails', async () => {
+  const client = mockClient();
+  const response = new EventEmitter();
+  const error = new Error('set_config failed');
+  const query = client.query;
+  client.query = (text, params) => text.startsWith('select set_config')
+    ? Promise.reject(error)
+    : query(text, params);
+
+  await withMockedConnect(client, () => new Promise((resolve, reject) => {
+    db.requestContextMiddleware({}, response, () => {
+      void (async () => {
+        await assert.rejects(db.activateTenantContext('org-a'), error);
+        response.emit('close');
+      })().then(resolve, reject);
+    });
+  }));
+
+  assert.equal(client.released, true);
+  assert.equal(client.releaseError, error);
+  assert.equal(client.listenerCount('error'), 0);
 });

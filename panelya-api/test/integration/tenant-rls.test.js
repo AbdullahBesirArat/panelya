@@ -6143,7 +6143,10 @@ const integrationService = require('../../modules/integrations/service');
       async connect() {
         const client = await systemPool.connect();
         return {
-          release: () => client.release(),
+          // A pooled pg client is an EventEmitter and expects release(err); delegate both.
+          on: (...args) => client.on(...args),
+          removeListener: (...args) => client.removeListener(...args),
+          release: (error) => client.release(error),
           async query(sql, params) {
             const result = await client.query(sql, params);
             if (/^update inventory_reservations\s/.test(sql) && ++releasesBeforeFault === 2) {
@@ -6290,7 +6293,7 @@ const integrationService = require('../../modules/integrations/service');
     }));
   }
 
-  test('R10 expire-pending over HTTP: auth, tenant isolation, grace, stock, audit, heartbeat and limits', async () => {
+  async function exerciseExpiryHttp({ lifecycle = false } = {}) {
     const express = require('express');
     const { setTimeout: delay } = require('node:timers/promises');
     const { attachAuthIfPresent } = require('../../middleware/auth');
@@ -6305,6 +6308,7 @@ const integrationService = require('../../modules/integrations/service');
     let platformAdmin;
     let server;
     let insertedHeartbeat = false;
+    let slowTriggerInstalled = false;
     const appToken = (role) => createAppAccessToken({
       user,
       membership: { role, organization: tenant },
@@ -6325,6 +6329,7 @@ const integrationService = require('../../modules/integrations/service');
           ...headers,
         },
         body: JSON.stringify(body),
+        signal: lifecycle ? AbortSignal.timeout(25000) : undefined,
       });
       return { status: response.status, body: await response.json() };
     }
@@ -6353,7 +6358,7 @@ const integrationService = require('../../modules/integrations/service');
       expired: true, customerId: customerIds.get(org), ...options,
     });
     const stateOf = async ({ org, id, orderId, variantId }) => (await admin.query(
-      `select r.status as reservation_status, o.status as order_status, v.reserved, v.on_hand,
+      `select r.status as reservation_status, o.status as order_status, o.payment_status, v.reserved, v.on_hand,
               md5(to_jsonb(r)::text) as reservation_hash, md5(to_jsonb(o)::text) as order_hash,
               md5(to_jsonb(v)::text) as variant_hash,
               (select md5(coalesce(jsonb_agg(to_jsonb(m) order by m.id)::text, ''))
@@ -6404,6 +6409,171 @@ const integrationService = require('../../modules/integrations/service');
       }
       assert.fail(`Expected ${expectedCount} committed EXPIRE_PENDING log row(s)`);
     }
+    async function assertPoolsDrained() {
+      const pools = [appDb.pool, appDb.getSystemPool()];
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        if (pools.every((pool) => pool.totalCount === pool.idleCount && !pool.waitingCount)) break;
+        await delay(20);
+      }
+      for (const pool of pools) {
+        assert.equal(pool.totalCount - pool.idleCount, 0, 'checked-out application connection');
+        assert.equal(pool.waitingCount, 0);
+      }
+      const { rows } = await admin.query(
+        `select pid, usename, state from pg_stat_activity where datname = current_database()
+          and usename in ('panelya_runtime', 'panelya_system_runtime') and state like 'idle in transaction%'`
+      );
+      assert.deepEqual(rows, []);
+    }
+
+    async function runWithSlowBatch(options, { terminate = false } = {}) {
+      const pending = post(options);
+      let finished = false;
+      const settled = pending.finally(() => { finished = true; });
+      // Observe rejection immediately while the polling queries run.
+      settled.catch(() => {});
+      let sleepSamples = 0;
+      let staleRequestSessions = [];
+      try {
+        while (!finished) {
+          const { rows } = await admin.query(
+            `select pid, usename, state, query, wait_event,
+                    clock_timestamp() - state_change > interval '500 milliseconds' as stale
+               from pg_stat_activity where datname = current_database()
+                and usename in ('panelya_runtime', 'panelya_system_runtime')`
+          );
+          const sleeping = rows.filter((row) => row.usename === 'panelya_system_runtime'
+            && row.state === 'active' && row.wait_event === 'PgSleep'
+            && /^update inventory_reservations\b/i.test(row.query));
+          if (sleeping.length) {
+            assert.equal(sleeping.length, 1);
+            sleepSamples += 1;
+            staleRequestSessions = staleRequestSessions.concat(rows.filter((row) => row.usename === 'panelya_runtime'
+              && row.state?.startsWith('idle in transaction') && row.stale).map(({ pid }) => pid));
+            if (terminate) {
+              assert.deepEqual((await admin.query('select pg_terminate_backend($1) as terminated', [sleeping[0].pid])).rows,
+                [{ terminated: true }]);
+              break;
+            }
+          }
+          await delay(200);
+        }
+        const result = await settled;
+        assert.ok(sleepSamples >= (terminate ? 1 : 3), 'observed the test trigger sleeping in the batch');
+        assert.deepEqual(staleRequestSessions, [], 'runtime request transaction was idle during the system batch');
+        return result;
+      } finally {
+        await settled.catch(() => {});
+      }
+    }
+
+    async function checkLifecycle() {
+      platformAdmin = (await admin.query(
+        "insert into admins (username, password_hash, role) values ($1,'unused','super_admin') returning id, username, role",
+        [`expiry-${stamp}`]
+      )).rows[0];
+      const ownerAgent = `expiry-slow-owner-${stamp}`;
+      const failedAgent = `expiry-failed-${stamp}`;
+      const activitySql = `select metadata->'newValue' as value from activity_logs
+        where organization_id = $1 and actor_user_id = $2 and action = 'EXPIRE_PENDING' and user_agent = $3`;
+      const operator = {
+        token: createAdminAccessToken(platformAdmin),
+        body: { organizationSlug: tenant.slug },
+      };
+      await admin.query(`
+        create function test_expiry_http_sleep() returns trigger language plpgsql as $$
+        begin
+          perform pg_sleep(2);
+          return new;
+        end;
+        $$;
+        create trigger test_expiry_http_sleep before update on inventory_reservations for each row
+          when (old.organization_id = ${admin.escapeLiteral(tenant.id)}::uuid and new.status = 'expired')
+          execute function test_expiry_http_sleep();
+      `);
+      slowTriggerInstalled = true;
+      const ownerItem = await seed(tenant.id, 'slow-owner');
+      assertReport(await runWithSlowBatch({ headers: { 'user-agent': ownerAgent } }), [ownerItem.id]);
+      await assertPoolsDrained();
+      await assertReleased(ownerItem);
+      assert.deepEqual(await committedRows(activitySql, [tenant.id, user.id, ownerAgent], 1),
+        [{ value: auditValue(1, {}) }]);
+
+      const operatorItem = await seed(tenant.id, 'slow-operator');
+      assertReport(await runWithSlowBatch(operator), [operatorItem.id]);
+      await assertPoolsDrained();
+      await assertReleased(operatorItem);
+      assert.deepEqual(await committedRows(
+        "select new_value from audit_logs where admin_id = $1 and action = 'EXPIRE_PENDING' and success",
+        [platformAdmin.id], 1
+      ), [{ new_value: auditValue(1, {}) }]);
+
+      const interrupted = await seed(tenant.id, 'interrupted');
+      const before = await stateOf(interrupted);
+      assertHeld(before);
+      const failed = await runWithSlowBatch({ headers: { 'user-agent': failedAgent } }, { terminate: true });
+      assert.equal(failed.status, 500);
+      assert.equal(typeof failed.body.error, 'string');
+      await assertPoolsDrained();
+      assert.deepEqual(await stateOf(interrupted), before);
+      assert.deepEqual((await admin.query(activitySql, [tenant.id, user.id, failedAgent])).rows, []);
+      await dropSlowTrigger();
+      assertReport(await post(), [interrupted.id]);
+      await assertReleased(interrupted);
+
+      const auditFailure = await seed(tenant.id, 'audit-failure');
+      const deletedUser = { ...user, id: crypto.randomUUID() };
+      const auditFailureToken = createAppAccessToken({
+        user: deletedUser,
+        membership: { role: 'owner', organization: tenant },
+      });
+      const auditFailureAgent = `expiry-audit-failed-${stamp}`;
+      const auditFailureResponse = await post({ token: auditFailureToken, headers: { 'user-agent': auditFailureAgent } });
+      assert.equal(auditFailureResponse.status, 500);
+      await assertPoolsDrained();
+      await assertReleased(auditFailure);
+      assert.deepEqual((await admin.query(activitySql, [tenant.id, deletedUser.id, auditFailureAgent])).rows, []);
+
+      const locked = await seed(tenant.id, 'paid-under-lock');
+      const contenders = await Promise.all(['concurrent-1', 'concurrent-2'].map((tag) => seed(tenant.id, tag)));
+      const lockedBefore = await stateOf(locked);
+      await admin.query('begin');
+      try {
+        await admin.query("update orders set payment_status = 'paid' where organization_id = $1 and id = $2",
+          [tenant.id, locked.orderId]);
+        const reports = await Promise.all([post(), post()]);
+        for (const { status, body } of reports) {
+          assert.equal(status, 200);
+          assert.equal(body.ok, true);
+          assert.equal(body.expiredCount, body.expired.length);
+          for (const entry of body.expired) assert.equal(entry.status, 'expired');
+        }
+        assert.deepEqual(reports.flatMap(({ body }) => body.expired.map(({ reservation_id }) => reservation_id)).sort(),
+          contenders.map(({ id }) => id).sort());
+        await admin.query('commit');
+      } catch (error) {
+        await admin.query('rollback');
+        throw error;
+      }
+      const paid = await stateOf(locked);
+      assertHeld(paid);
+      assert.deepEqual(paid, { ...lockedBefore, payment_status: 'paid', order_hash: paid.order_hash });
+      assert.notEqual(paid.order_hash, lockedBefore.order_hash);
+      const settled = await Promise.all(contenders.map((item) => assertReleased(item)));
+      assertReport(await post(), [], { payment_state: 1 });
+      assert.deepEqual(await stateOf(locked), paid);
+      assert.deepEqual(await Promise.all(contenders.map(stateOf)), settled);
+      for (let i = 0; i < 20; i += 1) {
+        assertReport(await post(), [], { payment_state: 1 });
+        await assertPoolsDrained();
+      }
+    }
+
+    async function dropSlowTrigger() {
+      if (!slowTriggerInstalled) return;
+      await admin.query('drop trigger test_expiry_http_sleep on inventory_reservations; drop function test_expiry_http_sleep()');
+      slowTriggerInstalled = false;
+    }
 
     const env = {
       INVENTORY_EXPIRY_METHODS: 'iban,card',
@@ -6440,6 +6610,10 @@ const integrationService = require('../../modules/integrations/service');
         const listener = app.listen(0, '127.0.0.1', () => resolve(listener));
         listener.once('error', reject);
       });
+      if (lifecycle) {
+        await checkLifecycle();
+        return;
+      }
       const heartbeatInsert = await admin.query(
         `insert into inventory_worker_health (job_name, last_started_at, last_succeeded_at, processed_count)
          values ('inventory_reservation_expiry', now(), now(), 7) on conflict (job_name) do nothing`
@@ -6517,8 +6691,11 @@ const integrationService = require('../../modules/integrations/service');
       assert.deepEqual(await stateOf(foreign), foreignBefore);
 
       // Use independent variants and real redemptions so all excluded effects can be fingerprinted.
-      for (const methods of [[], ['iban'], ['card'], ['iban', 'card']]) {
-        const tag = methods.join('-') || 'none';
+      for (const [setting, methods] of [
+        [undefined, []], ['none', []], ['iban,invalid', []],
+        ['iban', ['iban']], ['card', ['card']], ['iban,card', ['iban', 'card']],
+      ]) {
+        const tag = setting || 'unset';
         const items = await Promise.all(['iban', 'card'].map(async (paymentMethod) => {
           const item = await seed(tenant.id, 'policy-' + tag + '-' + paymentMethod, { paymentMethod });
           await redeem(item);
@@ -6529,7 +6706,7 @@ const integrationService = require('../../modules/integrations/service');
           [items[0].id]
         );
         const before = await Promise.all(items.map(stateOf));
-        if (methods.length) process.env.INVENTORY_EXPIRY_METHODS = methods.join(',');
+        if (setting !== undefined) process.env.INVENTORY_EXPIRY_METHODS = setting;
         else delete process.env.INVENTORY_EXPIRY_METHODS;
         const included = items.filter(({ paymentMethod }) => methods.includes(paymentMethod));
         const excluded = items.filter(({ paymentMethod }) => !methods.includes(paymentMethod));
@@ -6680,6 +6857,7 @@ const integrationService = require('../../modules/integrations/service');
         else process.env[key] = value;
       }
       if (server) await new Promise((resolve) => server.close(resolve));
+      await dropSlowTrigger();
       if (insertedHeartbeat) {
         await admin.query("delete from inventory_worker_health where job_name = 'inventory_reservation_expiry'");
       }
@@ -6708,7 +6886,12 @@ const integrationService = require('../../modules/integrations/service');
         throw error;
       }
     }
-  });
+  }
+
+  test('R10 expire-pending over HTTP: request transaction lifecycle, rollback and contention',
+    () => exerciseExpiryHttp({ lifecycle: true }));
+  test('R10 expire-pending over HTTP: auth, tenant isolation, grace, stock, audit, heartbeat and limits',
+    () => exerciseExpiryHttp());
 
   test('safe rollback retains tenant columns; cross-tenant corruption blocks reapply', async () => {
     // A34's five FORCE-RLS policies also depend on the helper introduced in 038.

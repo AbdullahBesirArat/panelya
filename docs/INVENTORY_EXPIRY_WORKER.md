@@ -50,6 +50,14 @@ The endpoint accepts and ignores `olderThanMinutes` for legacy client compatibil
 on the stored reservation deadline (`expires_at`), payment state, and configured grace windows so request
 values cannot shorten a stock hold.
 
+#### Request transaction lifecycle
+
+After authorization, the endpoint resolves the tenant on the system pool without opening a request
+transaction. The tenant-scoped write batch uses its own system-pool transaction and rolls back as a
+unit on failure. After the batch succeeds, the endpoint opens a tenant-scoped request transaction
+for the audit insert. Request middleware finalizes it on response finish or close. If the audit
+insert fails, the endpoint returns an error and the completed batch stays committed.
+
 ## Staged rollout
 
 1. Deploy everywhere with `INVENTORY_EXPIRY_METHODS=none` and the worker off. Verify the policy on every replica
