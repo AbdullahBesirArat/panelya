@@ -255,15 +255,23 @@ router.post('/expire-pending', requireAuth, requireRole(['super_admin', 'owner',
       return res.status(403).json({ error: 'Bu islem icin oturum tipi uygun degil' });
     }
     const limit = Math.min(Math.max(Number(req.body.limit || process.env.PAYMENT_PENDING_EXPIRE_LIMIT || 100), 1), 500);
-    // Tenant-triggered: confine the system-pool job to the caller's resolved tenant (R8).
-    const organization = await resolveOrganization(req);
+    // Resolve and run the scoped system batch before opening the request transaction for audit.
+    const organization = await resolveOrganization(req, db.getSystemPool());
     const organizationId = organization.id;
     const ibanGrace = ibanGraceMinutes();
     const cardGrace = cardGraceMinutes();
     const report = await expirePendingOrders({ limit, organizationId, graceMinutes: ibanGrace, cardGrace });
+    // activateTenantContext() is false when the response already closed (client went away) or when
+    // no request context exists. Only the first case may end silently; otherwise fail loudly
+    // instead of leaving the request without an answer.
+    if (!await db.activateTenantContext(organizationId)) {
+      if (res.destroyed || res.writableEnded) return;
+      throw new Error('Request tenant context is unavailable for the audit entry');
+    }
     await auditLog(req, {
       action: 'EXPIRE_PENDING',
       resourceType: 'order',
+      throwOnError: true,
       newValue: {
         expiredCount: report.expiredCount,
         skipped: report.skipped,

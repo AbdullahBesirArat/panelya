@@ -377,6 +377,18 @@ async function expireInventoryReservationsWithReport({
   const scope = organizationId || null;
   const stampHeartbeat = updateHeartbeat && !scope;
   let client;
+  let releaseError;
+  // pg can emit a socket error as well as reject the in-flight query.
+  const onClientError = (error) => { releaseError = error; };
+  // The connection must go back to the pool on every path, even if detaching the listener throws;
+  // a connection that is never released makes pool teardown wait forever.
+  const releaseClient = () => {
+    if (!client) return;
+    const checkedOut = client;
+    client = null;
+    try { checkedOut.removeListener('error', onClientError); }
+    finally { checkedOut.release(releaseError); }
+  };
   const expired = [];
   const policy = { organizationId: scope, graceMinutes, cardGrace, methods };
   if (methods.length === 0) {
@@ -389,6 +401,7 @@ async function expireInventoryReservationsWithReport({
        on conflict (job_name) do update set last_started_at = now(), updated_at = now()`
     );
     client = await pool.connect();
+    client.on('error', onClientError);
     await client.query('begin');
     const report = await countReservationExpiry(client, policy);
     // Payment/admin transitions can already hold the order while acquiring the reservation.
@@ -445,9 +458,9 @@ async function expireInventoryReservationsWithReport({
     return { ...report, expired };
   } catch (error) {
     if (client) {
-      await client.query('rollback').catch(() => {});
-      client.release();
-      client = null;
+      try { await client.query('rollback'); }
+      catch (rollbackError) { releaseError = rollbackError; }
+      finally { releaseClient(); }
     }
     if (stampHeartbeat) await pool.query(
       `insert into inventory_worker_health
@@ -459,7 +472,7 @@ async function expireInventoryReservationsWithReport({
     ).catch(() => {});
     throw error;
   } finally {
-    client?.release();
+    releaseClient();
   }
 }
 
