@@ -300,6 +300,22 @@ function cardGraceMinutes(value = process.env.INVENTORY_EXPIRY_CARD_GRACE_MINUTE
   return Math.min(Math.max(Math.floor(minutes), 1), 1440);
 }
 
+const expiryMethodOrder = ['iban', 'card'];
+
+function inventoryExpiryMethods(value = process.env.INVENTORY_EXPIRY_METHODS) {
+  if (value === undefined) return [];
+  if (typeof value === 'string' && value.length <= 128) {
+    const normalized = value.trim().toLowerCase();
+    if (!normalized || normalized === 'none') return [];
+    const tokens = normalized.split(',').map((token) => token.trim());
+    if (tokens.every((token) => expiryMethodOrder.includes(token))) {
+      return expiryMethodOrder.filter((method) => tokens.includes(method));
+    }
+  }
+  console.warn('Invalid INVENTORY_EXPIRY_METHODS configuration. Expiry is disabled for all methods.');
+  return [];
+}
+
 // Shared by the read-only count, claim, and cancellation recheck.
 const dueReservations = `
   from inventory_reservations r
@@ -310,6 +326,7 @@ const dueReservations = `
         or o.fulfillment_status <> 'unfulfilled' then 'order_not_pending'
       when o.payment_status not in ('pending', 'manual_pending')
         or nullif(btrim(o.payment_id), '') is not null then 'payment_state'
+      when not coalesce(o.payment_method = any($4::text[]), false) then 'method_disabled'
       when exists (
         select 1 from payment_callback_events e
          where e.organization_id = o.organization_id
@@ -317,7 +334,7 @@ const dueReservations = `
            and (e.order_code = o.order_code or e.processed_order_id = o.id
              or e.payment_token = nullif(btrim(o.payment_token), ''))
       ) then 'callback_pending'
-      when o.payment_method is distinct from 'iban'
+      when o.payment_method = 'card'
         and nullif(btrim(o.payment_token), '') is not null
         and r.expires_at + ($3::int * interval '1 minute') > now() then 'card_grace'
       when o.payment_method = 'iban'
@@ -329,28 +346,42 @@ const dueReservations = `
 
 async function countReservationExpiry(client, {
   organizationId = null, graceMinutes = ibanGraceMinutes(), cardGrace = cardGraceMinutes(),
+  methods = inventoryExpiryMethods(),
 } = {}) {
   const { rows } = await client.query(
-    `select eligibility.reason, count(*)::int as count
+    `select o.payment_method as method, eligibility.reason, count(*)::int as count
        ${dueReservations}
-      group by eligibility.reason`,
-    [graceMinutes, organizationId, cardGrace]
+      group by o.payment_method, eligibility.reason`,
+    [graceMinutes, organizationId, cardGrace, methods]
   );
-  return {
-    due: rows.find(({ reason }) => reason === null)?.count ?? 0,
-    skipped: Object.fromEntries(rows.filter(({ reason }) => reason !== null).map(({ reason, count }) => [reason, count])),
-  };
+  const report = { methods, due: 0, skipped: {}, byMethod: {} };
+  for (const { method, reason, count } of rows) {
+    const key = expiryMethodOrder.includes(method) ? method : 'unknown';
+    const totals = report.byMethod[key] ??= { due: 0, skipped: {}, expired: 0 };
+    if (reason === null) {
+      report.due += count;
+      totals.due += count;
+    } else {
+      report.skipped[reason] = (report.skipped[reason] || 0) + count;
+      totals.skipped[reason] = (totals.skipped[reason] || 0) + count;
+    }
+  }
+  return report;
 }
 
 // Global CLI runs opt out of the heartbeat. Tenant-scoped runs always leave it alone.
 async function expireInventoryReservationsWithReport({
   pool = db.getSystemPool(), limit = 100, organizationId = null, graceMinutes = ibanGraceMinutes(),
-  cardGrace = cardGraceMinutes(), updateHeartbeat = true,
+  cardGrace = cardGraceMinutes(), methods = inventoryExpiryMethods(), updateHeartbeat = true,
 } = {}) {
   const scope = organizationId || null;
   const stampHeartbeat = updateHeartbeat && !scope;
   let client;
   const expired = [];
+  const policy = { organizationId: scope, graceMinutes, cardGrace, methods };
+  if (methods.length === 0) {
+    return { ...await countReservationExpiry(pool, policy), expired };
+  }
   try {
     if (stampHeartbeat) await pool.query(
       `insert into inventory_worker_health (job_name, last_started_at, updated_at)
@@ -359,17 +390,17 @@ async function expireInventoryReservationsWithReport({
     );
     client = await pool.connect();
     await client.query('begin');
-    const { skipped } = await countReservationExpiry(client, { organizationId: scope, graceMinutes, cardGrace });
+    const report = await countReservationExpiry(client, policy);
     // Payment/admin transitions can already hold the order while acquiring the reservation.
     // Skip contention on either row, so expiry never waits for an order while holding its reservation.
     const selected = await client.query(
-      `select r.id, r.organization_id, r.order_id
+      `select r.id, r.organization_id, r.order_id, o.payment_method as method
          ${dueReservations}
           and eligibility.reason is null
         order by r.expires_at, r.id
-        limit $4
+        limit $5
         for update of r, o skip locked`,
-      [graceMinutes, scope, cardGrace, Math.floor(Math.min(Math.max(Number(limit) || 100, 1), 500))]
+      [graceMinutes, scope, cardGrace, methods, Math.floor(Math.min(Math.max(Number(limit) || 100, 1), 500))]
     );
     for (const reservation of selected.rows) {
       const cancelled = await client.query(
@@ -377,15 +408,18 @@ async function expireInventoryReservationsWithReport({
             set status = 'cancelled',
                 payment_error = coalesce(payment_error, 'Stok rezervasyonu zaman aşımına uğradı'),
                 updated_at = now()
-          where organization_id = $2 and id = $4 and status = 'payment_pending'
+          where organization_id = $2 and id = $5 and status = 'payment_pending'
             and exists (
               select 1 ${dueReservations}
-                and r.id = $5 and eligibility.reason is null
+                and o.id = $5 and r.id = $6 and eligibility.reason is null
             )`,
-        [graceMinutes, reservation.organization_id, cardGrace, reservation.order_id, reservation.id]
+        [graceMinutes, reservation.organization_id, cardGrace, methods, reservation.order_id, reservation.id]
       );
+      const totals = report.byMethod[reservation.method] ??= { due: 0, skipped: {}, expired: 0 };
       if (cancelled.rowCount !== 1) {
-        skipped.cancel_update_missed = (skipped.cancel_update_missed || 0) + 1;
+        for (const skipped of [report.skipped, totals.skipped]) {
+          skipped.cancel_update_missed = (skipped.cancel_update_missed || 0) + 1;
+        }
         continue;
       }
       const result = await releaseReservation(client, {
@@ -398,6 +432,7 @@ async function expireInventoryReservationsWithReport({
         organizationId: reservation.organization_id,
       });
       expired.push(reservation.id);
+      totals.expired += 1;
     }
     if (stampHeartbeat) await client.query(
       `update inventory_worker_health
@@ -407,7 +442,7 @@ async function expireInventoryReservationsWithReport({
       ['inventory_reservation_expiry', expired.length]
     );
     await client.query('commit');
-    return { expired, skipped };
+    return { ...report, expired };
   } catch (error) {
     if (client) {
       await client.query('rollback').catch(() => {});
@@ -441,6 +476,7 @@ module.exports = {
   expireInventoryReservationsWithReport,
   guestReferenceHash,
   ibanGraceMinutes,
+  inventoryExpiryMethods,
   reactivateReservation,
   releaseReservation,
   reservationItems,

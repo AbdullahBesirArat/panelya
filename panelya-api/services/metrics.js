@@ -1,3 +1,4 @@
+const { workerMode } = require('./inventoryExpiryWorker');
 const crypto = require('crypto');
 
 const startedAt = new Date();
@@ -120,7 +121,7 @@ function prometheusMetrics() {
   return `${lines.join('\n')}\n`;
 }
 
-function inventoryWorkerHealthSnapshot(row, {
+function inventoryWorkerHeartbeatSnapshot(row, {
   now = Date.now(),
   staleMinutes = Number(process.env.INVENTORY_RESERVATION_WORKER_STALE_MINUTES || 10),
 } = {}) {
@@ -149,6 +150,18 @@ function inventoryWorkerHealthSnapshot(row, {
   };
 }
 
+function inventoryWorkerHealthSnapshot(row, { config, unavailable = false, ...options } = {}) {
+  const heartbeat = inventoryWorkerHeartbeatSnapshot(row, options);
+  if (unavailable) heartbeat.status = 'unavailable';
+  if (!config) return heartbeat;
+  const mode = workerMode(config);
+  return {
+    ...heartbeat, mode, methods: config.methods, heartbeatStatus: heartbeat.status,
+    status: mode === 'write' ? heartbeat.status : mode,
+    healthy: mode === 'write' && heartbeat.healthy,
+  };
+}
+
 function inventoryWorkerPrometheus(snapshot) {
   const successSeconds = snapshot?.lastSucceededAt
     ? Math.floor(new Date(snapshot.lastSucceededAt).getTime() / 1000)
@@ -163,6 +176,15 @@ function inventoryWorkerPrometheus(snapshot) {
     '# HELP panelya_inventory_reservation_worker_processed_count Reservations processed in the last successful run.',
     '# TYPE panelya_inventory_reservation_worker_processed_count gauge',
     `panelya_inventory_reservation_worker_processed_count ${Number(snapshot?.processedCount || 0)}`,
+    ...(snapshot?.mode ? [
+      '# HELP panelya_inventory_reservation_worker_mode Current expiry worker mode.',
+      '# TYPE panelya_inventory_reservation_worker_mode gauge',
+      `panelya_inventory_reservation_worker_mode{mode="${snapshot.mode}"} 1`,
+      '# HELP panelya_inventory_reservation_worker_method_enabled Whether expiry includes this method.',
+      '# TYPE panelya_inventory_reservation_worker_method_enabled gauge',
+      ...['iban', 'card'].map((method) =>
+        `panelya_inventory_reservation_worker_method_enabled{method="${method}"} ${Number(snapshot.methods.includes(method))}`),
+    ] : []),
   ].join('\n');
 }
 

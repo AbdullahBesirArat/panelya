@@ -4,6 +4,7 @@ const {
   countReservationExpiry,
   expireInventoryReservationsWithReport,
   ibanGraceMinutes,
+  inventoryExpiryMethods,
 } = require('./inventoryReservations');
 
 // In-process scheduler for the inventory reservation expiry job (R10).
@@ -32,6 +33,7 @@ function clampInt(value, fallback, min, max) {
 function workerConfig(env = process.env) {
   return {
     enabled: env.INVENTORY_EXPIRY_WORKER_ENABLED === 'true',
+    methods: inventoryExpiryMethods(env.INVENTORY_EXPIRY_METHODS ?? ''),
     dryRun: env.INVENTORY_EXPIRY_DRY_RUN === 'true',
     graceMinutes: ibanGraceMinutes(env.INVENTORY_EXPIRY_IBAN_GRACE_MINUTES ?? ''),
     cardGrace: cardGraceMinutes(env.INVENTORY_EXPIRY_CARD_GRACE_MINUTES ?? ''),
@@ -40,37 +42,42 @@ function workerConfig(env = process.env) {
   };
 }
 
+function workerMode({ enabled, dryRun, methods }) {
+  if (!enabled) return 'disabled';
+  if (dryRun) return 'dry_run';
+  return methods.length ? 'write' : 'no_methods';
+}
+
 async function countDueReservations(pool = db.getSystemPool()) {
   return (await countReservationExpiry(pool)).due;
 }
 
 async function runExpiryOnce({
   config = workerConfig(),
-  expire = (options) => expireInventoryReservationsWithReport({
-    ...options, graceMinutes: config.graceMinutes, cardGrace: config.cardGrace,
-  }),
-  count = () => countReservationExpiry(db.getSystemPool(), {
-    graceMinutes: config.graceMinutes, cardGrace: config.cardGrace,
-  }),
+  expire = expireInventoryReservationsWithReport,
+  count = (policy) => countReservationExpiry(db.getSystemPool(), policy),
   logger = console,
 } = {}) {
   if (running) return { skipped: true };
   running = true;
   try {
+    const methods = config.methods ?? inventoryExpiryMethods();
+    const policy = { methods, graceMinutes: config.graceMinutes, cardGrace: config.cardGrace };
     if (config.dryRun) {
-      const report = await count();
-      const { due, skipped = {} } = typeof report === 'number' ? { due: report } : report;
+      const report = await count(policy);
+      const { due, skipped = {}, byMethod = {} } = typeof report === 'number' ? { due: report } : report;
       const skippedCount = Object.values(skipped).reduce((total, value) => total + value, 0);
-      logger.info(`Inventory reservation expiry (DRY RUN): eligible=${due} skipped=${skippedCount} reasons=${JSON.stringify(skipped)}`);
-      return { dryRun: true, due, skipped };
+      logger.info(`Inventory reservation expiry (DRY RUN): eligible=${due} skipped=${skippedCount} reasons=${JSON.stringify(skipped)} methods=${JSON.stringify(methods)} byMethod=${JSON.stringify(byMethod)}`);
+      return { dryRun: true, due, skipped, methods, byMethod };
     }
-    const report = await expire({ limit: config.limit });
-    const { expired, skipped = {} } = Array.isArray(report) ? { expired: report } : report;
+    if (methods.length === 0) return { expired: 0, skipped: {}, methods, byMethod: {} };
+    const report = await expire({ ...policy, limit: config.limit });
+    const { expired, skipped = {}, byMethod = {} } = Array.isArray(report) ? { expired: report } : report;
     const skippedCount = Object.values(skipped).reduce((total, value) => total + value, 0);
     if (expired.length > 0 || skippedCount > 0) {
-      logger.info(`Inventory reservation expiry: expired=${expired.length} skipped=${skippedCount} reasons=${JSON.stringify(skipped)}`);
+      logger.info(`Inventory reservation expiry: expired=${expired.length} skipped=${skippedCount} reasons=${JSON.stringify(skipped)} methods=${JSON.stringify(methods)} byMethod=${JSON.stringify(byMethod)}`);
     }
-    return { expired: expired.length, skipped };
+    return { expired: expired.length, skipped, methods, byMethod };
   } catch (error) {
     logger.warn(`Stok rezervasyonu suresi dolma islenemedi: ${error.message}`);
     return { error: true };
@@ -100,4 +107,5 @@ module.exports = {
   runExpiryOnce,
   startInventoryExpiryWorker,
   workerConfig,
+  workerMode,
 };

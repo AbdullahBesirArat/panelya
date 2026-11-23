@@ -1049,7 +1049,20 @@ if (!ADMIN_URL) {
     });
   });
 
-  test('inventory reservations prevent oversell and remain idempotent across consume, release, cancel and expiry', async () => {
+  function withExpiryMethods(run) {
+    return async () => {
+      const original = process.env.INVENTORY_EXPIRY_METHODS;
+      process.env.INVENTORY_EXPIRY_METHODS = 'iban,card';
+      try {
+        await run();
+      } finally {
+        if (original === undefined) delete process.env.INVENTORY_EXPIRY_METHODS;
+        else process.env.INVENTORY_EXPIRY_METHODS = original;
+      }
+    };
+  }
+
+  test('inventory reservations prevent oversell and remain idempotent across consume, release, cancel and expiry', withExpiryMethods(async () => {
     const stamp = Date.now();
     const product = await admin.query(
       `insert into products (organization_id, name, price, stock, status)
@@ -1288,7 +1301,7 @@ if (!ADMIN_URL) {
     assert.equal(lockRace.filter((result) => result.status === 'fulfilled').length, 1);
     assert.equal(lockRace.filter((result) => result.status === 'rejected').length, 1);
     assert.doesNotMatch(String(lockRace.find((result) => result.status === 'rejected').reason.message), /deadlock/i);
-  });
+  }));
 
   test('coupon engine evaluates scope and stacking, snapshots allocations and enforces usage limits concurrently', async () => {
     const stamp = Date.now();
@@ -5884,7 +5897,7 @@ const integrationService = require('../../modules/integrations/service');
     }
   });
 
-  test('R10 expiry worker: dry run counts and changes nothing; a real run expires, cancels and stamps the heartbeat', async () => {
+  test('R10 expiry worker: dry run counts and changes nothing; a real run expires, cancels and stamps the heartbeat', withExpiryMethods(async () => {
     const { runExpiryOnce } = require('../../services/inventoryExpiryWorker');
     const quiet = { info() {}, warn() {} };
     const stamp = Date.now();
@@ -5934,7 +5947,7 @@ const integrationService = require('../../modules/integrations/service');
       "select last_succeeded_at is not null as succeeded, last_error from inventory_worker_health where job_name = 'inventory_reservation_expiry'"
     );
     assert.deepEqual(health.rows[0], { succeeded: true, last_error: null });
-  });
+  }));
 
   async function seedExpiryReservation(org, tag, {
     expired, paymentMethod = 'card', product, customerId = (org === orgA ? fixtures.a : fixtures.b).customerId,
@@ -5963,7 +5976,7 @@ const integrationService = require('../../modules/integrations/service');
     return { org, id: reservation.reservation.id, orderId: order.rows[0].id, variantId: seeded.variantId };
   }
 
-  test('R10 readiness: a dry run is a strict no-op across tenants, parallel workers expire each reservation exactly once, repeats are idempotent and a failed tick never wedges the worker', async () => {
+  test('R10 readiness: a dry run is a strict no-op across tenants, parallel workers expire each reservation exactly once, repeats are idempotent and a failed tick never wedges the worker', withExpiryMethods(async () => {
     const { runExpiryOnce, countDueReservations } = require('../../services/inventoryExpiryWorker');
     const { expireInventoryReservationsWithReport } = require('../../services/inventoryReservations');
     const quiet = { info() {}, warn() {} };
@@ -6081,7 +6094,9 @@ const integrationService = require('../../modules/integrations/service');
     }
     const stateOf = async (item) => (await admin.query(
       `select to_jsonb(r) as reservation, to_jsonb(o) as "order", to_jsonb(v) as variant,
-              to_jsonb(c) as redemption
+              to_jsonb(c) as redemption,
+              (select md5(coalesce(jsonb_agg(to_jsonb(m) order by m.id)::text, ''))
+                 from inventory_movements m where m.organization_id = $1 and m.variant_id = $3) as movement_hash
          from inventory_reservations r
          join orders o on o.organization_id = r.organization_id and o.id = r.order_id
          join product_variants v on v.organization_id = r.organization_id and v.id = $3
@@ -6100,11 +6115,17 @@ const integrationService = require('../../modules/integrations/service');
     const beforeClassifiedDryRun = await snapshot();
     assert.deepEqual(await runExpiryOnce({
       config: { dryRun: true, graceMinutes: 60, limit: 1 }, logger: quiet,
-    }), { dryRun: true, due: 2, skipped });
+    }), { dryRun: true, due: 2, skipped, methods: ['iban', 'card'], byMethod: {
+      card: { due: 1, skipped: { order_not_pending: 1 }, expired: 0 },
+      iban: { due: 1, skipped: { payment_state: 2, iban_grace: 1 }, expired: 0 },
+    } });
     assert.deepEqual(await snapshot(), beforeClassifiedDryRun);
     assert.deepEqual(await expireInventoryReservationsWithReport({
       pool: systemPool, organizationId: orgA, graceMinutes: 60, limit: 1,
-    }), { expired: [unpaid.id], skipped });
+    }), { expired: [unpaid.id], due: 1, skipped, methods: ['iban', 'card'], byMethod: {
+      card: { due: 0, skipped: { order_not_pending: 1 }, expired: 0 },
+      iban: { due: 1, skipped: { payment_state: 2, iban_grace: 1 }, expired: 1 },
+    } });
     assert.deepEqual(await Promise.all(skippedFixtures.map(stateOf)), untouched);
     assert.deepEqual(await Promise.all(skippedFixtures.map(releaseCount)), [0, 0, 0, 0, 0]);
     const expiredUnpaid = await stateOf(unpaid);
@@ -6171,6 +6192,11 @@ const integrationService = require('../../modules/integrations/service');
     assert.deepEqual(await expirePendingOrders(scoped), {
       ok: true, expiredCount: 0, expired: [],
       skipped: { ...skipped, callback_pending: 1, card_grace: 1 },
+      methods: ['iban', 'card'],
+      byMethod: {
+        card: { due: 0, skipped: { order_not_pending: 1, callback_pending: 1, card_grace: 1 }, expired: 0 },
+        iban: { due: 0, skipped: { payment_state: 2, iban_grace: 1 }, expired: 0 },
+      },
     });
     assert.deepEqual(await Promise.all([callback, card].map(stateOf)), protectedState);
     assert.deepEqual(await Promise.all([callback, card].map(releaseCount)), [0, 0]);
@@ -6181,28 +6207,28 @@ const integrationService = require('../../modules/integrations/service');
     assert.deepEqual(await expirePendingOrders(scoped), {
       ok: true, expiredCount: 1, expired: [{ reservation_id: card.id, status: 'expired' }],
       skipped: { ...skipped, callback_pending: 1 },
+      methods: ['iban', 'card'],
+      byMethod: {
+        card: { due: 1, skipped: { order_not_pending: 1, callback_pending: 1 }, expired: 1 },
+        iban: { due: 0, skipped: { payment_state: 2, iban_grace: 1 }, expired: 0 },
+      },
     });
     assert.equal(await releaseCount(card), 1);
     assert.deepEqual(await stateOf(callback), protectedState[0]);
 
-    const { execFileSync } = require('node:child_process');
-    const runCli = (script, ...args) => JSON.parse(execFileSync(process.execPath, [
-      path.join(__dirname, '..', '..', 'scripts', script), ...args,
-    ], {
-      encoding: 'utf8',
-      timeout: 15_000,
-      env: {
-        ...process.env,
-        NODE_ENV: 'test',
-        SYSTEM_DATABASE_URL: urlWithUser(ADMIN_URL, 'panelya_system_runtime', PASSWORDS.system),
-        INVENTORY_EXPIRY_IBAN_GRACE_MINUTES: '60',
-        INVENTORY_EXPIRY_CARD_GRACE_MINUTES: '60',
-      },
-    }));
+    const runCli = (script, ...args) => runExpiryCli(script, args, {
+      INVENTORY_EXPIRY_IBAN_GRACE_MINUTES: '60',
+      INVENTORY_EXPIRY_CARD_GRACE_MINUTES: '60',
+    });
     for (const script of ['expire-inventory-reservations.js', 'expire-pending-orders.js']) {
       const item = await seedReservation(orgB, path.basename(script, '.js'), { expired: true });
       const beforeCli = await snapshot();
-      assert.deepEqual(runCli(script), { due: 1, skipped: { ...skipped, callback_pending: 1 } });
+      assert.deepEqual(runCli(script), { due: 1, skipped: { ...skipped, callback_pending: 1 },
+        methods: ['iban', 'card'], byMethod: {
+          card: { due: 1, skipped: { order_not_pending: 1, callback_pending: 1 }, expired: 0 },
+          iban: { due: 0, skipped: { payment_state: 2, iban_grace: 1 }, expired: 0 },
+        },
+      });
       assert.deepEqual(await snapshot(), beforeCli, `${script} preview must change no rows`);
       const applied = runCli(script, '--apply');
       assert.equal(applied.ok, true);
@@ -6212,7 +6238,57 @@ const integrationService = require('../../modules/integrations/service');
       assert.equal(await releaseCount(item), 1);
       assert.deepEqual((await snapshot()).inventory_worker_health, beforeCli.inventory_worker_health);
     }
-  });
+    for (const [script, method, excludedMethod] of [
+      ['expire-inventory-reservations.js', 'iban', 'card'],
+      ['expire-pending-orders.js', 'card', 'iban'],
+    ]) {
+      const eligible = await seedReservation(orgA, script + '-allowed', { expired: true, paymentMethod: method });
+      const excluded = await seedReservation(orgB, script + '-excluded', { expired: true, paymentMethod: excludedMethod });
+      await admin.query(
+        "update inventory_reservations set expires_at = now() - interval '2 hours' where id = any($1::uuid[])",
+        [[eligible.id, excluded.id]]
+      );
+      const excludedBefore = await stateOf(excluded);
+      const beforeCli = await snapshot();
+      process.env.INVENTORY_EXPIRY_METHODS = method;
+      const preview = runCli(script, '--methods=iban,card');
+      assert.deepEqual(preview.methods, [method]);
+      assert.equal(preview.due, 1);
+      assert.equal(preview.byMethod[excludedMethod].skipped.method_disabled, 2);
+      assert.deepEqual(await snapshot(), beforeCli);
+      const applied = runCli(script, '--apply', '--methods=iban,card');
+      assert.deepEqual(applied.methods, [method]);
+      assert.equal(applied.expiredCount, 1);
+      assert.equal(applied.byMethod[method].expired, 1);
+      assert.deepEqual(applied.skipped, preview.skipped);
+      assert.deepEqual(applied.reservationIds ?? applied.expired.map(({ reservation_id }) => reservation_id), [eligible.id]);
+      assert.deepEqual(await stateOf(excluded), excludedBefore);
+      assert.equal(await releaseCount(excluded), 0);
+      assert.equal(await releaseCount(eligible), 1);
+      assert.equal(runCli(script, '--apply').expiredCount, 0);
+      assert.deepEqual((await snapshot()).inventory_worker_health, beforeCli.inventory_worker_health);
+      process.env.INVENTORY_EXPIRY_METHODS = 'iban,card';
+      assert.equal(runCli(script, '--apply').expiredCount, 1);
+      assert.equal(await releaseCount(excluded), 1);
+    }
+  }));
+
+  function runExpiryCli(script, args, overrides = {}) {
+    const { execFileSync } = require('node:child_process');
+    return JSON.parse(execFileSync(process.execPath, [
+      path.join(__dirname, '..', '..', 'scripts', script), ...args,
+    ], {
+      cwd: __dirname,
+      encoding: 'utf8',
+      timeout: 15_000,
+      env: {
+        ...process.env,
+        NODE_ENV: 'test',
+        SYSTEM_DATABASE_URL: urlWithUser(ADMIN_URL, 'panelya_system_runtime', PASSWORDS.system),
+        ...overrides,
+      },
+    }));
+  }
 
   test('R10 expire-pending over HTTP: auth, tenant isolation, grace, stock, audit, heartbeat and limits', async () => {
     const express = require('express');
@@ -6252,14 +6328,24 @@ const integrationService = require('../../modules/integrations/service');
       });
       return { status: response.status, body: await response.json() };
     }
-    function assertReport(result, ids, skipped = {}) {
-      assert.deepEqual(result, {
+    function assertReport(result, ids, skipped = {}, methods = ['iban', 'card']) {
+      const { byMethod, ...body } = result.body;
+      assert.equal(Object.values(byMethod).reduce((sum, entry) => sum + entry.expired, 0), ids.length);
+      const skippedTotals = {};
+      for (const entry of Object.values(byMethod)) {
+        for (const [reason, count] of Object.entries(entry.skipped)) {
+          skippedTotals[reason] = (skippedTotals[reason] || 0) + count;
+        }
+      }
+      assert.deepEqual(skippedTotals, skipped);
+      assert.deepEqual({ ...result, body }, {
         status: 200,
         body: {
           ok: true,
           expiredCount: ids.length,
           expired: ids.map((reservation_id) => ({ reservation_id, status: 'expired' })),
           skipped,
+          methods,
         },
       });
     }
@@ -6305,7 +6391,9 @@ const integrationService = require('../../modules/integrations/service');
       "select md5(to_jsonb(h)::text) as checksum from inventory_worker_health h where job_name = 'inventory_reservation_expiry'"
     )).rows;
     const auditValue = (expiredCount, skipped) => ({
-      expiredCount, skipped, ibanGraceMinutes: 60, cardGraceMinutes: 30, scoped: true, organizationId: tenant.id,
+      expiredCount, skipped, methods: ['iban', 'card'],
+      byMethod: { card: { due: 1, skipped, expired: 1 } },
+      ibanGraceMinutes: 60, cardGraceMinutes: 30, scoped: true, organizationId: tenant.id,
     });
     // The response may arrive before request-context COMMIT completes.
     async function committedRows(sql, params, expectedCount) {
@@ -6318,6 +6406,7 @@ const integrationService = require('../../modules/integrations/service');
     }
 
     const env = {
+      INVENTORY_EXPIRY_METHODS: 'iban,card',
       INVENTORY_EXPIRY_IBAN_GRACE_MINUTES: '60',
       INVENTORY_EXPIRY_CARD_GRACE_MINUTES: '30',
       PAYMENT_PENDING_EXPIRE_LIMIT: undefined,
@@ -6426,6 +6515,61 @@ const integrationService = require('../../modules/integrations/service');
       assertReport(await post({ token: appToken('admin') }), [tenantAdminItem.id], allSkips);
       await assertReleased(tenantAdminItem);
       assert.deepEqual(await stateOf(foreign), foreignBefore);
+
+      // Use independent variants and real redemptions so all excluded effects can be fingerprinted.
+      for (const methods of [[], ['iban'], ['card'], ['iban', 'card']]) {
+        const tag = methods.join('-') || 'none';
+        const items = await Promise.all(['iban', 'card'].map(async (paymentMethod) => {
+          const item = await seed(tenant.id, 'policy-' + tag + '-' + paymentMethod, { paymentMethod });
+          await redeem(item);
+          return { ...item, paymentMethod };
+        }));
+        await admin.query(
+          "update inventory_reservations set expires_at = now() - interval '2 hours' where id = $1",
+          [items[0].id]
+        );
+        const before = await Promise.all(items.map(stateOf));
+        if (methods.length) process.env.INVENTORY_EXPIRY_METHODS = methods.join(',');
+        else delete process.env.INVENTORY_EXPIRY_METHODS;
+        const included = items.filter(({ paymentMethod }) => methods.includes(paymentMethod));
+        const excluded = items.filter(({ paymentMethod }) => !methods.includes(paymentMethod));
+        const skips = { order_not_pending: 1, payment_state: 1 };
+        if (methods.includes('card')) Object.assign(skips, { callback_pending: 1, card_grace: 1 });
+        if (methods.includes('iban')) skips.iban_grace = 1;
+        const disabledCount = excluded.length + 2 * Number(!methods.includes('card')) + Number(!methods.includes('iban'));
+        if (disabledCount) skips.method_disabled = disabledCount;
+        const { runExpiryOnce, workerConfig } = require('../../services/inventoryExpiryWorker');
+        const config = workerConfig({ ...process.env, INVENTORY_EXPIRY_WORKER_ENABLED: 'true', INVENTORY_EXPIRY_DRY_RUN: 'false' });
+        const dry = await runExpiryOnce({ config: { ...config, dryRun: true }, logger: { info() {}, warn: assert.fail } });
+        assert.equal(dry.dryRun, true);
+        assert.deepEqual(dry.methods, methods);
+        assert.ok(dry.due >= included.length);
+        assert.deepEqual(await Promise.all(items.map(stateOf)), before);
+        assert.deepEqual(await heartbeat(), heartbeatBefore);
+        if (!methods.length) {
+          assert.deepEqual(await runExpiryOnce({ config }), { expired: 0, skipped: {}, methods: [], byMethod: {} });
+          for (const script of ['expire-inventory-reservations.js', 'expire-pending-orders.js']) {
+            const applied = runExpiryCli(script, ['--apply', '--methods=iban,card']);
+            assert.deepEqual(applied.methods, []);
+            assert.equal(applied.expiredCount, 0);
+            assert.equal(applied.due, 0);
+            assert.ok(applied.skipped.method_disabled >= items.length);
+          }
+          assert.deepEqual(await Promise.all(items.map(stateOf)), before);
+        }
+        const report = await post({ body: { methods: ['iban', 'card'] }, query: '?methods=iban,card' });
+        assertReport(report, included.map(({ id }) => id), skips, methods);
+        for (const item of excluded) assert.deepEqual(await stateOf(item), before[items.indexOf(item)]);
+        for (const item of included) await assertReleased(item, ['released']);
+        const settled = await Promise.all(items.map(stateOf));
+        assertReport(await post(), [], skips, methods);
+        assert.deepEqual(await Promise.all(items.map(stateOf)), settled);
+        assert.deepEqual(await Promise.all(protectedItems.map(stateOf)), protectedBefore);
+        assert.deepEqual(await heartbeat(), heartbeatBefore);
+        process.env.INVENTORY_EXPIRY_METHODS = 'iban,card';
+        assertReport(await post(), excluded.map(({ id }) => id), allSkips);
+        for (const item of excluded) await assertReleased(item, ['released']);
+      }
 
       // Advancing the stored deadlines past grace makes both holds eligible.
       for (const [item, minutes] of [[card, 31], [iban, 61]]) {

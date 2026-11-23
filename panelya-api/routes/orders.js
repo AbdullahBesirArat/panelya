@@ -267,6 +267,8 @@ router.post('/expire-pending', requireAuth, requireRole(['super_admin', 'owner',
       newValue: {
         expiredCount: report.expiredCount,
         skipped: report.skipped,
+        methods: report.methods,
+        byMethod: report.byMethod,
         ibanGraceMinutes: ibanGrace,
         cardGraceMinutes: cardGrace,
         scoped: true,

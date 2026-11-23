@@ -68,6 +68,11 @@ async function main() {
       SYSTEM_DATABASE_URL: `postgresql://panelya_system_runtime:${passwords.system}@${base}`,
       DATABASE_URL: `postgresql://panelya_runtime:${passwords.runtime}@${base}`,
       MFA_SECRET_ENCRYPTION_KEY: crypto.randomBytes(32).toString('hex'),
+      // Test harness only. POST /api/orders/expire-pending keeps its request-scoped tenant
+      // transaction open while a large expiry batch runs on the system pool, so a loaded machine
+      // can exceed the 15 s production default and the DB then kills that connection.
+      // The production default in db.js is unchanged.
+      DB_IDLE_IN_TRANSACTION_TIMEOUT_MS: process.env.DB_IDLE_IN_TRANSACTION_TIMEOUT_MS || '60000',
     };
 
     const result = spawnSync(process.execPath, ['--test', ...(process.env.TEST_NAME_PATTERN ? ['--test-name-pattern', process.env.TEST_NAME_PATTERN] : []), 'test/integration/tenant-rls.test.js'], {
