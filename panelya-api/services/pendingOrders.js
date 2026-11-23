@@ -1,11 +1,12 @@
-const { expireInventoryReservations } = require('./inventoryReservations');
+const { expireInventoryReservationsWithReport } = require('./inventoryReservations');
 
-async function expirePendingOrders({ limit = 100, organizationId = null } = {}) {
-  const reservationIds = await expireInventoryReservations({ limit, organizationId });
-  return reservationIds.map((reservationId) => ({
+async function expirePendingOrders(options) {
+  const { expired: reservationIds, skipped } = await expireInventoryReservationsWithReport(options);
+  const expired = reservationIds.map((reservationId) => ({
     reservation_id: reservationId,
     status: 'expired',
   }));
+  return { ok: true, expiredCount: expired.length, expired, skipped };
 }
 
 module.exports = {

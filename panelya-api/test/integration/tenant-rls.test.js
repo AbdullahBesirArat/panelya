@@ -5936,43 +5936,45 @@ const integrationService = require('../../modules/integrations/service');
     assert.deepEqual(health.rows[0], { succeeded: true, last_error: null });
   });
 
+  async function seedExpiryReservation(org, tag, {
+    expired, paymentMethod = 'card', product, customerId = (org === orgA ? fixtures.a : fixtures.b).customerId,
+  }) {
+    const seeded = product || await seedCartProduct(org, tag, { price: 100, stock: 5 });
+    const order = await admin.query(
+      "insert into orders (organization_id, order_code, customer_id, total, status, payment_method) values ($1,$2,$3,100,'payment_pending',$4) returning id",
+      [org, `RES-${tag}`, customerId, paymentMethod]
+    );
+    await admin.query(
+      `insert into order_items (organization_id, order_id, product_id, variant_id, product_name, quantity, unit_price)
+       values ($1,$2,$3,$4,'Reservation fixture item',2,100)`,
+      [org, order.rows[0].id, seeded.productId, seeded.variantId]
+    );
+    const reservation = await asTenant(runtimePool, org, (client) => createInventoryReservation(client, {
+      organizationId: org,
+      orderId: order.rows[0].id,
+      customerId,
+      items: [{ product_id: seeded.productId, variant_id: seeded.variantId, quantity: 2, unit_price: 100 }],
+      idempotencyKey: `reservation-${tag}`,
+      ttlMinutes: 15,
+    }));
+    if (expired) {
+      await admin.query("update inventory_reservations set expires_at = now() - interval '1 minute' where id = $1", [reservation.reservation.id]);
+    }
+    return { org, id: reservation.reservation.id, orderId: order.rows[0].id, variantId: seeded.variantId };
+  }
+
   test('R10 readiness: a dry run is a strict no-op across tenants, parallel workers expire each reservation exactly once, repeats are idempotent and a failed tick never wedges the worker', async () => {
     const { runExpiryOnce, countDueReservations } = require('../../services/inventoryExpiryWorker');
     const { expireInventoryReservationsWithReport } = require('../../services/inventoryReservations');
     const quiet = { info() {}, warn() {} };
     const stamp = Date.now();
-    const fixtureOf = (org) => (org === orgA ? fixtures.a : fixtures.b);
+    const seedReservation = (org, tag, options) => seedExpiryReservation(org, `r10-${tag}-${stamp}`, options);
 
     // Start from a known state: nothing due anywhere (earlier tests may have left rows).
     await admin.query("update inventory_reservations set expires_at = now() + interval '1 day' where status = 'active' and expires_at <= now()");
     assert.equal(await countDueReservations(systemPool), 0);
     const empty = await runExpiryOnce({ config: { dryRun: false, limit: 500 }, logger: quiet });
     assert.equal(empty.expired, 0, 'an empty database is a clean no-op');
-
-    async function seedReservation(org, tag, { expired, paymentMethod = 'card' }) {
-      const seeded = await seedCartProduct(org, `r10ready-${tag}`, { price: 100, stock: 5 });
-      const order = await admin.query(
-        "insert into orders (organization_id, order_code, customer_id, total, status, payment_method) values ($1,$2,$3,100,'payment_pending',$4) returning id",
-        [org, `R10R-${tag}-${stamp}`, fixtureOf(org).customerId, paymentMethod]
-      );
-      await admin.query(
-        `insert into order_items (organization_id, order_id, product_id, variant_id, product_name, quantity, unit_price)
-         values ($1,$2,$3,$4,'R10 readiness item',2,100)`,
-        [org, order.rows[0].id, seeded.productId, seeded.variantId]
-      );
-      const reservation = await asTenant(runtimePool, org, (client) => createInventoryReservation(client, {
-        organizationId: org,
-        orderId: order.rows[0].id,
-        customerId: fixtureOf(org).customerId,
-        items: [{ product_id: seeded.productId, variant_id: seeded.variantId, quantity: 2, unit_price: 100 }],
-        idempotencyKey: `r10-ready-${tag}-${stamp}`,
-        ttlMinutes: 15,
-      }));
-      if (expired) {
-        await admin.query("update inventory_reservations set expires_at = now() - interval '1 minute' where id = $1", [reservation.reservation.id]);
-      }
-      return { org, id: reservation.reservation.id, orderId: order.rows[0].id, variantId: seeded.variantId };
-    }
 
     const due = [
       await seedReservation(orgA, 'a-due-1', { expired: true }),
@@ -5986,7 +5988,7 @@ const integrationService = require('../../modules/integrations/service');
     const tables = [
       'inventory_reservations', 'inventory_reservation_items', 'orders', 'products',
       'product_variants', 'inventory_movements', 'coupon_redemptions', 'order_events',
-      'audit_logs', 'inventory_worker_health',
+      'audit_logs', 'payment_callback_events', 'inventory_worker_health',
     ];
     const snapshot = async () => Object.fromEntries((await admin.query(tables.map((table) => `
       select '${table}' as name, count(*)::int as count,
@@ -6144,6 +6146,424 @@ const integrationService = require('../../modules/integrations/service');
     assert.deepEqual(retried.sort(), [foreign.id, retry.id].sort());
     assert.deepEqual(await Promise.all([foreign, retry].map(releaseCount)), [1, 1]);
     assert.deepEqual(await expireInventoryReservations({ pool: systemPool, graceMinutes: 60 }), []);
+
+    const callback = await seedReservation(orgA, 'callback-pending', { expired: true });
+    const card = await seedReservation(orgA, 'card-grace', { expired: true });
+    const token = `r10-token-${stamp}`;
+    const cardCode = (await admin.query(
+      'update orders set payment_token = $1 where id = $2 returning order_code', [token, card.orderId]
+    )).rows[0].order_code;
+    await admin.query(
+      `insert into payment_callback_events (organization_id, provider, order_code, processing_status)
+       select organization_id, 'iyzico', order_code, 'processing' from orders where id = $1`,
+      [callback.orderId]
+    );
+    await admin.query(
+      `insert into payment_callback_events (organization_id, provider, order_code, processing_status)
+       values ($1, 'iyzico', $3, 'processed'), ($2, 'iyzico', $3, 'pending')`,
+      [orgA, orgB, cardCode]
+    );
+
+    // The route sends this service's report directly as JSON.
+    const { expirePendingOrders } = require('../../services/pendingOrders');
+    const scoped = { pool: systemPool, organizationId: orgA, graceMinutes: 60, cardGrace: 60 };
+    const protectedState = await Promise.all([callback, card].map(stateOf));
+    assert.deepEqual(await expirePendingOrders(scoped), {
+      ok: true, expiredCount: 0, expired: [],
+      skipped: { ...skipped, callback_pending: 1, card_grace: 1 },
+    });
+    assert.deepEqual(await Promise.all([callback, card].map(stateOf)), protectedState);
+    assert.deepEqual(await Promise.all([callback, card].map(releaseCount)), [0, 0]);
+    await admin.query(
+      "update inventory_reservations set expires_at = now() - interval '61 minutes' where id = $1",
+      [card.id]
+    );
+    assert.deepEqual(await expirePendingOrders(scoped), {
+      ok: true, expiredCount: 1, expired: [{ reservation_id: card.id, status: 'expired' }],
+      skipped: { ...skipped, callback_pending: 1 },
+    });
+    assert.equal(await releaseCount(card), 1);
+    assert.deepEqual(await stateOf(callback), protectedState[0]);
+
+    const { execFileSync } = require('node:child_process');
+    const runCli = (script, ...args) => JSON.parse(execFileSync(process.execPath, [
+      path.join(__dirname, '..', '..', 'scripts', script), ...args,
+    ], {
+      encoding: 'utf8',
+      timeout: 15_000,
+      env: {
+        ...process.env,
+        NODE_ENV: 'test',
+        SYSTEM_DATABASE_URL: urlWithUser(ADMIN_URL, 'panelya_system_runtime', PASSWORDS.system),
+        INVENTORY_EXPIRY_IBAN_GRACE_MINUTES: '60',
+        INVENTORY_EXPIRY_CARD_GRACE_MINUTES: '60',
+      },
+    }));
+    for (const script of ['expire-inventory-reservations.js', 'expire-pending-orders.js']) {
+      const item = await seedReservation(orgB, path.basename(script, '.js'), { expired: true });
+      const beforeCli = await snapshot();
+      assert.deepEqual(runCli(script), { due: 1, skipped: { ...skipped, callback_pending: 1 } });
+      assert.deepEqual(await snapshot(), beforeCli, `${script} preview must change no rows`);
+      const applied = runCli(script, '--apply');
+      assert.equal(applied.ok, true);
+      assert.equal(applied.expiredCount, 1);
+      assert.deepEqual(applied.reservationIds ?? applied.expired.map(({ reservation_id }) => reservation_id), [item.id]);
+      assert.equal((await stateOf(item)).reservation.status, 'expired');
+      assert.equal(await releaseCount(item), 1);
+      assert.deepEqual((await snapshot()).inventory_worker_health, beforeCli.inventory_worker_health);
+    }
+  });
+
+  test('R10 expire-pending over HTTP: auth, tenant isolation, grace, stock, audit, heartbeat and limits', async () => {
+    const express = require('express');
+    const { setTimeout: delay } = require('node:timers/promises');
+    const { attachAuthIfPresent } = require('../../middleware/auth');
+    const { attachSession } = require('../../middleware/authSession');
+    const { createAppAccessToken, createAdminAccessToken } = require('../../services/authTokens');
+    const stamp = crypto.randomUUID();
+    const tenantIds = [];
+    const customerIds = new Map();
+    let tenant;
+    let foreignTenant;
+    let user;
+    let platformAdmin;
+    let server;
+    let insertedHeartbeat = false;
+    const appToken = (role) => createAppAccessToken({
+      user,
+      membership: { role, organization: tenant },
+    });
+    const app = express();
+    app.use(express.json());
+    app.use(attachAuthIfPresent);
+    app.use(attachSession);
+    app.use(appDb.requestContextMiddleware);
+    app.use('/api/orders', require('../../routes/orders'));
+    app.use((err, _req, res, _next) => res.status(err.status || 500).json({ error: String(err.message || err) }));
+    async function post({ token = appToken('owner'), body = {}, headers = {}, query = '' } = {}) {
+      const response = await fetch(`http://127.0.0.1:${server.address().port}/api/orders/expire-pending${query}`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          ...(token ? { authorization: `Bearer ${token}` } : {}),
+          ...headers,
+        },
+        body: JSON.stringify(body),
+      });
+      return { status: response.status, body: await response.json() };
+    }
+    function assertReport(result, ids, skipped = {}) {
+      assert.deepEqual(result, {
+        status: 200,
+        body: {
+          ok: true,
+          expiredCount: ids.length,
+          expired: ids.map((reservation_id) => ({ reservation_id, status: 'expired' })),
+          skipped,
+        },
+      });
+    }
+    const seed = (org, tag, options = {}) => seedExpiryReservation(org, `http-${tag}-${stamp}`, {
+      expired: true, customerId: customerIds.get(org), ...options,
+    });
+    const stateOf = async ({ org, id, orderId, variantId }) => (await admin.query(
+      `select r.status as reservation_status, o.status as order_status, v.reserved, v.on_hand,
+              md5(to_jsonb(r)::text) as reservation_hash, md5(to_jsonb(o)::text) as order_hash,
+              md5(to_jsonb(v)::text) as variant_hash,
+              (select md5(coalesce(jsonb_agg(to_jsonb(m) order by m.id)::text, ''))
+                 from inventory_movements m where m.organization_id = $1 and m.variant_id = $4) as movement_hash,
+              (select coalesce(jsonb_agg(jsonb_build_array(m.on_hand_delta, m.reserved_delta) order by m.id), '[]'::jsonb)
+                 from inventory_movements m where m.organization_id = $1 and m.reference_id = $2::uuid::text
+                   and m.movement_type = 'reservation_release') as releases,
+              (select md5(coalesce(jsonb_agg(to_jsonb(c) order by c.id)::text, ''))
+                 from coupon_redemptions c where c.organization_id = $1 and c.order_id = $3) as redemption_hash,
+              (select coalesce(jsonb_agg(c.status order by c.id), '[]'::jsonb)
+                 from coupon_redemptions c where c.organization_id = $1 and c.order_id = $3) as redemptions
+         from inventory_reservations r
+         join orders o on o.organization_id = r.organization_id and o.id = r.order_id
+         join product_variants v on v.organization_id = r.organization_id and v.id = $4
+        where r.organization_id = $1 and r.id = $2 and o.id = $3`,
+      [org, id, orderId, variantId]
+    )).rows[0];
+    function assertHeld(state) {
+      assert.equal(state.reservation_status, 'active');
+      assert.equal(state.reserved, 2);
+      assert.equal(state.on_hand, 5);
+      assert.deepEqual(state.releases, []);
+    }
+    async function assertReleased(item, redemptions = []) {
+      const state = await stateOf(item);
+      assert.equal(state.reservation_status, 'expired');
+      assert.equal(state.order_status, 'cancelled');
+      assert.equal(state.reserved, 0);
+      assert.equal(state.on_hand, 5);
+      assert.deepEqual(state.releases, [[0, -2]]);
+      assert.deepEqual(state.redemptions, redemptions);
+      return state;
+    }
+    const heartbeat = async () => (await admin.query(
+      "select md5(to_jsonb(h)::text) as checksum from inventory_worker_health h where job_name = 'inventory_reservation_expiry'"
+    )).rows;
+    const auditValue = (expiredCount, skipped) => ({
+      expiredCount, skipped, ibanGraceMinutes: 60, cardGraceMinutes: 30, scoped: true, organizationId: tenant.id,
+    });
+    // The response may arrive before request-context COMMIT completes.
+    async function committedRows(sql, params, expectedCount) {
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        const { rows } = await admin.query(sql, params);
+        if (rows.length >= expectedCount) return rows;
+        await delay(20);
+      }
+      assert.fail(`Expected ${expectedCount} committed EXPIRE_PENDING log row(s)`);
+    }
+
+    const env = {
+      INVENTORY_EXPIRY_IBAN_GRACE_MINUTES: '60',
+      INVENTORY_EXPIRY_CARD_GRACE_MINUTES: '30',
+      PAYMENT_PENDING_EXPIRE_LIMIT: undefined,
+    };
+    const originalEnv = Object.fromEntries(Object.keys(env).map((key) => [key, process.env[key]]));
+    try {
+      for (const [key, value] of Object.entries(env)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+      for (const suffix of ['primary', 'foreign']) {
+        const slug = `expiry-${suffix}-${stamp}`;
+        const { rows: [organization] } = await admin.query(
+          "insert into organizations (name, slug, plan, status) values ($1,$1,'starter','active') returning id, slug",
+          [slug]
+        );
+        tenantIds.push(organization.id);
+        if (suffix === 'primary') tenant = organization;
+        else foreignTenant = organization;
+        const { rows: [customer] } = await admin.query(
+          "insert into customers (organization_id, name, email) values ($1,'Expiry fixture customer',$2) returning id",
+          [organization.id, `${slug}@example.test`]
+        );
+        customerIds.set(organization.id, customer.id);
+      }
+      ({ rows: [user] } = await admin.query(
+        "insert into app_users (email, name) values ($1,'Expiry endpoint tester') returning id, email, name",
+        [`expiry-${stamp}@example.test`]
+      ));
+      server = await new Promise((resolve, reject) => {
+        const listener = app.listen(0, '127.0.0.1', () => resolve(listener));
+        listener.once('error', reject);
+      });
+      const heartbeatInsert = await admin.query(
+        `insert into inventory_worker_health (job_name, last_started_at, last_succeeded_at, processed_count)
+         values ('inventory_reservation_expiry', now(), now(), 7) on conflict (job_name) do nothing`
+      );
+      insertedHeartbeat = heartbeatInsert.rowCount === 1;
+      const heartbeatBefore = await heartbeat();
+      assert.equal(heartbeatBefore.length, 1);
+
+      // Authentication failures cannot change even an eligible hold.
+      const eligible = await seed(tenant.id, 'eligible');
+      const foreign = await seed(foreignTenant.id, 'foreign');
+      const coupon = (await admin.query(
+        "insert into coupons (organization_id, code, name, discount_type, value) values ($1,$2,'HTTP expiry','fixed',10) returning id",
+        [tenant.id, `HTTP-${stamp}`]
+      )).rows[0];
+      const redeem = (item) => admin.query(
+        'insert into coupon_redemptions (organization_id, coupon_id, order_id, discount_amount) values ($1,$2,$3,10)',
+        [item.org, coupon.id, item.orderId]
+      );
+      await redeem(eligible);
+      const eligibleBefore = await stateOf(eligible);
+      const foreignBefore = await stateOf(foreign);
+      assertHeld(eligibleBefore);
+      assertHeld(foreignBefore);
+      for (const [token, status, error] of [
+        [null, 401, 'Oturum gerekli'],
+        [appToken('member'), 403, 'Bu islem icin yetkiniz yok'],
+        [appToken('viewer'), 403, 'Bu islem icin yetkiniz yok'],
+        [createAdminAccessToken({ id: 1, username: 'ops', role: 'admin' }), 403, 'Bu islem icin oturum tipi uygun degil'],
+      ]) {
+        assert.deepEqual(await post({ token, body: { organizationSlug: tenant.slug } }), { status, body: { error } });
+        assert.deepEqual(await stateOf(eligible), eligibleBefore);
+        assert.deepEqual(await stateOf(foreign), foreignBefore);
+      }
+
+      // All skip categories have real holds and coupon redemptions.
+      const advanced = await seed(tenant.id, 'advanced');
+      const authorized = await seed(tenant.id, 'authorized');
+      const callback = await seed(tenant.id, 'callback');
+      const card = await seed(tenant.id, 'card');
+      const iban = await seed(tenant.id, 'iban', { paymentMethod: 'iban' });
+      await admin.query("update orders set status = 'paid' where organization_id = $1 and id = $2", [tenant.id, advanced.orderId]);
+      await admin.query("update orders set payment_status = 'authorized' where organization_id = $1 and id = $2", [tenant.id, authorized.orderId]);
+      await admin.query('update orders set payment_token = $1 where organization_id = $2 and id = $3', [stamp, tenant.id, card.orderId]);
+      await admin.query(
+        `insert into payment_callback_events (organization_id, provider, order_code, processing_status)
+         select organization_id, 'iyzico', order_code, 'processing' from orders where organization_id = $1 and id = $2`,
+        [tenant.id, callback.orderId]
+      );
+      const protectedItems = [advanced, authorized, callback, card, iban];
+      for (const item of protectedItems) await redeem(item);
+      const protectedBefore = await Promise.all(protectedItems.map(stateOf));
+      for (const state of protectedBefore) {
+        assertHeld(state);
+        assert.deepEqual(state.redemptions, ['reserved']);
+      }
+      const permanentSkips = { order_not_pending: 1, payment_state: 1, callback_pending: 1 };
+      const allSkips = { ...permanentSkips, card_grace: 1, iban_grace: 1 };
+      const selectors = [
+        { headers: { 'x-organization-slug': foreignTenant.slug } },
+        { query: `?organizationSlug=${encodeURIComponent(foreignTenant.slug)}` },
+        { body: { organizationSlug: foreignTenant.slug } },
+      ];
+      for (const [index, selector] of selectors.entries()) {
+        const item = index === 0 ? eligible : await seed(tenant.id, `selector-${index}`);
+        assertReport(await post(selector), [item.id], allSkips);
+        await assertReleased(item, index === 0 ? ['released'] : []);
+        assert.deepEqual(await Promise.all(protectedItems.map(stateOf)), protectedBefore);
+        assert.deepEqual(await stateOf(foreign), foreignBefore);
+      }
+
+      const tenantAdminItem = await seed(tenant.id, 'tenant-admin');
+      assertReport(await post({ token: appToken('admin') }), [tenantAdminItem.id], allSkips);
+      await assertReleased(tenantAdminItem);
+      assert.deepEqual(await stateOf(foreign), foreignBefore);
+
+      // Advancing the stored deadlines past grace makes both holds eligible.
+      for (const [item, minutes] of [[card, 31], [iban, 61]]) {
+        await admin.query(
+          "update inventory_reservations set expires_at = now() - $3::int * interval '1 minute' where organization_id = $1 and id = $2",
+          [tenant.id, item.id, minutes]
+        );
+      }
+      assertReport(await post(), [iban.id, card.id], permanentSkips);
+      const releasedGrace = await Promise.all([iban, card].map((item) => assertReleased(item, ['released'])));
+      assertReport(await post(), [], permanentSkips);
+      assert.deepEqual(await Promise.all([iban, card].map(stateOf)), releasedGrace);
+      assert.deepEqual(await Promise.all([advanced, authorized, callback].map(stateOf)), protectedBefore.slice(0, 3));
+
+      // Compare equivalent due and live holds with every legacy field value.
+      const live = await seed(tenant.id, 'live', { expired: false });
+      await admin.query("update inventory_reservations set expires_at = now() + interval '1 day' where id = $1", [live.id]);
+      const liveBefore = await stateOf(live);
+      assertHeld(liveBefore);
+      const legacyValues = [5, 1440, 1, undefined, 'junk'];
+      for (const [index, value] of legacyValues.entries()) {
+        const item = await seed(tenant.id, `legacy-${index}`);
+        assertReport(await post({
+          headers: { 'user-agent': `expiry-legacy-${stamp}` },
+          body: value === undefined ? {} : { olderThanMinutes: value },
+        }), [item.id], permanentSkips);
+        await assertReleased(item);
+        assert.deepEqual(await stateOf(live), liveBefore);
+      }
+      const activity = await committedRows(
+        `select metadata->'newValue' as value from activity_logs
+          where organization_id = $1 and actor_user_id = $2 and action = 'EXPIRE_PENDING' and user_agent = $3`,
+        [tenant.id, user.id, `expiry-legacy-${stamp}`], legacyValues.length
+      );
+      assert.deepEqual(activity, legacyValues.map(() => ({ value: auditValue(1, permanentSkips) })));
+
+      // Platform operators use audit_logs. Use a real admin ID to satisfy its FK.
+      platformAdmin = (await admin.query(
+        "insert into admins (username, password_hash, role) values ($1,'unused','super_admin') returning id, username, role",
+        [`expiry-${stamp}`]
+      )).rows[0];
+      const operatorItem = await seed(tenant.id, 'operator');
+      assertReport(await post({
+        token: createAdminAccessToken(platformAdmin),
+        body: { organizationSlug: tenant.slug, olderThanMinutes: 1440 },
+      }), [operatorItem.id], permanentSkips);
+      await assertReleased(operatorItem);
+      assert.deepEqual(await committedRows(
+        "select new_value from audit_logs where admin_id = $1 and action = 'EXPIRE_PENDING'",
+        [platformAdmin.id], 1
+      ), [{ new_value: auditValue(1, permanentSkips) }]);
+      assert.deepEqual(await heartbeat(), heartbeatBefore);
+
+      // 704 due holds let every request hit its actual limit, including the upper cap.
+      // They share one variant so we can check aggregate stock after each batch.
+      const batches = [[1, 1], [1, 1], [-5, 1], [0, 100], ['abc', 100], [9999, 500], [1, 1]];
+      const total = batches.reduce((sum, [, count]) => sum + count, 0);
+      const product = await seedCartProduct(tenant.id, `http-limit-${stamp}`, { stock: total * 2 });
+      const due = [];
+      for (let i = 0; i < total; i += 1) due.push(await seed(tenant.id, `limit-${i}`, { product }));
+      const dueIds = due.map(({ id }) => id);
+      await admin.query(
+        `insert into coupon_redemptions (organization_id, coupon_id, order_id, discount_amount)
+         select organization_id, $3, order_id, 10 from inventory_reservations
+          where organization_id = $1 and id = any($2::uuid[])`,
+        [tenant.id, dueIds, coupon.id]
+      );
+      const ordered = (await admin.query(
+        'select id from inventory_reservations where id = any($1::uuid[]) order by expires_at, id', [dueIds]
+      )).rows.map(({ id }) => id);
+      let offset = 0;
+      for (const [limit, count] of batches) {
+        const ids = ordered.slice(offset, offset + count);
+        assertReport(await post({ body: { limit } }), ids, permanentSkips);
+        offset += count;
+        const expired = ordered.slice(0, offset);
+        const states = (await admin.query(
+          `select r.id, r.status, o.status as order_status, c.status as redemption_status,
+                  (select count(*)::int from inventory_movements m where m.organization_id = r.organization_id
+                    and m.reference_id = r.id::text and m.movement_type = 'reservation_release') as releases
+             from inventory_reservations r
+             join orders o on o.organization_id = r.organization_id and o.id = r.order_id
+             left join coupon_redemptions c on c.organization_id = r.organization_id and c.order_id = r.order_id
+            where r.organization_id = $1 and r.id = any($2::uuid[])`,
+          [tenant.id, dueIds]
+        )).rows;
+        const expiredIds = new Set(expired);
+        assert.equal(states.length, total);
+        for (const { id, status, order_status, redemption_status, releases } of states) {
+          const isExpired = expiredIds.has(id);
+          assert.equal(status, isExpired ? 'expired' : 'active', id);
+          assert.equal(order_status, isExpired ? 'cancelled' : 'payment_pending', id);
+          assert.equal(redemption_status, isExpired ? 'released' : 'reserved', id);
+          assert.equal(releases, isExpired ? 1 : 0, id);
+        }
+        assert.deepEqual((await admin.query(
+          'select on_hand, reserved from product_variants where organization_id = $1 and id = $2', [tenant.id, product.variantId]
+        )).rows, [{ on_hand: total * 2, reserved: (total - offset) * 2 }]);
+      }
+      assertReport(await post({ body: { limit: 9999 } }), [], permanentSkips);
+      assert.deepEqual(await stateOf(live), liveBefore);
+      assert.deepEqual(await stateOf(foreign), foreignBefore);
+      assert.deepEqual(await Promise.all([advanced, authorized, callback].map(stateOf)), protectedBefore.slice(0, 3));
+      assert.deepEqual(await heartbeat(), heartbeatBefore);
+    } finally {
+      for (const [key, value] of Object.entries(originalEnv)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+      if (server) await new Promise((resolve) => server.close(resolve));
+      if (insertedHeartbeat) {
+        await admin.query("delete from inventory_worker_health where job_name = 'inventory_reservation_expiry'");
+      }
+      await admin.query('begin');
+      try {
+        // Wait for pending request audit inserts before deleting the logs and actor.
+        if (user) await admin.query('select id from app_users where id = $1 for update', [user.id]);
+        if (platformAdmin) {
+          await admin.query('delete from audit_logs where admin_id = $1', [platformAdmin.id]);
+          await admin.query('delete from admins where id = $1', [platformAdmin.id]);
+        }
+        // Append-only events restrict deletion of their orders. Retain both in
+        // suspended throwaway tenants and remove the mutable fixture rows.
+        for (const table of [
+          'activity_logs', 'order_notification_outbox', 'payment_callback_events',
+          'coupon_redemptions', 'coupons', 'inventory_movements', 'inventory_reservations',
+          'order_items', 'product_variants', 'products', 'customers',
+        ]) {
+          await admin.query(`delete from ${table} where organization_id = any($1::uuid[])`, [tenantIds]);
+        }
+        if (user) await admin.query('delete from app_users where id = $1', [user.id]);
+        await admin.query("update organizations set status = 'suspended' where id = any($1::uuid[])", [tenantIds]);
+        await admin.query('commit');
+      } catch (error) {
+        await admin.query('rollback');
+        throw error;
+      }
+    }
   });
 
   test('safe rollback retains tenant columns; cross-tenant corruption blocks reapply', async () => {

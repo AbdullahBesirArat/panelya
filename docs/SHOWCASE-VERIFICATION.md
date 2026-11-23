@@ -70,13 +70,13 @@ PAYMENT_CALLBACK_SECRET_REQUIRED=true
 3. Iyzico sandbox test karti ile basarili odeme tamamla.
 4. `/api/orders` veya dashboard uzerinden ilgili siparisin `paid` oldugunu dogrula.
 5. Yeni bir odemede iptal/basarisiz akis dene ve siparisin `cancelled` oldugunu dogrula.
-6. Beklemede kalan siparis icin zaman asimi gorevini calistir:
+6. Test veritabaninda zaman asimi raporunu onizle:
 
 ```bash
 npm --prefix panelya-api run orders:expire-pending
 ```
 
-7. Stok geri yuklenmis ve order status `cancelled` olmus olmali.
+7. Test veritabanini ve onizleme sonucunu dogruladiktan sonra komutu `-- --apply` ile tekrar calistir. Stok geri yuklenmis ve order status `cancelled` olmus olmali.
 
 Production'a gecmeden once `IYZICO_BASE_URL=https://api.iyzipay.com` yap ve production guard'i calistir:
 
