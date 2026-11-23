@@ -33,14 +33,20 @@ All business writes and the successful heartbeat commit together. A failed batch
 heartbeat. Due but ineligible rows are counted by reason outside the claim limit. The counts are backlog snapshots.
 Locked rows are retried on a later tick, and a cancellation that affects zero rows is reported as a skip.
 
-The worker is a deliberate platform-wide service (system pool, all tenants). The per-tenant
-`POST /api/orders/expire-pending` endpoint is scoped to the caller's tenant. Its response includes a `skipped` breakdown alongside expired
-reservation IDs. The stored deadline and grace windows determine eligibility. Legacy clients may still send
-`olderThanMinutes`, which has no effect.
+The worker is a deliberate platform-wide service (system pool, all tenants).
 
 Both CLI scripts preview by default and print JSON counts. Use `-- --apply` when invoking either npm script
 to run the write path after reviewing the target database and preview. Production-mode apply requires
 `INVENTORY_EXPIRY_CLI_ALLOW_PRODUCTION=true`. Both CLI modes leave the scheduler heartbeat alone.
+
+### Endpoint contract
+
+`POST /api/orders/expire-pending` scopes each run to one tenant and leaves the worker heartbeat unchanged.
+The JSON response includes `ok: true`, a numeric `expiredCount`, an `expired` array of
+`{ reservation_id, status: 'expired' }` entries, and a `skipped` map of reason counts.
+The endpoint accepts and ignores `olderThanMinutes` for legacy client compatibility. Eligibility is based
+on the stored reservation deadline (`expires_at`), payment state, and configured grace windows so request
+values cannot shorten a stock hold.
 
 ## Staged rollout
 
@@ -62,3 +68,5 @@ The "R10 expiry worker" and "R10 readiness" cases in `test/integration/tenant-rl
 PostgreSQL) cover worker and CLI preview row counts and checksums, CLI apply heartbeat isolation, concurrent
 claims, tenant scope, callback and grace holds, the scoped expiry report, repeat runs, and rollback and retry
 after an injected mid-batch failure.
+The "R10 expire-pending over HTTP" case exercises the endpoint through its authentication and tenant
+middleware and verifies the response, audit records, and inventory effects against PostgreSQL.

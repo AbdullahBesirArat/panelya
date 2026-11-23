@@ -250,6 +250,10 @@ router.get('/', requireAuth, requireRole(['super_admin', 'owner', 'admin', 'memb
 
 router.post('/expire-pending', requireAuth, requireRole(['super_admin', 'owner', 'admin']), async (req, res, next) => {
   try {
+    // Platform-wide roles may select a tenant by slug only in the operator flow.
+    if (req.auth.actorType !== 'app' && req.auth.role !== 'super_admin') {
+      return res.status(403).json({ error: 'Bu islem icin oturum tipi uygun degil' });
+    }
     const limit = Math.min(Math.max(Number(req.body.limit || process.env.PAYMENT_PENDING_EXPIRE_LIMIT || 100), 1), 500);
     // Tenant-triggered: confine the system-pool job to the caller's resolved tenant (R8).
     const organization = await resolveOrganization(req);
