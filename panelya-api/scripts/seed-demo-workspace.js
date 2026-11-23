@@ -308,7 +308,6 @@ async function upsertUser(client, passwordHash) {
 }
 
 async function resetWorkspaceData(client, organizationId) {
-  await client.query('delete from activity_logs where organization_id = $1', [organizationId]);
   await client.query('delete from campaigns where organization_id = $1', [organizationId]);
   await client.query('delete from slider_items where organization_id = $1', [organizationId]);
   await client.query(
@@ -320,6 +319,10 @@ async function resetWorkspaceData(client, organizationId) {
   await client.query('delete from customers where organization_id = $1', [organizationId]);
   await client.query('delete from products where organization_id = $1', [organizationId]);
   await client.query('delete from categories where organization_id = $1', [organizationId]);
+}
+
+function deleteWorkspaceActivity(maintenancePool, organizationId) {
+  return maintenancePool.query('delete from activity_logs where organization_id = $1', [organizationId]);
 }
 
 async function seedCategories(client, organizationId) {
@@ -505,6 +508,8 @@ async function seedActivity(client, organizationId, userId) {
   }
 }
 
+let maintenancePool;
+
 async function main() {
   if (!DEMO.organizationSlug) {
     throw new Error('DEMO_ORGANIZATION_SLUG bos olamaz');
@@ -547,6 +552,9 @@ async function main() {
     await seedOrders(client, organization.id, customerIds, productIds);
     await seedActivity(client, organization.id, user.id);
 
+    // This connection sees only the previously committed activity rows.
+    maintenancePool = db.getSystemPool();
+    await deleteWorkspaceActivity(maintenancePool, organization.id);
     await client.query('commit');
 
     console.log('Demo workspace hazirlandi.');
@@ -561,11 +569,15 @@ async function main() {
   }
 }
 
-main()
-  .catch((error) => {
-    console.error('Demo workspace seed hatasi:', error.message);
-    process.exitCode = 1;
-  })
-  .finally(async () => {
-    await db.pool.end();
-  });
+if (require.main === module) {
+  main()
+    .catch((error) => {
+      console.error('Demo workspace seed hatasi:', error.message);
+      process.exitCode = 1;
+    })
+    .finally(async () => {
+      await Promise.all([db.pool.end(), maintenancePool?.end()]);
+    });
+}
+
+module.exports = { deleteWorkspaceActivity };

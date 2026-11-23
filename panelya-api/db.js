@@ -99,6 +99,35 @@ async function setTenantContext(client, organizationId) {
   return normalized;
 }
 
+function currentTenantOrganizationId() {
+  const context = requestStorage.getStore();
+  return context?.client ? context.organizationId : null;
+}
+
+async function withStandaloneTenantTransaction(organizationId, fn) {
+  const normalized = assertOrganizationId(organizationId);
+  const client = await pool.connect();
+  let releaseError;
+  try {
+    await client.query('begin');
+    await setTenantContext(client, normalized);
+    const result = await fn(client);
+    await client.query('commit');
+    return result;
+  } catch (error) {
+    // Network failures and PostgreSQL connection exceptions must evict the client.
+    if (!/^[0-9A-Z]{5}$/.test(error.code || '') || /^(08|57P0[1-5])/.test(error.code)) {
+      releaseError = error;
+    }
+    try { await client.query('rollback'); } catch (rollbackError) {
+      releaseError ||= rollbackError;
+    }
+    throw error;
+  } finally {
+    client.release(releaseError);
+  }
+}
+
 async function activateTenantContext(organizationId) {
   const normalized = assertOrganizationId(organizationId);
   const context = requestStorage.getStore();
@@ -176,6 +205,7 @@ module.exports = {
   SLOW_QUERY_THRESHOLD_MS,
   activateTenantContext,
   boundedNumber,
+  currentTenantOrganizationId,
   getMigrationPool,
   getSystemPool,
   pool,
@@ -185,6 +215,7 @@ module.exports = {
   requestContextMiddleware,
   setTenantContext,
   systemQuery,
+  withStandaloneTenantTransaction,
   withTransaction,
   withTenantContext,
 };

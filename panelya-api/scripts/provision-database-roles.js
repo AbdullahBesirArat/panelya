@@ -62,6 +62,14 @@ async function main() {
       grant usage, create on schema public to panelya_migrator;
       grant usage on schema public to panelya_runtime, panelya_system_runtime;
       grant select, insert, update, delete on all tables in schema public to panelya_runtime, panelya_system_runtime;
+      do $$ begin
+        if exists (
+          select 1 from pg_class
+          where oid = to_regclass('public.activity_logs') and relrowsecurity and relforcerowsecurity
+        ) then
+          revoke update, delete on public.activity_logs from panelya_runtime;
+        end if;
+      end $$;
       grant usage, select on all sequences in schema public to panelya_runtime, panelya_system_runtime;
       alter default privileges for role panelya_migrator in schema public
         grant select, insert, update, delete on tables to panelya_runtime, panelya_system_runtime;

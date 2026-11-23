@@ -662,6 +662,7 @@ router.post('/invites/accept', async (req, res, next) => {
     );
 
     invalidateOrganizationSummary(invite.organization_id);
+    await db.setTenantContext(client, invite.organization_id);
     await auditLog(req, {
       action: 'ACCEPT_INVITE',
       resourceType: 'membership',
@@ -670,6 +671,7 @@ router.post('/invites/accept', async (req, res, next) => {
       actorType: 'app',
       actorUserId: user.id,
       organizationId: invite.organization_id,
+      store: client,
     });
     await client.query('commit');
 
