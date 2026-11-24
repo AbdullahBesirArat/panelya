@@ -5,6 +5,38 @@ const { processPaymentCallbackEvent } = require('../services/paymentCallbackEven
 
 const organizationId = '00000000-0000-4000-8000-000000000001';
 
+test('IBAN payment transition requires counted evidence before side effects', async () => {
+  const order = {
+    id: '1', organization_id: organizationId, payment_method: 'iban',
+    status: 'payment_pending', order_status: 'pending_payment',
+    payment_status: 'manual_pending', fulfillment_status: 'unfulfilled',
+    total: '100.00', currency: 'TRY', version: 1,
+  };
+  const writes = [];
+  const client = {
+    async query(sql) {
+      if (/^select\s+\*\s+from orders/i.test(sql)) return { rows: [order] };
+      if (/^select\b[\s\S]*from payment_evidence/i.test(sql)) {
+        return /count\s*\(/i.test(sql)
+          ? { rows: [{ entries: '0', counted: '0', amount: '0' }] }
+          : { rows: [] };
+      }
+      if (/^select version from orders/i.test(sql)) return { rows: [{ version: 1 }] };
+      if (/^(update|insert|delete)\b/i.test(sql)) writes.push(sql.trim().split(/\s+/)[1]);
+      return { rows: [order] };
+    },
+  };
+  try {
+    await assert.rejects(transitionOrderOperation(client, {
+      organizationId, orderId: order.id, changes: { order: 'paid', payment: 'paid' },
+      transitionInventory: async () => writes.push('inventory'),
+      transitionPromotion: async () => writes.push('promotion'),
+    }), { status: 409, code: 'PAYMENT_EVIDENCE_REQUIRED' });
+  } finally {
+    assert.deepEqual(writes, [], 'refusal must precede every order, event, inventory and promotion write');
+  }
+});
+
 test('provider success short by one kuruş cannot mark the order paid', async () => {
   const event = { id: '2', organization_id: organizationId, payload: { provider: 'iyzico', token: 'test-card' } };
   const order = {

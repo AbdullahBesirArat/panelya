@@ -8383,6 +8383,7 @@ const integrationService = require('../../modules/integrations/service');
   // Phase 18 payment evidence contract. All provider responses below are local fixtures.
   function checkPaymentEvidence() {
     const scenario = (name, run) => test('phase18 ' + name, { timeout: 30000 }, run);
+    const finalGate = (name, run) => test('phase18b ' + name, { timeout: 30000 }, run);
     const req = { get() { return ''; } };
     const { enqueuePaymentCallbackEvent, processPaymentCallbackEvent } = require('../../services/paymentCallbackEvents');
     const { collectPaymentReconciliationReport } = require('../../services/paymentReconciliationMonitor');
@@ -8931,6 +8932,280 @@ const integrationService = require('../../modules/integrations/service');
         await admin.query('rollback');
       }
       assert.equal((await evidence(item)).length, 1);
+    });
+
+    const orderEvents = (item) => rows(
+      'select * from order_events where organization_id = $1 and order_id = $2 order by id',
+      [item.org, item.orderId]
+    );
+    const markPaid = (item) => asTenant(runtimePool, item.org, (client) =>
+      transitionLegacyOrderStatus(client, { organizationId: item.org, orderId: item.orderId, status: 'paid' })
+    );
+
+    for (const [name, prepare, code] of [
+      ['absent evidence', async () => {}, 'REQUIRED'],
+      ['customer claim only', (item) => submit(item, { level: 'customer_claim' }), 'REQUIRED'],
+      ['one kurus short', (item) => submit(item, { amount: '99.99' }), 'AMOUNT_MISMATCH'],
+      ['one kurus over', (item) => submit(item, { amount: '100.01' }), 'AMOUNT_MISMATCH'],
+      ['short operator note', (item) => submit(item, { note: '123456789' }), 'JUSTIFICATION_REQUIRED'],
+      ['justification on customer claim only', async (item) => {
+        await submit(item, { note: '' });
+        await submit(item, { level: 'customer_claim', reference: item.reference + '-claim' });
+      }, 'JUSTIFICATION_REQUIRED'],
+      ['legacy evidence in a different currency', async (item) => {
+        await admin.query(
+          `insert into payment_evidence
+             (organization_id, order_id, channel, evidence_level, amount, currency, reference, reference_key, received_at, note)
+           values ($1,$2,'bank_transfer','operator_recorded',100,'USD',$3,$3,now(),'Synthetic fixture note')`,
+          [item.org, item.orderId, item.reference]
+        );
+      }, 'CURRENCY_MISMATCH'],
+      ['evidence on another order or tenant', async (item) => {
+        await submit(await seed('iban', item.org));
+        await submit(await seed('iban', orgB));
+      }, 'REQUIRED'],
+    ]) {
+      finalGate('IBAN refuses ' + name + ' without changing order, inventory, coupon or events', async () => {
+        const item = await seed();
+        await prepare(item);
+        const before = await snapshot(item);
+        const events = await orderEvents(item);
+        await assert.rejects(markPaid(item), { status: 409, code: 'PAYMENT_EVIDENCE_' + code });
+        assert.deepEqual(await snapshot(item), before);
+        assert.deepEqual(await orderEvents(item), events);
+      });
+    }
+
+    finalGate('exact justified IBAN transfers emit only operator-asserted unverified metadata', async () => {
+      const item = await seed();
+      await submit(item, { amount: '99.99', note: '' });
+      await submit(item, {
+        amount: '0.01', reference: item.reference + '-second',
+        level: 'operator_asserted_verified', note: '1234567890',
+      });
+      await submit(item, { level: 'customer_claim', reference: item.reference + '-claim' });
+      const countedIds = (await evidence(item)).filter((entry) => entry.evidence_level !== 'customer_claim')
+        .map(({ id }) => String(id)).sort();
+      const existingEventIds = new Set((await orderEvents(item)).map(({ id }) => id));
+      assert.equal((await markPaid(item)).order.payment_status, 'paid');
+      const metadata = (await orderEvents(item)).filter(({ id }) => !existingEventIds.has(id))
+        .map((event) => event.internal_metadata);
+      const verification = metadata.filter((entry) => entry?.paymentVerification);
+      assert.deepEqual(verification.map((entry) => entry.paymentVerification), ['operator_asserted_unverified']);
+      assert.deepEqual(verification[0].evidenceIds.map(String).sort(), countedIds);
+      assert.equal(verification[0].evidenceCount, countedIds.length);
+    });
+
+    finalGate('open mismatch case protects the held reservation until the case is resolved', async () => {
+      const item = await seed('card');
+      const unrelated = await seed('card', orgB);
+      await due(item);
+      await due(unrelated);
+      await callback(item, await enqueue(item), { paidPrice: '99.99' });
+      const [open] = await cases(item);
+      assert.equal(open.case_type, 'provider_amount_mismatch');
+      assert.equal(open.status, 'open');
+      const before = await snapshot(item);
+      const events = await orderEvents(item);
+      const { countReservationExpiry } = require('../../services/inventoryReservations');
+      const policy = { organizationId: item.org, methods: ['card'], cardGrace: 30 };
+      const count = await countReservationExpiry(systemPool, policy);
+      assert.ok(count.skipped.reconciliation_open >= 1);
+      const report = await expire(item, policy);
+      assert.ok(report.skipped.reconciliation_open >= 1);
+      assert.ok(!report.expired.includes(item.id));
+      assert.deepEqual(await snapshot(item), before);
+      assert.deepEqual(await orderEvents(item), events);
+      assert.ok((await expire(unrelated)).expired.includes(unrelated.id));
+
+      await admin.query(
+        `update payment_reconciliation_cases set status = 'resolved_accepted',
+           resolution_note = 'Synthetic case resolved', resolved_at = now(), resolved_by_admin_id = 'phase18b'
+         where id = $1 and organization_id = $2`, [open.id, item.org]
+      );
+      assert.ok((await expire(item, policy)).expired.includes(item.id));
+      assert.equal((await snapshot(item)).orders.status, 'cancelled');
+    });
+
+    for (const [hours, severity] of [[2, 'warning'], [80, 'critical']]) {
+      finalGate('monitor reports stock held by open cases at ' + severity + ' severity', async () => {
+        const item = await seed('card');
+        await callback(item, await enqueue(item), { paidPrice: '99.99' });
+        const [open] = await cases(item);
+        // Age both clocks so the fixture represents a long-held reservation and an old case.
+        await admin.query(
+          "update payment_reconciliation_cases set detected_at = now() - $2::int * interval '1 hour' where id = $1",
+          [open.id, hours]
+        );
+        await admin.query(
+          "update inventory_reservations set created_at = now() - $2::int * interval '1 hour' where id = $1",
+          [item.id, hours]
+        );
+        const before = await snapshot(item);
+        const report = await collectPaymentReconciliationReport({
+          pool: systemPool, organizationId: item.org, thresholds: { warnHours: 1, criticalHours: 72 },
+        });
+        const finding = report.checks.reserved_stock_held_by_open_case;
+        assert.ok(finding, 'held stock check must be present');
+        assert.ok(finding.count >= 1);
+        assert.ok(finding.oldestAgeMinutes >= hours * 60);
+        assert.equal(finding.severity, severity);
+        const sample = finding.samples.find(({ orderId }) => orderId === String(item.orderId));
+        assert.ok(sample);
+        assert.deepEqual(Object.keys(sample).sort(), ['ageMinutes', 'id', 'orderId', 'organizationId']);
+        assert.ok(!JSON.stringify(report).includes(item.token));
+        assert.deepEqual(await snapshot(item), before);
+      });
+    }
+
+    // D3: one provider payment id is bound to exactly one (tenant, order) in every branch.
+    const claimRows = (pid) => rows(
+      'select * from payment_identity_claims where provider = $1 and provider_payment_id = $2', ['iyzico', pid]
+    );
+    const evidenceFor = (item) => rows(
+      "select id from payment_evidence where organization_id = $1 and order_id = $2 and channel = 'card'", [item.org, item.orderId]
+    );
+    const eventState = async (item, event) => (await rows(
+      'select processing_status, last_error from payment_callback_events where id = $1 and organization_id = $2',
+      [event.id, item.org]
+    ))[0];
+    const auditCount = async (item) => (await rows(
+      'select count(*)::int as n from activity_logs where organization_id = $1', [item.org]
+    ))[0].n;
+    const GENERIC = /^Odeme kaydi beklenen siparisle eslesmiyor$/;
+    async function assertFailClosed(item, event, payment) {
+      const before = await snapshot(item);
+      const caseCount = (await cases(item)).length;
+      const evidenceCount = (await evidenceFor(item)).length;
+      const audit = await auditCount(item);
+      await assert.rejects(callback(item, event, payment), (error) => {
+        assert.equal(error.code, 'PAYMENT_ID_ORDER_MISMATCH');
+        assert.match(error.message, GENERIC);
+        return true;
+      });
+      assert.deepEqual(await snapshot(item), before);
+      assert.equal((await cases(item)).length, caseCount);
+      assert.equal((await evidenceFor(item)).length, evidenceCount);
+      assert.equal(await auditCount(item), audit);
+      assert.deepEqual(await eventState(item, event), { processing_status: 'failed', last_error: 'PAYMENT_ID_ORDER_MISMATCH' });
+    }
+    for (const [name, firstPayment, secondPayment, sameTenant] of [
+      ['matching amount on a different order of the same tenant', {}, {}, true],
+      ['mismatching amount on a different order of the same tenant', {}, { paidPrice: '99.99' }, true],
+      ['matching amount after a mismatch case on another order', { paidPrice: '99.99' }, {}, true],
+      ['mismatching amount after a mismatch case on another order', { paidPrice: '99.99' }, { paidPrice: '98.00' }, true],
+      ['matching amount in a different tenant', {}, {}, false],
+      ['mismatching amount in a different tenant', {}, { paidPrice: '99.99' }, false],
+      ['mismatching amount in a different tenant after a mismatch case', { paidPrice: '99.99' }, { paidPrice: '98.00' }, false],
+    ]) {
+      finalGate('provider payment id bound once: ' + name, async () => {
+        const first = await seed('card');
+        const second = await seed('card', sameTenant ? orgA : orgB);
+        const pid = 'shared-' + crypto.randomUUID();
+        await callback(first, await enqueue(first), { paymentId: pid, ...firstPayment });
+        assert.equal((await claimRows(pid)).length, 1);
+        await assertFailClosed(second, await enqueue(second), { paymentId: pid, ...secondPayment });
+        const [claim] = await claimRows(pid);
+        assert.deepEqual([claim.organization_id, String(claim.order_id)], [first.org, String(first.orderId)]);
+        if (!sameTenant) {
+          // The second tenant sees nothing about the first tenant through its own RLS scope.
+          const visible = await asTenant(runtimePool, second.org, (client) => client.query(
+            'select (select count(*) from payment_identity_claims)::int as claims,' +
+            ' (select count(*) from payment_evidence where provider_payment_id = $1)::int as evidence,' +
+            ' (select count(*) from payment_reconciliation_cases where provider_payment_id = $1)::int as cases', [pid]
+          ));
+          assert.deepEqual(visible.rows[0], { claims: 0, evidence: 0, cases: 0 });
+        }
+      });
+    }
+
+    finalGate('legacy case without a claim row still binds the payment id', async () => {
+      const first = await seed('card');
+      const second = await seed('card');
+      const pid = 'legacy-' + crypto.randomUUID();
+      const event = await enqueue(first);
+      await admin.query(
+        `insert into payment_reconciliation_cases
+           (organization_id, provider, provider_payment_id, case_type, order_id, callback_event_id,
+            order_total, order_status_at_detection)
+         values ($1,'iyzico',$2,'paid_on_cancelled_order',$3,$4,100,'cancelled')`,
+        [first.org, pid, first.orderId, event.id]
+      );
+      assert.deepEqual(await claimRows(pid), []);
+      await assertFailClosed(second, await enqueue(second), { paymentId: pid });
+    });
+
+    finalGate('repeated identical callbacks keep one claim, evidence row, case and audit', async () => {
+      for (const [payment, expectCase] of [[{}, false], [{ paidPrice: '99.99' }, true]]) {
+        const item = await seed('card');
+        const pid = 'replay-' + crypto.randomUUID();
+        const event = await enqueue(item);
+        await callback(item, event, { paymentId: pid, ...payment });
+        const state = async () => ({
+          claims: (await claimRows(pid)).length, evidence: (await evidenceFor(item)).length,
+          cases: (await cases(item)).length, snapshot: await snapshot(item), audits: await auditCount(item),
+        });
+        const once = await state();
+        assert.equal(once.claims, 1);
+        assert.equal(once.cases, expectCase ? 1 : 0);
+        await callback(item, event, { paymentId: pid, ...payment });
+        await callback(item, await enqueue(item, 'second-' + pid), { paymentId: pid, ...payment });
+        assert.deepEqual(await state(), once);
+      }
+    });
+
+    finalGate('concurrent callbacks for one payment id on two orders have exactly one winner', async () => {
+      const first = await seed('card');
+      const second = await seed('card');
+      const pid = 'race-' + crypto.randomUUID();
+      const [one, two] = [await enqueue(first), await enqueue(second)];
+      const results = await Promise.allSettled([
+        callback(first, one, { paymentId: pid }), callback(second, two, { paymentId: pid }),
+      ]);
+      assert.equal(results.filter(({ status }) => status === 'fulfilled').length, 1);
+      const loser = results.find(({ status }) => status === 'rejected');
+      assert.equal(loser.reason.code, 'PAYMENT_ID_ORDER_MISMATCH');
+      const statuses = [(await snapshot(first)).orders.status, (await snapshot(second)).orders.status].sort();
+      assert.deepEqual(statuses, ['paid', 'payment_pending']);
+      assert.equal((await claimRows(pid)).length, 1);
+      assert.equal((await evidenceFor(first)).length + (await evidenceFor(second)).length, 1);
+      assert.equal(systemPool.waitingCount, 0);
+    });
+
+    finalGate('payment identity claims are append-only and backfill from legacy evidence and cases', async () => {
+      const item = await seed('card');
+      const pid = 'append-' + crypto.randomUUID();
+      await callback(item, await enqueue(item), { paymentId: pid });
+      await assert.rejects(runtimePool.query("update payment_identity_claims set provider = 'x' where provider_payment_id = $1", [pid]));
+      await assert.rejects(admin.query('delete from payment_identity_claims where provider_payment_id = $1', [pid]), /append-only/);
+      await assert.rejects(admin.query('truncate payment_identity_claims'), /append-only/);
+      // Simulate a pre-077 database: remove the claim, then replay the migration's backfill statement.
+      const sql = require('node:fs').readFileSync(
+        require('node:path').join(__dirname, '../../db/migrations/077_payment_identity_claims.sql'), 'utf8'
+      );
+      const backfill = sql.slice(sql.indexOf('-- backfill:begin'), sql.indexOf('-- backfill:end'));
+      assert.ok(backfill.includes('insert into payment_identity_claims'));
+      await admin.query('alter table payment_identity_claims disable trigger user');
+      try {
+        await admin.query('delete from payment_identity_claims where provider_payment_id = $1', [pid]);
+        assert.deepEqual(await claimRows(pid), []);
+        await admin.query(backfill);
+      } finally { await admin.query('alter table payment_identity_claims enable trigger user'); }
+      const [claim] = await claimRows(pid);
+      assert.deepEqual([claim.organization_id, String(claim.order_id)], [item.org, String(item.orderId)]);
+    });
+
+    finalGate('payment identity claim table forces RLS and keys each provider payment globally', async () => {
+      const [flags] = await rows(
+        `select relrowsecurity, relforcerowsecurity from pg_class
+         where oid = to_regclass('public.payment_identity_claims')`
+      );
+      assert.deepEqual(flags, { relrowsecurity: true, relforcerowsecurity: true });
+      const [key] = await rows(
+        `select pg_get_constraintdef(oid) as definition from pg_constraint
+         where conrelid = 'payment_identity_claims'::regclass and contype = 'p'`
+      );
+      assert.equal(key.definition, 'PRIMARY KEY (provider, provider_payment_id)');
     });
 
     for (const [name, payment] of [
