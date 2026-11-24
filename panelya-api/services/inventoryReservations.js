@@ -372,10 +372,11 @@ async function countReservationExpiry(client, {
 // Global CLI runs opt out of the heartbeat. Tenant-scoped runs always leave it alone.
 async function expireInventoryReservationsWithReport({
   pool = db.getSystemPool(), limit = 100, organizationId = null, graceMinutes = ibanGraceMinutes(),
-  cardGrace = cardGraceMinutes(), methods = inventoryExpiryMethods(), updateHeartbeat = true,
+  cardGrace = cardGraceMinutes(), methods = inventoryExpiryMethods(), updateHeartbeat = true, beforeCommit,
 } = {}) {
   const scope = organizationId || null;
-  const stampHeartbeat = updateHeartbeat && !scope;
+  const hasMethods = methods.length > 0;
+  const stampHeartbeat = updateHeartbeat && !scope && hasMethods;
   let client;
   let releaseError;
   // pg can emit a socket error as well as reject the in-flight query.
@@ -391,7 +392,7 @@ async function expireInventoryReservationsWithReport({
   };
   const expired = [];
   const policy = { organizationId: scope, graceMinutes, cardGrace, methods };
-  if (methods.length === 0) {
+  if (!hasMethods && !beforeCommit) {
     return { ...await countReservationExpiry(pool, policy), expired };
   }
   try {
@@ -454,8 +455,10 @@ async function expireInventoryReservationsWithReport({
         where job_name = $1`,
       ['inventory_reservation_expiry', expired.length]
     );
+    const result = { ...report, expired };
+    if (beforeCommit) await beforeCommit(client, result);
     await client.query('commit');
-    return { ...report, expired };
+    return result;
   } catch (error) {
     if (client) {
       try { await client.query('rollback'); }

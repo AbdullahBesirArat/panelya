@@ -132,6 +132,11 @@ async function auditLog(req, {
     const adminId = req.admin?.sub || null;
 
     if (effectiveActorType === 'app' || effectiveUserId) {
+      const actorOrganizationId = req.auth?.organizationId;
+      if (throwOnError && actorOrganizationId != null
+        && String(effectiveOrganizationId) !== String(actorOrganizationId)) {
+        throw new Error('Activity log organization mismatch');
+      }
       await writeAppActivity(req, {
         action,
         resourceType,
@@ -157,7 +162,9 @@ async function auditLog(req, {
         errorMessage,
         adminId: Number(adminId),
       }, store);
+      return;
     }
+    if (throwOnError) throw new Error('Audit actor is unavailable');
   } catch (err) {
     console.warn('Audit log yazilamadi', { message: err.message });
     if (throwOnError) throw err;

@@ -6850,7 +6850,7 @@ const integrationService = require('../../modules/integrations/service');
     }));
   }
 
-  async function exerciseExpiryHttp({ lifecycle = false, auditIsolation = false } = {}) {
+  async function exerciseExpiryHttp({ lifecycle = false, auditIsolation = false, atomicAudit = false } = {}) {
     const express = require('express');
     const { attachAuthIfPresent } = require('../../middleware/auth');
     const { attachSession } = require('../../middleware/authSession');
@@ -6885,7 +6885,7 @@ const integrationService = require('../../modules/integrations/service');
           ...headers,
         },
         body: JSON.stringify(body),
-        signal: lifecycle || auditIsolation ? AbortSignal.timeout(25000) : undefined,
+        signal: lifecycle || auditIsolation || atomicAudit ? AbortSignal.timeout(25000) : undefined,
       });
       return { status: response.status, body: await response.json() };
     }
@@ -6956,14 +6956,8 @@ const integrationService = require('../../modules/integrations/service');
       byMethod: { card: { due: 1, skipped, expired: 1 } },
       ibanGraceMinutes: 60, cardGraceMinutes: 30, scoped: true, organizationId: tenant.id,
     });
-    // The response may arrive before request-context COMMIT completes.
-    async function committedRows(sql, params, expectedCount) {
-      for (let attempt = 0; attempt < 100; attempt += 1) {
-        const { rows } = await admin.query(sql, params);
-        if (rows.length >= expectedCount) return rows;
-        await delay(20);
-      }
-      assert.fail(`Expected ${expectedCount} committed EXPIRE_PENDING log row(s)`);
+    async function committedRows(sql, params) {
+      return (await admin.query(sql, params)).rows;
     }
     async function checkAuditIsolation() {
       const userAgent = `expiry-audit-isolation-${stamp}`;
@@ -6971,21 +6965,86 @@ const integrationService = require('../../modules/integrations/service');
       const rows = await committedRows(
         `select id, organization_id from activity_logs
           where action = 'EXPIRE_PENDING' and (user_agent = $1 or organization_id = $2)`,
-        [userAgent, foreignTenant.id], 1
+        [userAgent, foreignTenant.id]
       );
       assert.equal(rows.length, 1);
       assert.equal(rows[0].organization_id, tenant.id);
-      // activity_logs is NOT row-level-security protected today (migration 038 limits RLS to the
-      // commerce graph and leaves other tables for a later rollout). Tenant isolation of audit
-      // rows is therefore enforced by the organization_id filter that every tenant-facing query
-      // applies (see routes/organizations.js). Assert that contract, not an RLS guarantee that
-      // does not exist; when RLS is added to activity_logs, tighten this to a withTenantContext read.
+      // Tenant-facing queries in routes/organizations.js also filter by organization_id.
       const tenantFacing = (organizationId) => admin.query(
         `select id, organization_id from activity_logs
           where organization_id = $1 and action = 'EXPIRE_PENDING'`, [organizationId]
       );
       assert.deepEqual((await tenantFacing(foreignTenant.id)).rows, []);
       assert.deepEqual((await tenantFacing(tenant.id)).rows, rows);
+    }
+    async function checkAtomicAudit() {
+      const { expirePendingOrders } = require('../../services/pendingOrders');
+      const foreign = await seed(foreignTenant.id, 'atomic-foreign');
+      const foreignBefore = await stateOf(foreign);
+      const healthBefore = await heartbeat();
+      platformAdmin = (await admin.query(
+        "insert into admins (username, password_hash, role) values ($1,'unused','super_admin') returning id, username, role",
+        [`atomic-${stamp}`]
+      )).rows[0];
+      const operator = { token: createAdminAccessToken(platformAdmin), body: { organizationSlug: tenant.slug } };
+      const activityRows = async () => (await admin.query(
+        "select organization_id, metadata->'newValue' as value from activity_logs where organization_id = any($1::uuid[]) and action = 'EXPIRE_PENDING'",
+        [tenantIds]
+      )).rows;
+      const adminRows = async () => (await admin.query(
+        "select new_value as value from audit_logs where admin_id = $1 and action = 'EXPIRE_PENDING'", [platformAdmin.id]
+      )).rows;
+      const item = await seed(tenant.id, 'atomic-owner');
+      const before = await stateOf(item);
+      assertHeld(before);
+      assert.equal(before.order_status, 'payment_pending');
+      for (const [token, status] of [[null, 401], [appToken('viewer'), 403]]) {
+        assert.equal((await post({ token })).status, status);
+        assert.deepEqual(await stateOf(item), before);
+        assert.deepEqual(await activityRows(), []);
+      }
+      async function rejectAudit(table, predicate, options, fixture, initial, rows) {
+        await admin.query(`alter table ${table} add constraint test_expiry_audit_failure check (${predicate})`);
+        try {
+          const response = await post(options);
+          assert.equal(response.status, 500);
+          assert.match(response.body.error, /test_expiry_audit_failure/);
+          assert.deepEqual(await stateOf(fixture), initial);
+          assert.deepEqual(await rows(), []);
+        } finally {
+          await admin.query(`alter table ${table} drop constraint test_expiry_audit_failure`);
+        }
+      }
+      await rejectAudit('activity_logs',
+        `action <> 'EXPIRE_PENDING' or organization_id <> ${admin.escapeLiteral(tenant.id)}`,
+        {}, item, before, activityRows);
+      await assert.rejects(expirePendingOrders({
+        organizationId: tenant.id, graceMinutes: 60, cardGrace: 30,
+        beforeCommit: async (client, report) => {
+          assert.deepEqual(report.expired, [item.id]);
+          await appDb.setTenantContext(client, tenant.id);
+          await auditLog({ auth: { actorType: 'app', userId: user.id, organizationId: tenant.id }, get() {} }, {
+            action: 'EXPIRE_PENDING', resourceType: 'order', organizationId: foreignTenant.id,
+            store: client, throwOnError: true,
+          });
+        },
+      }), /organization mismatch/);
+      assert.deepEqual(await stateOf(item), before);
+      assert.deepEqual(await activityRows(), []);
+
+      assertReport(await post(), [item.id]);
+      await assertReleased(item);
+      assert.deepEqual(await activityRows(), [{ organization_id: tenant.id, value: auditValue(1, {}) }]);
+
+      const operatorItem = await seed(tenant.id, 'atomic-operator');
+      await rejectAudit('audit_logs', `action <> 'EXPIRE_PENDING' or admin_id <> ${Number(platformAdmin.id)}`,
+        operator, operatorItem, await stateOf(operatorItem), adminRows);
+      assertReport(await post(operator), [operatorItem.id]);
+      await assertReleased(operatorItem);
+      assert.deepEqual(await adminRows(), [{ value: auditValue(1, {}) }]);
+      assert.deepEqual(await stateOf(foreign), foreignBefore);
+      assert.deepEqual(await heartbeat(), healthBefore);
+      await assertPoolsDrained();
     }
     async function assertPoolsDrained() {
       const pools = [appDb.pool, appDb.getSystemPool()];
@@ -7074,7 +7133,7 @@ const integrationService = require('../../modules/integrations/service');
       assertReport(await runWithSlowBatch({ headers: { 'user-agent': ownerAgent } }), [ownerItem.id]);
       await assertPoolsDrained();
       await assertReleased(ownerItem);
-      assert.deepEqual(await committedRows(activitySql, [tenant.id, user.id, ownerAgent], 1),
+      assert.deepEqual(await committedRows(activitySql, [tenant.id, user.id, ownerAgent]),
         [{ value: auditValue(1, {}) }]);
 
       const operatorItem = await seed(tenant.id, 'slow-operator');
@@ -7083,7 +7142,7 @@ const integrationService = require('../../modules/integrations/service');
       await assertReleased(operatorItem);
       assert.deepEqual(await committedRows(
         "select new_value from audit_logs where admin_id = $1 and action = 'EXPIRE_PENDING' and success",
-        [platformAdmin.id], 1
+        [platformAdmin.id]
       ), [{ new_value: auditValue(1, {}) }]);
 
       const interrupted = await seed(tenant.id, 'interrupted');
@@ -7106,11 +7165,14 @@ const integrationService = require('../../modules/integrations/service');
         membership: { role: 'owner', organization: tenant },
       });
       const auditFailureAgent = `expiry-audit-failed-${stamp}`;
+      const auditFailureBefore = await stateOf(auditFailure);
       const auditFailureResponse = await post({ token: auditFailureToken, headers: { 'user-agent': auditFailureAgent } });
       assert.equal(auditFailureResponse.status, 500);
       await assertPoolsDrained();
-      await assertReleased(auditFailure);
+      assert.deepEqual(await stateOf(auditFailure), auditFailureBefore);
       assert.deepEqual((await admin.query(activitySql, [tenant.id, deletedUser.id, auditFailureAgent])).rows, []);
+      assertReport(await post(), [auditFailure.id]);
+      await assertReleased(auditFailure);
 
       const locked = await seed(tenant.id, 'paid-under-lock');
       const contenders = await Promise.all(['concurrent-1', 'concurrent-2'].map((tag) => seed(tenant.id, tag)));
@@ -7194,6 +7256,10 @@ const integrationService = require('../../modules/integrations/service');
       }
       if (auditIsolation) {
         await checkAuditIsolation();
+        return;
+      }
+      if (atomicAudit) {
+        await checkAtomicAudit();
         return;
       }
       const heartbeatInsert = await admin.query(
@@ -7361,7 +7427,7 @@ const integrationService = require('../../modules/integrations/service');
       const activity = await committedRows(
         `select metadata->'newValue' as value from activity_logs
           where organization_id = $1 and actor_user_id = $2 and action = 'EXPIRE_PENDING' and user_agent = $3`,
-        [tenant.id, user.id, `expiry-legacy-${stamp}`], legacyValues.length
+        [tenant.id, user.id, `expiry-legacy-${stamp}`]
       );
       assert.deepEqual(activity, legacyValues.map(() => ({ value: auditValue(1, permanentSkips) })));
 
@@ -7378,7 +7444,7 @@ const integrationService = require('../../modules/integrations/service');
       await assertReleased(operatorItem);
       assert.deepEqual(await committedRows(
         "select new_value from audit_logs where admin_id = $1 and action = 'EXPIRE_PENDING'",
-        [platformAdmin.id], 1
+        [platformAdmin.id]
       ), [{ new_value: auditValue(1, permanentSkips) }]);
       assert.deepEqual(await heartbeat(), heartbeatBefore);
 
@@ -7445,8 +7511,6 @@ const integrationService = require('../../modules/integrations/service');
       }
       await admin.query('begin');
       try {
-        // Wait for pending request audit inserts before deleting the logs and actor.
-        if (user) await admin.query('select id from app_users where id = $1 for update', [user.id]);
         if (platformAdmin) {
           await admin.query('delete from audit_logs where admin_id = $1', [platformAdmin.id]);
           await admin.query('delete from admins where id = $1', [platformAdmin.id]);
@@ -7479,6 +7543,17 @@ const integrationService = require('../../modules/integrations/service');
   test('R10 expire-pending over HTTP: auth, tenant isolation, grace, stock, audit, heartbeat and limits',
     () => exerciseExpiryHttp());
   test('audit tenant isolation for expire-pending', () => exerciseExpiryHttp({ auditIsolation: true }));
+  for (const enabled of [true, false]) {
+    test(`atomic expire-pending audit with activity_logs RLS ${enabled ? 'enabled' : 'disabled'}`, async () => {
+      if (!enabled) await admin.query(activityLogsMigrationSql('down'));
+      try {
+        await verifyActivityLogsRls(enabled);
+        await exerciseExpiryHttp({ atomicAudit: true });
+      } finally {
+        if (!enabled) await admin.query(activityLogsMigrationSql('up'));
+      }
+    });
+  }
 
   test('activity_logs RLS preserves app auth and coupon audit events over HTTP', async (t) => {
     const express = require('express');

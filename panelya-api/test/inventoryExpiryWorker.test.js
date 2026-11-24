@@ -15,6 +15,59 @@ const {
 const { inventoryWorkerHealthSnapshot, inventoryWorkerPrometheus } = require('../services/metrics');
 const quietLogger = { info() {}, warn() {} };
 
+for (const mode of ['commit', 'rollback', 'no hook', 'disabled methods']) {
+  test(`expiry audit transaction: ${mode}`, async () => {
+    const calls = [];
+    const failure = new Error('audit insert failed');
+    let succeeded = 'previous';
+    let pendingSuccess = succeeded;
+    const client = Object.assign(new EventEmitter(), {
+      async query(sql) {
+        if (/^select (o.payment_method|r.id)/.test(sql)) return { rows: [] };
+        if (sql.startsWith('update inventory_worker_health')) {
+          calls.push('heartbeat');
+          pendingSuccess = 'current';
+          return;
+        }
+        calls.push(sql);
+        if (sql === 'commit') succeeded = pendingSuccess;
+        if (sql === 'rollback') pendingSuccess = succeeded;
+      },
+      release() { calls.push('release'); },
+    });
+    const methods = mode === 'disabled methods' ? [] : ['card'];
+    const report = { methods, due: 0, skipped: {}, byMethod: {}, expired: [] };
+    const pool = {
+      connect: async () => client,
+      async query(sql) {
+        if (sql.startsWith('select o.payment_method')) return { rows: [] };
+        calls.push(sql.includes('last_failed_at') ? 'failed' : 'started');
+      },
+    };
+    const beforeCommit = mode === 'no hook' ? undefined : async (store, snapshot) => {
+      assert.equal(store, client);
+      assert.deepEqual(snapshot, report);
+      calls.push('audit');
+      if (mode === 'rollback') throw failure;
+    };
+    const run = expireInventoryReservationsWithReport({
+      pool, methods, beforeCommit, updateHeartbeat: mode !== 'disabled methods',
+    });
+    if (mode === 'rollback') {
+      await assert.rejects(run, (error) => error === failure);
+      assert.deepEqual(calls, ['started', 'begin', 'heartbeat', 'audit', 'rollback', 'release', 'failed']);
+      assert.equal(succeeded, 'previous');
+      assert.equal(pendingSuccess, 'previous');
+    } else {
+      assert.deepEqual(await run, report);
+      const expected = mode === 'disabled methods' ? ['begin'] : ['started', 'begin', 'heartbeat'];
+      if (beforeCommit) expected.push('audit');
+      assert.deepEqual(calls, [...expected, 'commit', 'release']);
+      assert.equal(succeeded, mode === 'disabled methods' ? 'previous' : 'current');
+    }
+  });
+}
+
 test('R10: the worker is OFF unless explicitly enabled', () => {
   assert.equal(workerConfig({}).enabled, false);
   assert.equal(workerConfig({ INVENTORY_EXPIRY_WORKER_ENABLED: 'false' }).enabled, false);
