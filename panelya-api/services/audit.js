@@ -123,6 +123,7 @@ async function auditLog(req, {
   actorUserId = null,
   organizationId = null,
   store = db,
+  throwOnError = false,
 }) {
   try {
     const effectiveActorType = actorType || req.auth?.actorType || req.admin?.actorType || null;
@@ -159,6 +160,7 @@ async function auditLog(req, {
     }
   } catch (err) {
     console.warn('Audit log yazilamadi', { message: err.message });
+    if (throwOnError) throw err;
   }
 }
 

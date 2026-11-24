@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const { EventEmitter } = require('node:events');
 const { expireInventoryReservationsWithReport, inventoryExpiryMethods } = require('../services/inventoryReservations');
 
 const {
@@ -47,7 +48,7 @@ test('R10: interval, batch limit and dry-run are parsed and clamped', () => {
 test('R10: a missed cancellation leaves stock and promotion untouched and logs the skip', async () => {
   const queries = [];
   const output = [];
-  const client = {
+  const client = Object.assign(new EventEmitter(), {
     async query(sql, params) {
       queries.push({ sql, params });
       if (sql.startsWith('select o.payment_method as method')) return { rows: [] };
@@ -58,7 +59,7 @@ test('R10: a missed cancellation leaves stock and promotion untouched and logs t
       assert.ok(['begin', 'commit'].includes(sql), `unexpected SQL: ${sql}`);
     },
     release() {},
-  };
+  });
   const result = await runExpiryOnce({
     config: { methods: ['card'] },
     expire: (policy) => expireInventoryReservationsWithReport({

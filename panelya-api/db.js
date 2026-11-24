@@ -131,34 +131,55 @@ async function withStandaloneTenantTransaction(organizationId, fn) {
 async function activateTenantContext(organizationId) {
   const normalized = assertOrganizationId(organizationId);
   const context = requestStorage.getStore();
-  if (!context) return false;
+  if (!context || context.finalized) return false;
   if (context.organizationId && context.organizationId !== normalized) {
     throw Object.assign(new Error('Request tenant context degistirilemez'), { status: 403 });
   }
   if (!context.client) {
     const targetPool = context.privileged ? getSystemPool() : pool;
-    context.client = await targetPool.connect();
-    try { await context.client.query('begin'); } catch (error) {
-      context.client.release();
-      context.client = null;
+    const client = await targetPool.connect();
+    const onError = (error) => console.warn('Request DB connection failed', { message: error.message });
+    client.on('error', onError);
+    try {
+      // A response can close while the pool checkout or tenant setup is in flight.
+      if (!context.finalized) {
+        await client.query('begin');
+        await setTenantContext(client, normalized);
+        if (!context.finalized) {
+          context.client = client;
+          context.organizationId = normalized;
+          context.onClientError = onError;
+          return true;
+        }
+        await client.query('rollback');
+      }
+    } catch (error) {
+      client.removeListener('error', onError);
+      client.release(error);
       throw error;
     }
-  }
-  if (!context.organizationId) {
-    await setTenantContext(context.client, normalized);
-    context.organizationId = normalized;
+    client.removeListener('error', onError);
+    client.release();
+    return false;
   }
   return true;
 }
 
 async function finalizeRequestContext(context, commit) {
-  if (!context.client || context.finalized) return;
+  if (context.finalized) return;
   context.finalized = true;
   const client = context.client;
+  if (!client) return;
   context.client = null;
+  let releaseError;
   try { await client.query(commit ? 'commit' : 'rollback'); }
-  catch (error) { console.warn('Request DB transaction sonlandirilamadi', { message: error.message }); }
-  finally { client.release(); }
+  catch (error) {
+    releaseError = error;
+    console.warn('Request DB transaction sonlandirilamadi', { message: error.message });
+  } finally {
+    client.removeListener('error', context.onClientError);
+    client.release(releaseError);
+  }
 }
 
 function requestContextMiddleware(req, res, next) {
