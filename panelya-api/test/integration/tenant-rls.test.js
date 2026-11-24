@@ -6507,23 +6507,27 @@ const integrationService = require('../../modules/integrations/service');
   }));
 
   async function seedExpiryReservation(org, tag, {
-    expired, paymentMethod = 'card', product, customerId = (org === orgA ? fixtures.a : fixtures.b).customerId,
+    expired, paymentMethod = 'card', product, additionalProduct,
+    customerId = (org === orgA ? fixtures.a : fixtures.b).customerId,
   }) {
     const seeded = product || await seedCartProduct(org, tag, { price: 100, stock: 5 });
     const order = await admin.query(
       "insert into orders (organization_id, order_code, customer_id, total, status, payment_method) values ($1,$2,$3,100,'payment_pending',$4) returning id",
       [org, `RES-${tag}`, customerId, paymentMethod]
     );
-    await admin.query(
+    const items = [seeded, additionalProduct].filter(Boolean).map(({ productId, variantId }) => ({
+      product_id: productId, variant_id: variantId, quantity: 2, unit_price: 100,
+    }));
+    for (const item of items) await admin.query(
       `insert into order_items (organization_id, order_id, product_id, variant_id, product_name, quantity, unit_price)
        values ($1,$2,$3,$4,'Reservation fixture item',2,100)`,
-      [org, order.rows[0].id, seeded.productId, seeded.variantId]
+      [org, order.rows[0].id, item.product_id, item.variant_id]
     );
     const reservation = await asTenant(runtimePool, org, (client) => createInventoryReservation(client, {
       organizationId: org,
       orderId: order.rows[0].id,
       customerId,
-      items: [{ product_id: seeded.productId, variant_id: seeded.variantId, quantity: 2, unit_price: 100 }],
+      items,
       idempotencyKey: `reservation-${tag}`,
       ttlMinutes: 15,
     }));
@@ -6875,6 +6879,7 @@ const integrationService = require('../../modules/integrations/service');
     app.use(attachSession);
     app.use(appDb.requestContextMiddleware);
     app.use('/api/orders', require('../../routes/orders'));
+    app.use('/api/payment', require('../../routes/payment'));
     app.use((err, _req, res, _next) => res.status(err.status || 500).json({ error: String(err.message || err) }));
     async function post({ token = appToken('owner'), body = {}, headers = {}, query = '' } = {}) {
       const response = await fetch(`http://127.0.0.1:${server.address().port}/api/orders/expire-pending${query}`, {
@@ -6923,6 +6928,7 @@ const integrationService = require('../../modules/integrations/service');
                  from inventory_movements m where m.organization_id = $1 and m.variant_id = $4) as movement_hash,
               (select coalesce(jsonb_agg(jsonb_build_array(m.on_hand_delta, m.reserved_delta) order by m.id), '[]'::jsonb)
                  from inventory_movements m where m.organization_id = $1 and m.reference_id = $2::uuid::text
+                   and m.variant_id = $4
                    and m.movement_type = 'reservation_release') as releases,
               (select md5(coalesce(jsonb_agg(to_jsonb(c) order by c.id)::text, ''))
                  from coupon_redemptions c where c.organization_id = $1 and c.order_id = $3) as redemption_hash,
@@ -7179,7 +7185,9 @@ const integrationService = require('../../modules/integrations/service');
       }
     }
     async function checkPaymentRace() {
-      const { enqueuePaymentCallbackEvent, processPaymentCallbackEvent } = require('../../services/paymentCallbackEvents');
+      const { enqueuePaymentCallbackEvent, processPaymentCallbackEvent, processPendingPaymentCallbackEvents } =
+        require('../../services/paymentCallbackEvents');
+      const { expireInventoryReservationsWithReport } = require('../../services/inventoryReservations');
       const request = { get() { return ''; } };
       const scope = { verifiedOrganizationId: tenant.id };
       const auditRows = () => committedRows(
@@ -7187,27 +7195,40 @@ const integrationService = require('../../modules/integrations/service');
           where organization_id = $1 and action = 'EXPIRE_PENDING'
           order by (metadata->'newValue'->>'expiredCount')::int`, [tenant.id]
       );
-      async function seedCard(tag) {
-        const item = await seed(tenant.id, tag);
+      const cases = () => committedRows(
+        'select * from payment_reconciliation_cases where organization_id = $1 order by id', [tenant.id]
+      );
+      const reconciliationAudits = (action = 'PAYMENT_RECONCILIATION_REQUIRED') => committedRows(
+        'select entity_id, actor_user_id from activity_logs where organization_id = $1 and action = $2 order by entity_id::bigint',
+        [tenant.id, action]
+      );
+      const verifyPayment = (token) => ({
+        status: 'success', paymentStatus: 'SUCCESS', paymentId: `paid-${token}`, paidPrice: '101.25', currency: 'TRY',
+      });
+      async function seedCard(tag, options) {
+        const item = await seed(tenant.id, tag, options);
         const token = `${stamp}-${tag}`;
         const [{ order_code: orderCode }] = await committedRows(
           'update orders set payment_token = $3 where organization_id = $1 and id = $2 returning order_code',
           [tenant.id, item.orderId, token]
         );
         await admin.query("update inventory_reservations set expires_at = now() - interval '2 hours' where id = $1", [item.id]);
-        const enqueue = () => enqueuePaymentCallbackEvent(request, { provider: 'iyzico', token, orderCode }, admin, scope);
-        return { item, enqueue };
+        const enqueue = (overrides) => enqueuePaymentCallbackEvent(
+          request, { provider: 'iyzico', token, orderCode, status: 'paid', ...overrides }, admin, scope
+        );
+        return { item, enqueue, token };
       }
-      function process(event, audit = async () => {}) {
-        return processPaymentCallbackEvent(request, event.id, {
+      function callbackDeps(overrides = {}) {
+        return {
           ...scope,
-          retrieve: async () => ({ status: 'success', paymentStatus: 'SUCCESS', paymentId: `paid-${event.id}` }),
-          audit,
+          retrieve: async ({ token }) => verifyPayment(token),
           sendEmail: async () => {},
           buildSuccessUrl: () => '/success',
           buildFailureUrl: () => '/failure',
-        });
+          ...overrides,
+        };
       }
+      const process = (event, overrides) => processPaymentCallbackEvent(request, event.id, callbackDeps(overrides));
       const paid = await seedCard('callback-wins');
       const before = await stateOf(paid.item);
       assertHeld(before);
@@ -7215,10 +7236,10 @@ const integrationService = require('../../modules/integrations/service');
       const locked = Promise.withResolvers();
       const release = Promise.withResolvers();
       // The service reaches its audit hook with its real order and stock writes still uncommitted.
-      const callback = process(event, async () => {
+      const callback = process(event, { audit: async () => {
         locked.resolve();
         await release.promise;
-      });
+      } });
       let during;
       try {
         await Promise.race([locked.promise, callback.then(() => assert.fail('callback completed before the barrier'))]);
@@ -7252,24 +7273,214 @@ const integrationService = require('../../modules/integrations/service');
       ), [{ on_hand_delta: -2, reserved_delta: -2 }]);
       assert.equal((await process(event)).idempotentReplay, true);
       assert.deepEqual(await stateOf(paid.item), consumed);
+      assert.deepEqual(await cases(), []);
 
-      const expired = await seedCard('expiry-wins');
+      const additionalProduct = await seedCartProduct(tenant.id, `second-${stamp}`, { price: 100, stock: 5 });
+      const expired = await seedCard('expiry-wins', { additionalProduct });
+      const [{ id: couponId }] = await committedRows(
+        "insert into coupons (organization_id, code, name, discount_type, value) values ($1,$2,'Late payment','fixed',10) returning id",
+        [tenant.id, `LATE-${stamp}`]
+      );
+      await admin.query(
+        'insert into coupon_redemptions (organization_id, coupon_id, order_id, discount_amount) values ($1,$2,$3,10)',
+        [tenant.id, couponId, expired.item.orderId]
+      );
       const expiry = await post();
       assertReport(expiry, [expired.item.id]);
-      const released = await assertReleased(expired.item);
-      const late = await process(await expired.enqueue());
+      const released = await assertReleased(expired.item, ['released']);
+      const releasedAdditional = await assertReleased({ ...expired.item, variantId: additionalProduct.variantId }, ['released']);
+      const lateEvent = await expired.enqueue();
+      const late = await process(lateEvent);
       assert.equal(late.ok, false);
       assert.equal(late.result_status, 'cancelled');
       assert.equal(late.order.status, 'cancelled');
-      assert.equal(late.order.payment_id, `paid-${late.id}`);
+      assert.equal(late.order.payment_id, verifyPayment(expired.token).paymentId);
       assert.match(late.order.payment_error, /Final durum korunuyor: cancelled/);
       const afterLateCallback = await stateOf(expired.item);
       assert.deepEqual(afterLateCallback, { ...released, order_hash: afterLateCallback.order_hash });
+      assert.deepEqual(await stateOf({ ...expired.item, variantId: additionalProduct.variantId }),
+        { ...releasedAdditional, order_hash: afterLateCallback.order_hash });
+      const allCases = await cases();
+      assert.equal(allCases.length, 1);
+      const [lateCase] = allCases;
+      assert.equal(lateCase.id, late.reconciliationCaseId);
+      assert.equal(lateCase.status, 'open');
+      assert.equal(lateCase.provider_payment_id, late.order.payment_id);
+      assert.equal(lateCase.provider_paid_amount, '101.25');
+      assert.equal(lateCase.currency, 'TRY');
+      assert.equal(lateCase.order_total, '100.00');
+      assert.equal(lateCase.order_id, expired.item.orderId);
+      assert.equal(lateCase.callback_event_id, late.id);
+      assert.equal(late.processing_status, 'processed');
+      assert.equal(late.last_error, `reconciliation_case:${lateCase.id}`);
+      assert.equal((await process(lateEvent)).reconciliationCaseId, lateCase.id);
+      assert.equal((await process(await expired.enqueue({ eventId: 'duplicate-' + stamp }))).reconciliationCaseId, lateCase.id);
+      assert.deepEqual(await cases(), allCases);
+      assert.deepEqual(await reconciliationAudits(), [{ entity_id: lateCase.id, actor_user_id: null }]);
       assert.deepEqual(await stateOf(paid.item), consumed);
       assert.deepEqual(await auditRows(), [
         { value: { ...auditValue(0, { callback_pending: 1 }), byMethod: during.body.byMethod } },
         { value: auditValue(1, {}) },
       ]);
+
+      const foreignEvent = await enqueuePaymentCallbackEvent(
+        request, { provider: 'iyzico', token: expired.token, eventId: 'foreign-' + stamp }, admin,
+        { verifiedOrganizationId: foreignTenant.id }
+      );
+      await assert.rejects(process(foreignEvent, {
+        verifiedOrganizationId: foreignTenant.id,
+        retrieve: async () => assert.fail('foreign token reached provider'),
+      }), { status: 404 });
+      for (const [payload, retrieve] of [
+        [{ provider: 'mock' }, async () => assert.fail('mock called iyzico')],
+        [{ token: null }, async () => assert.fail('tokenless event called iyzico')],
+        [{}, async () => ({ status: 'failure' })],
+        [{}, async () => ({ status: 'success', paymentStatus: 'FAILURE' })],
+      ].map(([payload, retrieve], index) => [{ ...payload, eventId: `unverified-${stamp}-${index}` }, retrieve])) {
+        const outcome = await process(await expired.enqueue(payload), { retrieve });
+        assert.equal(outcome.ok, false);
+        assert.equal(outcome.reconciliationCaseId, undefined);
+      }
+      await assert.rejects(process(await expired.enqueue({ token: 'unknown-' + stamp })), { status: 404 });
+      assert.deepEqual(await cases(), allCases);
+
+      const contended = await seedCard('expiry-lock-wins');
+      const expiryLocked = Promise.withResolvers();
+      const releaseExpiry = Promise.withResolvers();
+      const expiryTransaction = expireInventoryReservationsWithReport({
+        organizationId: tenant.id, cardGrace: 30,
+        beforeCommit: async (_client, report) => {
+          assert.deepEqual(report.expired, [contended.item.id]);
+          expiryLocked.resolve();
+          await releaseExpiry.promise;
+        },
+      });
+      let laterCallback;
+      try {
+        await Promise.race([expiryLocked.promise, expiryTransaction.then(() => assert.fail('expiry missed barrier'))]);
+        const lockRequested = Promise.withResolvers();
+        laterCallback = process(await contended.enqueue(), {
+          pool: {
+            async connect() {
+              const client = await appDb.getSystemPool().connect();
+              return {
+                release: (error) => client.release(error),
+                query(sql, params) {
+                  const result = client.query(sql, params);
+                  if (sql.startsWith('select * from orders where payment_token') && sql.includes('for update')) {
+                    lockRequested.resolve();
+                  }
+                  return result;
+                },
+              };
+            },
+          },
+        });
+        await Promise.race([lockRequested.promise, laterCallback.then(() => assert.fail('callback missed barrier'))]);
+      } finally {
+        releaseExpiry.resolve();
+        await expiryTransaction;
+        if (laterCallback) await laterCallback;
+      }
+      const contendedResult = await laterCallback;
+      assert.equal(contendedResult.order.status, 'cancelled');
+      assert.ok(contendedResult.reconciliationCaseId);
+      await assertReleased(contended.item);
+
+      async function withRejectedInsert(table, expression, fn) {
+        await admin.query(`alter table ${table} add constraint test_reconciliation_reject check (${expression}) not valid`);
+        try { await fn(); }
+        finally { await admin.query(`alter table ${table} drop constraint test_reconciliation_reject`); }
+      }
+      const retry = await seedCard('retry-late-payment');
+      assertReport(await post(), [retry.item.id]);
+      const retryEvent = await retry.enqueue();
+      const beforeFault = await stateOf(retry.item);
+      const casesBeforeFault = await cases();
+      const auditsBeforeFault = await reconciliationAudits();
+      for (const [table, expression] of [
+        ['payment_reconciliation_cases', `callback_event_id <> ${retryEvent.id}`],
+        ['activity_logs', "action <> 'PAYMENT_RECONCILIATION_REQUIRED'"],
+      ]) {
+        await withRejectedInsert(table, expression, async () => {
+          await assert.rejects(process(retryEvent), { code: '23514' });
+          assert.deepEqual(await cases(), casesBeforeFault);
+          assert.deepEqual(await reconciliationAudits(), auditsBeforeFault);
+          assert.deepEqual(await stateOf(retry.item), beforeFault);
+          const [failed] = await committedRows(
+            'select processing_status, next_retry_at > now() as retry_scheduled from payment_callback_events where id = $1',
+            [retryEvent.id]
+          );
+          assert.deepEqual(failed, { processing_status: 'failed', retry_scheduled: true });
+        });
+        await admin.query('update payment_callback_events set next_retry_at = now() where id = $1', [retryEvent.id]);
+      }
+      const worker = await processPendingPaymentCallbackEvents(1, callbackDeps({
+        query: (sql, params) => sql.includes('select id, organization_id')
+          ? appDb.systemQuery(`with payment_callback_events as (
+              select * from public.payment_callback_events where id = $3
+            ) ${sql}`, [...params, retryEvent.id])
+          : appDb.systemQuery(sql, params),
+      }));
+      assert.deepEqual(worker, [{ id: retryEvent.id, status: 'processed' }]);
+      const retryReplay = await process(retryEvent);
+      assert.ok(retryReplay.reconciliationCaseId);
+      assert.equal((await cases()).length, casesBeforeFault.length + 1);
+      assert.equal((await reconciliationAudits()).length, auditsBeforeFault.length + 1);
+
+      const caseIds = (await cases()).map(({ id }) => id);
+      assert.equal(caseIds.length, 3);
+      assert.equal((await asTenant(runtimePool, foreignTenant.id, (client) => client.query(
+        'select id from payment_reconciliation_cases where id = $1', [lateCase.id]
+      ))).rowCount, 0);
+      const foreignToken = createAppAccessToken({ user, membership: { role: 'owner', organization: foreignTenant } });
+      async function operator(path = '', body, token = appToken('owner')) {
+        const response = await fetch(`http://127.0.0.1:${server.address().port}/api/payment/reconciliation${path}`, {
+          method: body ? 'POST' : 'GET',
+          headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+          body: body ? JSON.stringify(body) : undefined,
+          signal: AbortSignal.timeout(10000),
+        });
+        return { status: response.status, body: await response.json() };
+      }
+      async function checkOperatorIsolation() {
+        assert.deepEqual(await operator('', undefined, foreignToken), {
+          status: 200, body: { cases: [], nextCursor: null },
+        });
+        assert.equal((await operator(`/${lateCase.id}/resolve`, { resolution: 'dismissed' }, foreignToken)).status, 404);
+      }
+      await checkOperatorIsolation();
+      await admin.query('alter table payment_reconciliation_cases disable row level security');
+      try { await checkOperatorIsolation(); }
+      finally { await admin.query('alter table payment_reconciliation_cases enable row level security'); }
+      const page = await operator('?status=open&limit=1');
+      assert.equal(page.status, 200);
+      assert.deepEqual(page.body.cases.map(({ id }) => id), [caseIds[2]]);
+      assert.equal(page.body.nextCursor, caseIds[2]);
+      const secondPage = await operator(`?before=${caseIds[2]}`);
+      assert.deepEqual(secondPage.body.cases.map(({ id }) => id), [caseIds[1], caseIds[0]]);
+      const resolvePath = (id) => `/${id}/resolve`;
+      assert.equal((await operator(resolvePath(lateCase.id), { resolution: 'dismissed' }, appToken('viewer'))).status, 403);
+      await withRejectedInsert('activity_logs', "action <> 'PAYMENT_RECONCILIATION_RESOLVED'", async () => {
+        assert.equal((await operator(resolvePath(lateCase.id), { resolution: 'dismissed' })).status, 500);
+        assert.equal((await cases())[0].status, 'open');
+        assert.deepEqual(await reconciliationAudits('PAYMENT_RECONCILIATION_RESOLVED'), []);
+      });
+      const items = [expired.item, contended.item, retry.item];
+      const beforeResolution = [];
+      for (const item of items) beforeResolution.push(await stateOf(item));
+      for (const [index, resolution] of ['resolved_refunded', 'resolved_accepted', 'dismissed'].entries()) {
+        const id = caseIds[index];
+        const result = await operator(resolvePath(id), { resolution, note: 'Manual review' });
+        assert.equal(result.status, 200, JSON.stringify(result.body));
+        assert.equal(result.body.case.status, resolution);
+        assert.equal(result.body.case.resolved_by, user.id);
+        assert.equal(result.body.case.resolution_note, 'Manual review');
+        assert.equal((await operator(resolvePath(id), { resolution })).status, 409);
+      }
+      assert.deepEqual(await reconciliationAudits('PAYMENT_RECONCILIATION_RESOLVED'),
+        caseIds.map((entity_id) => ({ entity_id, actor_user_id: user.id })));
+      for (const [index, item] of items.entries()) assert.deepEqual(await stateOf(item), beforeResolution[index]);
       await assertPoolsDrained();
     }
     async function assertPoolsDrained() {
@@ -8014,6 +8225,8 @@ const integrationService = require('../../modules/integrations/service');
   });
 
   test('safe rollback retains tenant columns; cross-tenant corruption blocks reapply', async () => {
+    await runRollback({ pool: migratorPool, target: '075_payment_reconciliation_cases.sql', logger: { log() {}, warn() {} } });
+    assert.equal((await admin.query("select to_regclass('payment_reconciliation_cases') as name")).rows[0].name, null);
     await runRollback({ pool: migratorPool, target: '074_activity_logs_rls.sql', logger: { log() {}, warn() {} } });
     // A34's five FORCE-RLS policies also depend on the helper introduced in 038.
     await runRollback({ pool: migratorPool, target: '072_instagram_ai_catalog_ingestion.sql', logger: { log() {}, warn() {} } });
@@ -8078,6 +8291,10 @@ const integrationService = require('../../modules/integrations/service');
     );
     await admin.query('update products set category_id = null where id = $1', [corrupt.rows[0].id]);
     await runMigrations({ pool: migratorPool, logger: { log() {}, warn() {} } });
+    const { rows: [reconciliationTable] } = await admin.query(
+      "select relrowsecurity, relforcerowsecurity from pg_class where oid = 'payment_reconciliation_cases'::regclass"
+    );
+    assert.deepEqual(reconciliationTable, { relrowsecurity: true, relforcerowsecurity: true });
   });
   test('checkout idempotency over HTTP: exact retries replay one order, changed requests conflict, tenants and routes stay separate', async () => {
     const express = require('express');

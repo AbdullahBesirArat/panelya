@@ -102,6 +102,7 @@ async function lockOrderForCallback(client, payload, options = {}) {
   const token = firstPresent(payload.token, payload.paymentToken, payload.payment_token);
   if (token) {
     const scope = await resolveUniqueOrderScopeByToken(client, token);
+    if (scope.organization_id !== verifiedOrganizationId(options)) return null;
     const result = await client.query(
       'select * from orders where payment_token = $1 and organization_id = $2 limit 1 for update',
       [token, scope.organization_id]
@@ -222,6 +223,7 @@ async function finalizeEvent(client, eventId, values, organizationId) {
      set ${fields.join(', ')}, updated_at = now()
      where id = $${params.length - 1}
        and organization_id = $${params.length}
+       ${values.processing_status === 'failed' ? "and processing_status <> 'processed'" : ''}
      returning *`,
     params
   );
@@ -247,7 +249,7 @@ async function processPaymentCallbackEvent(req, eventId, deps = {}) {
 
   const organizationId = verifiedOrganizationId({ verifiedOrganizationId: explicitVerifiedOrganizationId });
   if (!organizationId) throw callbackIdentityError();
-  const client = await pool.connect();
+  let client = await pool.connect();
   let claimedEvent = null;
   try {
     await client.query('begin');
@@ -266,8 +268,8 @@ async function processPaymentCallbackEvent(req, eventId, deps = {}) {
 
       // Idempotent replay: islenmis event icin depolanan sonucu guvenle dondur.
       if (row && row.processing_status === 'processed' && row.processed_order_id) {
-        const organizationId = await resolveReplayOrganizationId(client, row).catch(() => '');
-        if (organizationId) {
+        const replayOrganizationId = await resolveReplayOrganizationId(client, row).catch(() => '');
+        if (replayOrganizationId === organizationId) {
           const orderRes = await client.query(
             'select * from orders where id = $1 and organization_id = $2 limit 1',
             [row.processed_order_id, organizationId]
@@ -286,6 +288,8 @@ async function processPaymentCallbackEvent(req, eventId, deps = {}) {
         } else {
           replay = { ...row, ok: row.result_status === 'paid', idempotentReplay: true };
         }
+        const caseId = /^reconciliation_case:(\d+)$/.exec(row.last_error || '')?.[1];
+        if (caseId) replay.reconciliationCaseId = caseId;
       }
       await client.query('commit');
       return replay;
@@ -300,15 +304,20 @@ async function processPaymentCallbackEvent(req, eventId, deps = {}) {
     let proposedStatus = provider === 'mock' && payload.status === 'paid' ? 'paid' : 'cancelled';
     let paymentId = null;
     let paymentError = null;
+    let verifiedPayment = null;
 
     if (payload.token && provider === 'iyzico') {
       const orderPreview = await resolveUniqueOrderScopeByToken(client, payload.token);
+      if (orderPreview.organization_id !== organizationId) {
+        throw Object.assign(new Error('Siparis bulunamadi'), { status: 404 });
+      }
 
       const payment = await retrieve({
         token: payload.token,
         conversationId: orderPreview.order_code,
       });
       proposedStatus = payment.status === 'success' && payment.paymentStatus === 'SUCCESS' ? 'paid' : 'cancelled';
+      if (proposedStatus === 'paid') verifiedPayment = payment;
       paymentId = payment.paymentId || null;
       paymentError = payment.errorMessage || null;
     }
@@ -326,6 +335,9 @@ async function processPaymentCallbackEvent(req, eventId, deps = {}) {
     if (guard.guarded) {
       paymentError = paymentError || `Final durum korunuyor: ${currentStatus}`;
     }
+    const reconciliationCaseId = currentStatus === 'cancelled' && verifiedPayment
+      ? await recordLatePayment(client, req, audit, currentOrder, event, payload.token, verifiedPayment)
+      : null;
 
     // Reservation transition is itself idempotent. Duplicate callbacks cannot
     // consume or release inventory more than once.
@@ -352,7 +364,7 @@ async function processPaymentCallbackEvent(req, eventId, deps = {}) {
       processing_status: 'processed',
       processed_order_id: currentOrder.id,
       result_status: nextStatus,
-      last_error: paymentError,
+      last_error: reconciliationCaseId ? `reconciliation_case:${reconciliationCaseId}` : paymentError,
       last_processed_at: new Date().toISOString(),
       next_retry_at: null,
     }, organizationId);
@@ -368,13 +380,15 @@ async function processPaymentCallbackEvent(req, eventId, deps = {}) {
     });
 
     await client.query('commit');
+    client.release();
+    client = null;
 
     const customerResult = await query(
       `select id, name, email
        from customers
-       where id = $1
+       where id = $1 and organization_id = $2
        limit 1`,
-      [updatedOrder.rows[0].customer_id]
+      [updatedOrder.rows[0].customer_id, organizationId]
     );
     await sendEmail(updatedOrder.rows[0], customerResult.rows[0]).catch((error) => {
       console.warn('Order status email gonderilemedi', {
@@ -385,6 +399,7 @@ async function processPaymentCallbackEvent(req, eventId, deps = {}) {
 
     return {
       ...finalizedEvent,
+      ...(reconciliationCaseId && { reconciliationCaseId }),
       order: updatedOrder.rows[0],
       ok: nextStatus === 'paid',
       redirectUrl: nextStatus === 'paid'
@@ -392,7 +407,12 @@ async function processPaymentCallbackEvent(req, eventId, deps = {}) {
         : buildFailureUrl(req, updatedOrder.rows[0].order_code),
     };
   } catch (error) {
-    await client.query('rollback');
+    if (!client) throw error;
+    let rollbackError;
+    try { await client.query('rollback'); }
+    catch (err) { rollbackError = err; }
+    client.release(rollbackError);
+    client = null;
 
     // Rollback sonrasi event'i (ayri baglantida) retry edilebilir 'failed' olarak
     // neden bilgisiyle isaretle. Ham payload/token/imza loglanmaz.
@@ -405,8 +425,44 @@ async function processPaymentCallbackEvent(req, eventId, deps = {}) {
 
     throw error;
   } finally {
-    client.release();
+    if (client) client.release();
   }
+}
+
+async function recordLatePayment(client, req, audit, order, event, token, payment) {
+  const paymentId = firstPresent(payment.paymentId);
+  if (!paymentId) throw new Error('Dogrulanmis odeme icin saglayici odeme kimligi eksik');
+
+  const identity = [order.organization_id, 'iyzico', paymentId, 'paid_on_cancelled_order'];
+  const { rows: [created] } = await client.query(
+    `insert into payment_reconciliation_cases
+       (organization_id, provider, provider_payment_id, case_type, order_id, callback_event_id,
+        payment_token, provider_paid_amount, currency, order_total, order_status_at_detection)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+     on conflict (organization_id, provider, provider_payment_id, case_type) do nothing
+     returning id`,
+    [...identity, order.id, event.id, token, payment.paidPrice ?? null, payment.currency ?? null,
+      order.total, order.status]
+  );
+  if (!created) {
+    const { rows: [existing] } = await client.query(
+      `select id from payment_reconciliation_cases
+        where organization_id = $1 and provider = $2 and provider_payment_id = $3 and case_type = $4`,
+      identity
+    );
+    return existing.id;
+  }
+  await audit(req, {
+    action: 'PAYMENT_RECONCILIATION_REQUIRED',
+    actorType: 'app',
+    organizationId: order.organization_id,
+    resourceType: 'payment_reconciliation_case',
+    resourceId: created.id,
+    newValue: { orderId: order.id, callbackEventId: event.id, providerPaymentId: paymentId },
+    store: client,
+    throwOnError: true,
+  });
+  return created.id;
 }
 
 async function processPendingPaymentCallbackEvents(limit = 20, deps = {}) {

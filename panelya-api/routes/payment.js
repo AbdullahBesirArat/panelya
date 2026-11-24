@@ -38,6 +38,7 @@ const { buildInvoiceProfileSnapshot } = require('../modules/invoicing/profiles')
 const { calculateCheckoutTax } = require('../modules/invoicing/taxEngine');
 
 const router = express.Router();
+router.use('/reconciliation', require('./paymentReconciliation'));
 const paymentInitLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: Number(process.env.PAYMENT_INIT_RATE_LIMIT || 40),
@@ -583,7 +584,12 @@ router.post('/callback', async (req, res, next) => {
       return res.redirect(result.redirectUrl);
     }
 
-    res.json({ ok: result.ok, order: result.order, callbackEventId: result.id });
+    res.json({
+      ok: result.ok,
+      order: result.order,
+      callbackEventId: result.id,
+      reconciliationCaseId: result.reconciliationCaseId,
+    });
   } catch (err) {
     next(err);
   }

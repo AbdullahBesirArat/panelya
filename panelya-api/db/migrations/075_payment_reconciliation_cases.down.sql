@@ -1,0 +1,2 @@
+drop table if exists payment_reconciliation_cases;
+alter table payment_callback_events drop constraint if exists payment_callback_events_org_id_key;

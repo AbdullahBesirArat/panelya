@@ -592,3 +592,43 @@ test('036 migration event_key + partial unique index ekler ve down rollback icer
   assert.match(down, /drop index if exists uq_payment_callback_events_event_key/i);
   assert.match(down, /drop column if exists event_key/i);
 });
+
+test('verified late payment returns a reconciliation case while the order stays cancelled', async () => {
+  const event = { id: 91, processing_status: 'pending', payload: { provider: 'iyzico', token: 'late' } };
+  const order = { id: 12, organization_id: 'org-1', order_code: '#12', payment_token: 'late', status: 'cancelled', total: '20.00' };
+  const { calls, deps } = makeHarness({ event, order });
+  const client = await deps.pool.connect();
+  const query = client.query;
+  const audits = [];
+  deps.audit = async (_req, entry) => { audits.push(entry); };
+  client.query = (sql, params) => sql.includes('insert into payment_reconciliation_cases')
+    ? { rows: [{ id: '42' }] } : query(sql, params);
+  const outcome = await processPaymentCallbackEvent(req, event.id, deps);
+  assert.equal(outcome.ok, false);
+  assert.equal(outcome.order.status, 'cancelled');
+  assert.equal(outcome.reconciliationCaseId, '42');
+  const detection = audits.find(({ action }) => action === 'PAYMENT_RECONCILIATION_REQUIRED');
+  assert.ok(detection);
+  assert.equal(detection.actorType, 'app');
+  assert.equal(detection.organizationId, order.organization_id);
+  assert.equal(detection.store, client);
+  assert.equal(detection.throwOnError, true);
+  assert.ok(calls.queries.some(({ params }) => params?.includes('reconciliation_case:42')));
+});
+
+test('tokenless iyzico paid payload does not mark a pending order paid', async () => {
+  const event = {
+    id: 92, processing_status: 'pending', payload: { provider: 'iyzico', orderCode: '#13', status: 'paid' },
+  };
+  const order = { id: 13, organization_id: 'org-1', order_code: '#13', status: 'payment_pending' };
+  const { calls, deps } = makeHarness({ event, order });
+  const outcome = await processPaymentCallbackEvent(req, event.id, {
+    ...deps,
+    verifiedOrganizationId: order.organization_id,
+    retrieve: async () => assert.fail('tokenless event reached iyzico'),
+  });
+  assert.equal(outcome.ok, false);
+  assert.equal(outcome.order.status, 'cancelled');
+  assert.equal(outcome.reconciliationCaseId, undefined);
+  assert.equal(calls.queries.some(({ text }) => text.includes('payment_reconciliation_cases')), false);
+});
