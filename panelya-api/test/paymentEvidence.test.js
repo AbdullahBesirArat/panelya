@@ -46,6 +46,7 @@ test('provider success short by one kuruş cannot mark the order paid', async ()
   const updates = [];
   const client = {
     async query(sql, params) {
+      if (/^\s*select 1 from \(/i.test(sql)) return { rows: [] };
       if (/from orders/i.test(sql)) return { rows: [order] };
       if (/^update orders/i.test(sql)) {
         updates.push(params[0]);

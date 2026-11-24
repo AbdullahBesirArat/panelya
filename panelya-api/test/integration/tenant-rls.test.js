@@ -2208,7 +2208,7 @@ if (!ADMIN_URL) {
     const order = await admin.query(
       `insert into orders
        (organization_id, order_code, customer_id, total, status, payment_method)
-       values ($1,$2,$3,100,'payment_pending','card') returning *`,
+       values ($1,$2,$3,100,'payment_pending','iban') returning *`,
       [orgA, `A16-${stamp}`, customer.rows[0].id]
     );
     await admin.query(
@@ -2219,23 +2219,16 @@ if (!ADMIN_URL) {
       [orgA, order.rows[0].id, fixtures.a.productId, fixtures.a.variantId]
     );
     assert.equal(order.rows[0].order_status, 'pending_payment');
-    assert.equal(order.rows[0].payment_status, 'pending');
+    assert.equal(order.rows[0].payment_status, 'manual_pending');
     assert.equal(order.rows[0].fulfillment_status, 'unfulfilled');
     assert.equal(order.rows[0].version, 1);
     assert.equal(order.rows[0].customer_snapshot.address, 'Snapshot address');
-    // A card order can only be marked paid with provider-verified evidence (Phase 18); seed it as the callback would.
-    const a16Event = await admin.query(
-      `insert into payment_callback_events
-         (organization_id, provider, order_code, payment_token, requested_status, payload, event_key, next_retry_at)
-       values ($1,'iyzico',$2,$3,'paid','{}'::jsonb,$4, now()) returning id`,
-      [orgA, order.rows[0].order_code, `a16-token-${stamp}`, `iyzico|event:a16-${stamp}`]
-    );
+    // An IBAN order can only be marked paid with exact operator evidence (Phase 18); seed it directly.
     await admin.query(
       `insert into payment_evidence
-         (organization_id, order_id, channel, evidence_level, amount, currency, provider, provider_payment_id,
-          callback_event_id, received_at)
-       values ($1,$2,'card','provider_verified',100,'TRY','iyzico',$3,$4,now())`,
-      [orgA, order.rows[0].id, `a16-pay-${stamp}`, a16Event.rows[0].id]
+         (organization_id, order_id, channel, evidence_level, amount, currency, reference, reference_key, received_at, note)
+       values ($1,$2,'bank_transfer','operator_recorded',100,'TRY',$3,$3,now(),'A16 fixture operator note')`,
+      [orgA, order.rows[0].id, `A16REF${stamp}`]
     );
 
     const actor = { type: 'staff', id: staffA.rows[0].id, name: 'A16 Operator', role: 'admin', source: 'integration' };
@@ -2286,7 +2279,9 @@ if (!ADMIN_URL) {
       'order_created',
       'order_status_changed',
       'payment_status_changed',
+      'payment_verification_recorded',
     ]);
+    assert.deepEqual(timeline.rows[3].internal_metadata.paymentVerification, 'operator_asserted_unverified');
     assert.equal(timeline.rows[1].actor_type, 'staff');
     assert.deepEqual(timeline.rows[1].internal_metadata, { source: 'integration' });
     await assert.rejects(
@@ -2365,21 +2360,14 @@ if (!ADMIN_URL) {
 
     const commitOrder = await admin.query(
       `insert into orders (organization_id, order_code, customer_id, total, status, payment_method)
-       values ($1,$2,$3,10,'payment_pending','card') returning *`,
+       values ($1,$2,$3,10,'payment_pending','iban') returning *`,
       [orgA, `A16-COMMIT-${stamp}`, customer.rows[0].id]
-    );
-    const commitEvent = await admin.query(
-      `insert into payment_callback_events
-         (organization_id, provider, order_code, payment_token, requested_status, payload, event_key, next_retry_at)
-       values ($1,'iyzico',$2,$3,'paid','{}'::jsonb,$4, now()) returning id`,
-      [orgA, commitOrder.rows[0].order_code, `a16-commit-token-${stamp}`, `iyzico|event:a16-commit-${stamp}`]
     );
     await admin.query(
       `insert into payment_evidence
-         (organization_id, order_id, channel, evidence_level, amount, currency, provider, provider_payment_id,
-          callback_event_id, received_at)
-       values ($1,$2,'card','provider_verified',10,'TRY','iyzico',$3,$4,now())`,
-      [orgA, commitOrder.rows[0].id, `a16-commit-pay-${stamp}`, commitEvent.rows[0].id]
+         (organization_id, order_id, channel, evidence_level, amount, currency, reference, reference_key, received_at, note)
+       values ($1,$2,'bank_transfer','operator_recorded',10,'TRY',$3,$3,now(),'A16 fixture operator note')`,
+      [orgA, commitOrder.rows[0].id, `A16COMMITREF${stamp}`]
     );
     const txClient = await runtimePool.connect();
     try {
@@ -9437,8 +9425,8 @@ const integrationService = require('../../modules/integrations/service');
       const item = await seed('card');
       const before = await snapshot(item);
       const events = await orderEvents(item);
-      await assert.rejects(legacy(item, 'paid'), { status: 409, code: 'PAYMENT_EVIDENCE_REQUIRED' });
-      await assert.rejects(operate(item, { payment: 'paid' }), { status: 409, code: 'PAYMENT_EVIDENCE_REQUIRED' });
+      await assert.rejects(legacy(item, 'paid'), { status: 409, code: 'CARD_PAYMENT_PROVIDER_CONFIRMATION_ONLY' });
+      await assert.rejects(operate(item, { payment: 'paid' }), { status: 409, code: 'CARD_PAYMENT_PROVIDER_CONFIRMATION_ONLY' });
       assert.deepEqual(await snapshot(item), before);
       assert.deepEqual(await orderEvents(item), events);
     });
@@ -9619,7 +9607,7 @@ const integrationService = require('../../modules/integrations/service');
       const a = await legacyCardOrder(orgA, 'iyzico', pid);
       const b = await legacyCardOrder(orgB, 'iyzico', pid);
       const solo = await legacyCardOrder(orgA, 'iyzico', 'legacy-solo-' + crypto.randomUUID());
-      const unknown = await legacyCardOrder(orgA, null, 'legacy-unknown-' + crypto.randomUUID());
+      const unknown = await legacyCardOrder(orgA, 'manual', 'legacy-unknown-' + crypto.randomUUID());
       const mock = await legacyCardOrder(orgA, 'mock', 'mock-' + crypto.randomUUID());
       const before = await rows('select count(*)::int as n from payment_evidence');
       const report = await asLegacy(preflight);
@@ -9632,7 +9620,9 @@ const integrationService = require('../../modules/integrations/service');
       void a; void b;
       assert.deepEqual(await rows('select count(*)::int as n from payment_evidence'), before);
       assert.equal(report.readOnly, true);
-      void solo; void unknown; void mock;
+      // Leave no ambiguous legacy ids behind for later migration tests of the shared disposable database.
+      await admin.query('update orders set payment_id = null where id = any($1::bigint[])',
+        [[a, b, solo, unknown, mock].map(({ orderId }) => orderId)]);
     });
 
     finalGate('migration 077 fails closed on conflicting legacy orders.payment_id and never labels legacy orders verified', async () => {

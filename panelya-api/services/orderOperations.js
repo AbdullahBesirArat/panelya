@@ -197,17 +197,10 @@ async function transitionOrderOperation(client, {
     ibanEvidence = { ids: totals.counted_ids.map(String), count: Number(totals.counted) };
   }
   if (row.payment_method === 'card' && next.payment === 'paid' && changedDomains.includes('payment')) {
-    // Card payment is only ever established by the provider-verified callback. An operator cannot
-    // declare it manually; without that evidence the transition would also unlock fulfilment.
-    const { rows: [verified] } = await client.query(
-      `select 1 from payment_evidence
-        where organization_id = $1 and order_id = $2 and channel = 'card' and evidence_level = 'provider_verified'
-        limit 1`,
-      [organizationId, row.id]
-    );
-    if (!verified) {
-      throw operationError('Kart odemesi saglayici dogrulamasi olmadan onaylanamaz', 409, 'PAYMENT_EVIDENCE_REQUIRED');
-    }
+    // Card payment is established only by the provider-verified callback transaction. Neither stored
+    // evidence, an open or resolved case, nor an operator role can confirm it manually: evidence rows
+    // also exist for late, duplicate and reopened orders where payment must NOT be declared by hand.
+    throw operationError('Kart odemesi yalnizca saglayici dogrulamasiyla onaylanir', 409, 'CARD_PAYMENT_PROVIDER_CONFIRMATION_ONLY');
   }
 
   const nextLegacyStatus = changes.order

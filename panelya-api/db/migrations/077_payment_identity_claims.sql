@@ -36,8 +36,10 @@ create policy payment_identity_claims_tenant_policy on payment_identity_claims
 -- this transaction only (the owner then bypasses RLS) and restore it before the end marker.
 alter table payment_evidence no force row level security;
 alter table payment_reconciliation_cases no force row level security;
+alter table orders no force row level security;
 -- Fail closed on ambiguous legacy ownership: one provider payment id must belong to exactly one
--- (tenant, order) across payment_evidence and payment_reconciliation_cases. The message carries
+-- (tenant, order) across payment_evidence, payment_reconciliation_cases and legacy orders.payment_id
+-- (provider iyzico only; the id then only RESERVES the identity, it is never treated as verified evidence). The message carries
 -- no payment id or tenant data; the whole migration (table, claims, schema_migrations row) rolls back.
 do $$
 begin
@@ -48,6 +50,10 @@ begin
       union all
       select provider, provider_payment_id, organization_id, order_id
         from payment_reconciliation_cases where provider <> 'manual' and nullif(btrim(provider_payment_id), '') is not null
+      union all
+      select payment_provider, payment_id, organization_id, id
+        from orders where payment_provider = 'iyzico' and nullif(btrim(payment_id), '') is not null
+          and payment_id not like 'mock-%'
     ) known
     group by provider, provider_payment_id
     having count(distinct (organization_id, order_id)) > 1
@@ -65,12 +71,17 @@ select distinct on (provider, provider_payment_id) provider, provider_payment_id
     union all
     select provider, provider_payment_id, organization_id, order_id, created_at
       from payment_reconciliation_cases where provider <> 'manual' and nullif(btrim(provider_payment_id), '') is not null
+    union all
+    select payment_provider, payment_id, organization_id, id, created_at
+      from orders where payment_provider = 'iyzico' and nullif(btrim(payment_id), '') is not null
+        and payment_id not like 'mock-%'
   ) known
  order by provider, provider_payment_id, created_at, order_id
 on conflict (provider, provider_payment_id) do nothing;
 
 alter table payment_evidence force row level security;
 alter table payment_reconciliation_cases force row level security;
+alter table orders force row level security;
 -- backfill:end
 
 alter table payment_identity_claims force row level security;

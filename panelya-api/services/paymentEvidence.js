@@ -196,6 +196,9 @@ async function bindPaymentIdentity(client, { order, provider, paymentId }) {
        union all
        select organization_id, order_id from payment_evidence
         where channel = 'card' and provider = $1 and provider_payment_id = $2
+       union all
+       select organization_id, id from orders
+        where payment_provider = $1 and payment_id = $2
      ) known
      where not (organization_id = $3 and order_id = $4) limit 1`,
     [provider, paymentId, ...owner]
