@@ -8,6 +8,7 @@ const path = require('path');
 const swaggerUi = require('swagger-ui-express');
 const swaggerSpec = require('./swagger');
 const db = require('./db');
+const { capabilities } = require('./services/capabilities');
 const { resolveUploadDir } = require('./services/uploads');
 const {
   corsOptions,
@@ -159,6 +160,7 @@ app.get('/api/health', async (req, res) => {
     service: 'panelya-api',
     env: process.env.NODE_ENV || 'development',
     workers: { inventoryReservationExpiry },
+    capabilities: capabilities(),
   });
 });
 

@@ -6,8 +6,11 @@ const crypto = require('crypto');
 const sharp = require('sharp');
 const { Client, Pool } = require('pg');
 const appDb = require('../../db');
+const { EventEmitter } = require('node:events');
+const { auditLog } = require('../../services/audit');
 const { runMigrations } = require('../../scripts/run-migrations');
 const { runRollback } = require('../../scripts/rollback-migration');
+const { deleteWorkspaceActivity } = require('../../scripts/seed-demo-workspace');
 const { createMemoryStorage } = require('../../services/objectStorage');
 const { prepareImage } = require('../../services/mediaPipeline');
 const {
@@ -295,6 +298,134 @@ if (!ADMIN_URL) {
           and tablename in ('products','orders','order_items','payment_callback_events')`
     );
     assert.deepEqual(owners.rows.map((row) => row.tableowner), ['panelya_migrator']);
+  });
+
+  async function withActivityFixtures(fn) {
+    const marker = crypto.randomUUID();
+    const insert = (store, organizationId) => store.query(
+      `insert into activity_logs (organization_id, action, entity_type, entity_id, created_at)
+       values ($1, 'TEST', 'activity_rls', $2, clock_timestamp()) returning id`,
+      [organizationId, marker]
+    );
+    try {
+      const ids = [];
+      for (const org of [orgA, orgB, null]) {
+        ids.push((await insert(systemPool, org)).rows[0].id);
+      }
+      await fn({ marker, insert, ids });
+    } finally {
+      await systemPool.query('delete from activity_logs where entity_id = $1', [marker]);
+    }
+  }
+
+  test('activity_logs seed maintenance deletes only the target workspace activity', async () => {
+    await withActivityFixtures(async ({ marker, insert, ids }) => {
+      // Exercise the seed's exact delete without removing unrelated shared fixture rows.
+      const workspace = await admin.query("insert into organizations (name, slug) values ('Seed test', $1) returning id", [marker]);
+      const workspaceId = workspace.rows[0].id;
+      try {
+        await insert(systemPool, workspaceId);
+        const removed = await deleteWorkspaceActivity(systemPool, workspaceId);
+        assert.equal(removed.rowCount, 1);
+        const remaining = await systemPool.query('select id from activity_logs where id = any($1::uuid[])', [ids]);
+        assert.equal(remaining.rowCount, 3);
+      } finally {
+        await admin.query('delete from organizations where id = $1', [workspaceId]);
+      }
+    });
+  });
+
+  test('activity_logs central writer scopes tenant and global events and protects active transactions', async (t) => {
+    const previousPoolMax = appDb.pool.options.max;
+    appDb.pool.options.max = 1;
+    t.after(() => { appDb.pool.options.max = previousPoolMax; });
+    await withActivityFixtures(async ({ marker }) => {
+      const req = { auth: { actorType: 'app' }, get: () => 'integration-agent' };
+      const entry = { resourceType: 'test', resourceId: marker };
+      assert.equal((await appDb.pool.query('select current_user')).rows[0].current_user, 'panelya_runtime');
+      assert.equal((await appDb.getSystemPool().query('select current_user')).rows[0].current_user,
+        'panelya_system_runtime');
+      const cleanContext = async (store) => {
+        const { rows: [state] } = await store.query(
+          "select nullif(current_setting('app.current_organization_id', true), '') as tenant"
+        );
+        assert.equal(state.tenant, null);
+      };
+      await auditLog(req, { ...entry, action: 'standalone', organizationId: orgA });
+      await cleanContext(appDb.pool);
+      await auditLog(req, { ...entry, action: 'global', organizationId: null });
+
+      async function inRequest(organizationId, event, fn) {
+        const response = Object.assign(new EventEmitter(), { statusCode: 200 });
+        return new Promise((resolve, reject) => {
+          appDb.requestContextMiddleware(req, response, async () => {
+            let released;
+            try {
+              await appDb.activateTenantContext(organizationId);
+              await appDb.withTenantContext(organizationId, async (client) => {
+                released = new Promise((done) => {
+                  const onRelease = (_error, releasedClient) => {
+                    if (releasedClient !== client) return;
+                    appDb.pool.removeListener('release', onRelease);
+                    done();
+                  };
+                  appDb.pool.on('release', onRelease);
+                });
+                await fn(client);
+              });
+              response.emit(event);
+              await released;
+              resolve();
+            } catch (error) {
+              response.emit('close');
+              await released;
+              reject(error);
+            }
+          });
+        });
+      }
+
+      await inRequest(orgA, 'finish', async (client) => {
+        await auditLog(req, { ...entry, action: 'mismatch', organizationId: orgB });
+        await auditLog(req, { ...entry, action: 'request-match', organizationId: null });
+        const inside = await client.query(
+          "select action from activity_logs where entity_id = $1 and action = 'request-match'", [marker]
+        );
+        assert.equal(inside.rowCount, 1);
+      });
+      await cleanContext(appDb.pool);
+      await inRequest(orgA, 'close', async () => {
+        await auditLog(req, { ...entry, action: 'request-close', organizationId: orgA });
+      });
+      await cleanContext(appDb.pool);
+
+      const categorySlug = `audit-rls-${marker}`;
+      try {
+        await asTenant(runtimePool, orgA, async (client) => {
+          await client.query("insert into categories (organization_id, name, slug) values ($1, 'Audit failure test', $2)",
+            [orgA, categorySlug]);
+          await auditLog(req, {
+            ...entry, action: 'bad-actor', organizationId: orgA, actorUserId: crypto.randomUUID(), store: client,
+          });
+          assert.equal((await client.query('select 1')).rowCount, 1);
+          await auditLog(req, { ...entry, action: 'explicit', organizationId: orgA, store: client });
+        });
+        assert.equal((await admin.query('select id from categories where organization_id = $1 and slug = $2',
+          [orgA, categorySlug])).rowCount, 1);
+        const events = await systemPool.query(
+          "select action, organization_id from activity_logs where entity_id = $1 and action <> 'TEST' order by action",
+          [marker]
+        );
+        assert.deepEqual(events.rows, [
+          { action: 'explicit', organization_id: orgA },
+          { action: 'global', organization_id: null },
+          { action: 'request-match', organization_id: orgA },
+          { action: 'standalone', organization_id: orgA },
+        ]);
+      } finally {
+        await admin.query('delete from categories where organization_id = $1 and slug = $2', [orgA, categorySlug]);
+      }
+    });
   });
 
   test('A34 Instagram staging graph is FORCE-RLS isolated across all five tables', async () => {
@@ -6706,6 +6837,225 @@ const integrationService = require('../../modules/integrations/service');
       } catch (error) {
         await admin.query('rollback');
         throw error;
+      }
+    }
+  });
+
+  test('activity_logs records app auth and coupon audit events over HTTP', async (t) => {
+    const express = require('express');
+    const jwt = require('jsonwebtoken');
+    const { attachAuthIfPresent } = require('../../middleware/auth');
+    const { attachSession, requireMfaPolicy } = require('../../middleware/authSession');
+    const stamp = crypto.randomUUID();
+    const prefix = `/rls-${stamp}/api`;
+    const organizationSlug = `audit-${stamp}`;
+    const neighborSlug = `neighbor-${stamp}`;
+    const email = `owner-${stamp}@example.test`;
+    const inviteEmail = `invite-${stamp}@example.test`;
+    const unknownEmail = `unknown-${stamp}@example.test`;
+    const password = 'AuditIntegration!123';
+    const env = {
+      EMAIL_PROVIDER: 'none',
+      JWT_SECRET_APP: crypto.randomBytes(48).toString('hex'),
+      LOGIN_RATE_LIMIT: '10',
+      REGISTER_RATE_LIMIT: '6',
+    };
+    const previousEnv = Object.fromEntries(Object.keys(env).map((key) => [key, process.env[key]]));
+    // The router's limiters and the email provider capture env at module load.
+    const modulePaths = [require.resolve('../../services/email'), require.resolve('../../routes/auth')];
+    const previousModules = modulePaths.map((modulePath) => require.cache[modulePath]);
+    const userAgent = (event) => `Panelya-RLS/${stamp}/${event}`;
+    let server;
+    let neighborId;
+    let neighborCount;
+    let registration;
+
+    async function post(route, event, body, token) {
+      const response = await fetch(`http://127.0.0.1:${server.address().port}${prefix}${route}`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'user-agent': userAgent(event),
+          ...(token ? { authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(body),
+      });
+      return { status: response.status, body: await response.json() };
+    }
+
+    async function countNeighborActivity() {
+      const { rows: [row] } = await admin.query(
+        'select count(*)::int as count from activity_logs where organization_id = $1', [neighborId]
+      );
+      return row.count;
+    }
+
+    function activity(action, organizationId, actorId, entityType, entityId, success = true) {
+      return {
+        action, organization_id: organizationId, actor_user_id: actorId,
+        entity_type: entityType, entity_id: String(entityId), success,
+      };
+    }
+
+    async function assertActivity(event, expected) {
+      // Match the request across all organizations, including NULL. Exact equality
+      // catches duplicate and foreign-tenant writes without filtering by expected actor.
+      const { rows } = await admin.query(
+        `select action, organization_id, actor_user_id, entity_type, entity_id, metadata->'success' as success
+           from activity_logs where user_agent = $1 order by action`,
+        [userAgent(event)]
+      );
+      assert.deepEqual(rows, expected);
+      assert.equal(await countNeighborActivity(), neighborCount);
+    }
+
+    try {
+      Object.assign(process.env, env);
+      for (const modulePath of modulePaths) delete require.cache[modulePath];
+      const app = express();
+      app.use(express.json());
+      app.use(attachAuthIfPresent);
+      app.use(attachSession);
+      app.use(appDb.requestContextMiddleware);
+      app.use(`${prefix}/auth`, require('../../routes/auth'));
+      app.use(requireMfaPolicy);
+      app.use(`${prefix}/organizations`, require('../../routes/organizations'));
+      app.use(`${prefix}/coupons`, require('../../routes/coupons'));
+
+      assert.equal((await appDb.pool.query('select current_user')).rows[0].current_user, 'panelya_runtime');
+      assert.equal((await appDb.getSystemPool().query('select current_user')).rows[0].current_user,
+        'panelya_system_runtime');
+      const neighbor = await admin.query(
+        "insert into organizations (name, slug) values ('Audit neighbor', $1) returning id", [neighborSlug]
+      );
+      neighborId = neighbor.rows[0].id;
+      neighborCount = await countNeighborActivity();
+      server = await new Promise((resolve) => {
+        const listener = app.listen(0, '127.0.0.1', () => resolve(listener));
+      });
+
+      await t.test('registration records REGISTER for the new organization and owner', async () => {
+        const result = await post('/auth/register', 'register', {
+          email, password, name: 'Audit Owner', organizationName: 'Audit Tenant', organizationSlug,
+        });
+        assert.equal(result.status, 201, JSON.stringify(result.body));
+        const { rows } = await admin.query(
+          `select o.id as organization_id, u.id as user_id, m.role, m.status
+             from organizations o join memberships m on m.organization_id = o.id
+             join app_users u on u.id = m.user_id where o.slug = $1 and u.email = $2`,
+          [organizationSlug, email]
+        );
+        const { currentOrganization, user, accessToken, refreshToken } = result.body;
+        assert.equal(user.email, email);
+        assert.equal(currentOrganization.slug, organizationSlug);
+        assert.ok(accessToken && refreshToken);
+        assert.deepEqual(rows, [{
+          organization_id: currentOrganization.id, user_id: user.id, role: 'owner', status: 'active',
+        }]);
+        registration = { organizationId: currentOrganization.id, userId: user.id, accessToken };
+        await assertActivity('register', [
+          activity('REGISTER', currentOrganization.id, user.id, 'organization', currentOrganization.id),
+        ]);
+      });
+
+      assert.ok(registration, 'remaining cases require the registered owner and session');
+      const { organizationId, userId, accessToken } = registration;
+      await t.test('password login records LOGIN and SECURITY_NEW_DEVICE for the selected membership', async () => {
+        // The registration request used a different User-Agent, so this login is a new device.
+        const result = await post('/auth/session/login', 'new-device-login', { email, password, organizationSlug });
+        assert.equal(result.status, 200, JSON.stringify(result.body));
+        assert.equal(result.body.user.id, userId);
+        assert.equal(result.body.currentOrganization.id, organizationId);
+        assert.ok(result.body.accessToken && result.body.refreshToken);
+        const sessionId = jwt.decode(result.body.accessToken).sid;
+        assert.ok(sessionId);
+        await assertActivity('new-device-login', [
+          activity('LOGIN', organizationId, userId, 'session', userId),
+          activity('SECURITY_NEW_DEVICE', organizationId, userId, 'security', sessionId),
+        ]);
+      });
+
+      await t.test('failed password login without a bearer records a NULL-organization LOGIN', async () => {
+        const result = await post('/auth/session/login', 'anonymous-failure', { email: unknownEmail, password });
+        assert.deepEqual(result, { status: 401, body: { error: 'Giris bilgileri hatali' } });
+        await assertActivity('anonymous-failure', [
+          activity('LOGIN', null, null, 'session', unknownEmail, false),
+        ]);
+      });
+
+      await t.test('failed password login with an unrelated bearer inherits its organization and actor', async () => {
+        const result = await post('/auth/session/login', 'bearer-failure', { email: unknownEmail, password }, accessToken);
+        assert.deepEqual(result, { status: 401, body: { error: 'Giris bilgileri hatali' } });
+        // Today auditLog falls back to req.auth for both IDs, so this unknown
+        // email's failure lands in the unrelated bearer's tenant under its user ID.
+        await assertActivity('bearer-failure', [
+          activity('LOGIN', organizationId, userId, 'session', unknownEmail, false),
+        ]);
+      });
+
+      await t.test('invite acceptance records ACCEPT_INVITE with the newly created actor', async () => {
+        const token = crypto.randomBytes(32).toString('hex');
+        const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+        await admin.query(
+          `insert into organization_invites (organization_id, email, role, token_hash, invited_by, expires_at)
+           values ($1, $2, 'member', $3, $4, now() + interval '1 hour')`,
+          [organizationId, inviteEmail, tokenHash, userId]
+        );
+        const result = await post('/organizations/invites/accept', 'invite', {
+          token, password, name: 'Audit Invitee',
+        });
+        assert.equal(result.status, 200, JSON.stringify(result.body));
+        assert.equal(result.body.organization.id, organizationId);
+        const membership = result.body.membership;
+        const { rows } = await admin.query(
+          `select m.id, m.user_id, m.organization_id, m.role, m.status, i.accepted_at is not null as accepted
+             from app_users u join memberships m on m.user_id = u.id
+             join organization_invites i on i.organization_id = m.organization_id and i.email = u.email
+            where i.token_hash = $1`,
+          [tokenHash]
+        );
+        assert.deepEqual(rows, [{
+          id: membership.id, user_id: membership.user_id, organization_id: organizationId,
+          role: 'member', status: 'active', accepted: true,
+        }]);
+        await assertActivity('invite', [
+          activity('ACCEPT_INVITE', organizationId, membership.user_id, 'membership', membership.id),
+        ]);
+      });
+
+      await t.test('coupon creation commits the coupon and its CREATE audit event', async () => {
+        const code = `AUDIT-${stamp.toUpperCase()}`;
+        const result = await post('/coupons', 'coupon', {
+          code, name: 'Audit Coupon', discountType: 'percentage', value: 10,
+        }, accessToken);
+        assert.equal(result.status, 201, JSON.stringify(result.body));
+        assert.equal(result.body.code, code);
+        const { rows } = await admin.query(
+          'select id, organization_id, code from coupons where code = $1', [code]
+        );
+        assert.deepEqual(rows, [{ id: result.body.id, organization_id: organizationId, code }]);
+        await assertActivity('coupon', [
+          activity('CREATE', organizationId, userId, 'coupon', result.body.id),
+        ]);
+      });
+    } finally {
+      try {
+        if (server) await new Promise((resolve, reject) => {
+          server.close((error) => error ? reject(error) : resolve());
+        });
+        await admin.query('delete from activity_logs where user_agent like $1', [userAgent('%')]);
+        await admin.query('delete from api_rate_limits where key like $1', [`%:${prefix}/auth:%`]);
+        await admin.query('delete from organizations where slug = any($1::text[])', [[organizationSlug, neighborSlug]]);
+        await admin.query('delete from app_users where email = any($1::text[])', [[email, inviteEmail]]);
+      } finally {
+        for (const [key, previous] of Object.entries(previousEnv)) {
+          if (previous === undefined) delete process.env[key];
+          else process.env[key] = previous;
+        }
+        for (const [index, modulePath] of modulePaths.entries()) {
+          if (previousModules[index]) require.cache[modulePath] = previousModules[index];
+          else delete require.cache[modulePath];
+        }
       }
     }
   });

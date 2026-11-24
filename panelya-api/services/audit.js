@@ -1,4 +1,7 @@
 const db = require('../db');
+const { Client } = require('pg');
+
+const pendingActivityByClient = new WeakMap();
 
 function isNumericId(value) {
   return typeof value === 'number' || /^\d+$/.test(String(value || ''));
@@ -24,7 +27,7 @@ async function writeAdminAudit(req, entry, store = db) {
   );
 }
 
-async function writeAppActivity(req, entry, store = db) {
+async function insertAppActivity(req, entry, store) {
   await store.query(
     `insert into activity_logs
      (organization_id, actor_user_id, action, entity_type, entity_id, metadata, ip_address, user_agent)
@@ -45,6 +48,67 @@ async function writeAppActivity(req, entry, store = db) {
       String(req.get('user-agent') || '').slice(0, 500),
     ]
   );
+}
+
+async function insertAppActivityWithSavepoint(req, entry, client) {
+  // Overlapping savepoints on one client could roll back a sibling audit write.
+  const previous = pendingActivityByClient.get(client) || Promise.resolve();
+  const pending = previous.catch(() => {}).then(() => insertWithinSavepoint(req, entry, client));
+  pendingActivityByClient.set(client, pending);
+  try {
+    await pending;
+  } finally {
+    if (pendingActivityByClient.get(client) === pending) pendingActivityByClient.delete(client);
+  }
+}
+
+async function insertWithinSavepoint(req, entry, client) {
+  try {
+    await client.query('savepoint app_activity_audit');
+  } catch (error) {
+    // A checked-out client can also be used in autocommit mode.
+    if (error.code !== '25P01') throw error;
+    return insertAppActivity(req, entry, client);
+  }
+
+  try {
+    await insertAppActivity(req, entry, client);
+  } catch (error) {
+    try {
+      await client.query('rollback to savepoint app_activity_audit');
+      await client.query('release savepoint app_activity_audit');
+    } catch (_) { /* preserve the original insert error */ }
+    throw error;
+  }
+  await client.query('release savepoint app_activity_audit');
+}
+
+async function writeAppActivity(req, entry, store = db) {
+  if (store !== db) {
+    if (store instanceof Client || typeof store.release === 'function') {
+      return insertAppActivityWithSavepoint(req, entry, store);
+    }
+    return insertAppActivity(req, entry, store);
+  }
+
+  const activeOrganizationId = db.currentTenantOrganizationId();
+  if (activeOrganizationId) {
+    if (entry.organizationId != null && String(entry.organizationId) !== activeOrganizationId) {
+      console.warn('Activity log organization mismatch', {
+        activeOrganizationId,
+        entryOrganizationId: entry.organizationId,
+      });
+      throw new Error('Activity log organization mismatch');
+    }
+    return db.withTenantContext(activeOrganizationId, (client) => insertAppActivityWithSavepoint(
+      req, { ...entry, organizationId: activeOrganizationId }, client
+    ));
+  }
+
+  if (entry.organizationId != null && entry.organizationId !== '') {
+    return db.withStandaloneTenantTransaction(entry.organizationId, (client) => insertAppActivity(req, entry, client));
+  }
+  return insertAppActivity(req, entry, db.getSystemPool());
 }
 
 async function auditLog(req, {
