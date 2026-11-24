@@ -335,9 +335,30 @@ async function processPaymentCallbackEvent(req, eventId, deps = {}) {
     if (guard.guarded) {
       paymentError = paymentError || `Final durum korunuyor: ${currentStatus}`;
     }
-    const reconciliationCaseId = currentStatus === 'cancelled' && verifiedPayment
+    const latePaymentCase = currentStatus === 'cancelled' && verifiedPayment
       ? await recordLatePayment(client, req, audit, currentOrder, event, payload.token, verifiedPayment)
       : null;
+
+    const reconciliationCaseId = latePaymentCase?.id;
+    if (latePaymentCase?.existing) {
+      const replay = await finalizeEvent(client, event.id, {
+        processing_status: 'processed',
+        processed_order_id: currentOrder.id,
+        result_status: currentStatus,
+        last_error: `reconciliation_case:${reconciliationCaseId}`,
+        last_processed_at: new Date().toISOString(),
+        next_retry_at: null,
+      }, organizationId);
+      await client.query('commit');
+      return {
+        ...replay,
+        reconciliationCaseId,
+        order: currentOrder,
+        ok: false,
+        redirectUrl: buildFailureUrl(req, currentOrder.order_code),
+        idempotentReplay: true,
+      };
+    }
 
     // Reservation transition is itself idempotent. Duplicate callbacks cannot
     // consume or release inventory more than once.
@@ -418,7 +439,9 @@ async function processPaymentCallbackEvent(req, eventId, deps = {}) {
     // neden bilgisiyle isaretle. Ham payload/token/imza loglanmaz.
     await finalizeEvent({ query }, eventId, {
       processing_status: 'failed',
-      last_error: String(error.message || error).slice(0, 1000),
+      last_error: error.code === 'PAYMENT_ID_ORDER_MISMATCH'
+        ? error.code
+        : String(error.message || error).slice(0, 1000),
       last_processed_at: new Date().toISOString(),
       next_retry_at: new Date(Date.now() + retryDelayMs(claimedEvent?.attempts)).toISOString(),
     }, organizationId).catch(() => {});
@@ -446,11 +469,16 @@ async function recordLatePayment(client, req, audit, order, event, token, paymen
   );
   if (!created) {
     const { rows: [existing] } = await client.query(
-      `select id from payment_reconciliation_cases
+      `select id, organization_id, order_id from payment_reconciliation_cases
         where organization_id = $1 and provider = $2 and provider_payment_id = $3 and case_type = $4`,
       identity
     );
-    return existing.id;
+    if (existing?.organization_id !== order.organization_id || existing?.order_id !== order.id) {
+      const code = 'PAYMENT_ID_ORDER_MISMATCH';
+      console.warn(code);
+      throw Object.assign(new Error('Odeme kaydi beklenen siparisle eslesmiyor'), { code });
+    }
+    return { id: existing.id, existing: true };
   }
   await audit(req, {
     action: 'PAYMENT_RECONCILIATION_REQUIRED',
@@ -462,7 +490,7 @@ async function recordLatePayment(client, req, audit, order, event, token, paymen
     store: client,
     throwOnError: true,
   });
-  return created.id;
+  return { id: created.id, existing: false };
 }
 
 async function processPendingPaymentCallbackEvents(limit = 20, deps = {}) {

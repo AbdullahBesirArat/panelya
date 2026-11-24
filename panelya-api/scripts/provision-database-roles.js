@@ -70,6 +70,11 @@ async function main() {
           revoke update, delete on public.activity_logs from panelya_runtime;
         end if;
       end $$;
+      do $$ begin
+        if to_regclass('public.payment_reconciliation_cases') is not null then
+          revoke delete on public.payment_reconciliation_cases from panelya_runtime, panelya_system_runtime;
+        end if;
+      end $$;
       grant usage, select on all sequences in schema public to panelya_runtime, panelya_system_runtime;
       alter default privileges for role panelya_migrator in schema public
         grant select, insert, update, delete on tables to panelya_runtime, panelya_system_runtime;

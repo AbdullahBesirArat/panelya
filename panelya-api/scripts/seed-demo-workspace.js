@@ -2,6 +2,7 @@ require('dotenv').config();
 
 const bcrypt = require('bcryptjs');
 const db = require('../db');
+const { assertWorkspaceHasNoReconciliationCases } = require('./assert-workspace-evidence-retained');
 
 function envFlag(name, fallback = false) {
   const value = process.env[name];
@@ -308,6 +309,7 @@ async function upsertUser(client, passwordHash) {
 }
 
 async function resetWorkspaceData(client, organizationId) {
+  await assertWorkspaceHasNoReconciliationCases(client, organizationId);
   await client.query('delete from campaigns where organization_id = $1', [organizationId]);
   await client.query('delete from slider_items where organization_id = $1', [organizationId]);
   await client.query(
@@ -536,12 +538,12 @@ async function main() {
     await client.query('begin');
 
     const organization = await upsertOrganization(client);
-    const user = await upsertUser(client, passwordHash);
     await db.setTenantContext(client, organization.id);
+    await resetWorkspaceData(client, organization.id);
+    const user = await upsertUser(client, passwordHash);
 
     await seedMembership(client, organization.id, user.id);
     await seedSubscription(client, organization.id);
-    await resetWorkspaceData(client, organization.id);
 
     const categoryIds = await seedCategories(client, organization.id);
     const productIds = await seedProducts(client, organization.id, categoryIds);
@@ -580,4 +582,4 @@ if (require.main === module) {
     });
 }
 
-module.exports = { deleteWorkspaceActivity };
+module.exports = { deleteWorkspaceActivity, resetWorkspaceData };

@@ -11,7 +11,8 @@ const { EventEmitter } = require('node:events');
 const { auditLog } = require('../../services/audit');
 const { runMigrations } = require('../../scripts/run-migrations');
 const { runRollback } = require('../../scripts/rollback-migration');
-const { deleteWorkspaceActivity } = require('../../scripts/seed-demo-workspace');
+const { deleteWorkspaceActivity, resetWorkspaceData } = require('../../scripts/seed-demo-workspace');
+const { cleanupWorkspace } = require('../../scripts/cleanup-workspace');
 const { createMemoryStorage } = require('../../services/objectStorage');
 const { prepareImage } = require('../../services/mediaPipeline');
 const {
@@ -242,15 +243,13 @@ if (!ADMIN_URL) {
       max: 1,
     });
     await migratorPool.query(schemaSql);
-    await runMigrations({ pool: migratorPool, logger: { log() {}, warn() {} } });
-
     await admin.query('revoke create on schema public from public');
     await admin.query('grant usage on schema public to panelya_runtime, panelya_system_runtime');
     await admin.query(`
       grant select, insert, update, delete on all tables in schema public to panelya_runtime, panelya_system_runtime;
-      revoke update, delete on public.activity_logs from panelya_runtime;
     `);
     await admin.query('grant usage, select on all sequences in schema public to panelya_runtime, panelya_system_runtime');
+    await runMigrations({ pool: migratorPool, logger: { log() {}, warn() {} } });
 
     const first = await admin.query("insert into organizations (name, slug) values ('Org A', $1) returning id", [`org-a-${Date.now()}`]);
     const second = await admin.query("insert into organizations (name, slug) values ('Org B', $1) returning id", [`org-b-${Date.now()}`]);
@@ -6858,7 +6857,7 @@ const integrationService = require('../../modules/integrations/service');
     const express = require('express');
     const { attachAuthIfPresent } = require('../../middleware/auth');
     const { attachSession } = require('../../middleware/authSession');
-    const { createAppAccessToken, createAdminAccessToken } = require('../../services/authTokens');
+    const { createAppAccessToken, createAdminAccessToken, createImpersonationToken } = require('../../services/authTokens');
     const stamp = crypto.randomUUID();
     const tenantIds = [];
     const customerIds = new Map();
@@ -7205,16 +7204,16 @@ const integrationService = require('../../modules/integrations/service');
       const verifyPayment = (token) => ({
         status: 'success', paymentStatus: 'SUCCESS', paymentId: `paid-${token}`, paidPrice: '101.25', currency: 'TRY',
       });
-      async function seedCard(tag, options) {
-        const item = await seed(tenant.id, tag, options);
+      async function seedCard(tag, options, org = tenant.id) {
+        const item = await seed(org, tag, options);
         const token = `${stamp}-${tag}`;
         const [{ order_code: orderCode }] = await committedRows(
           'update orders set payment_token = $3 where organization_id = $1 and id = $2 returning order_code',
-          [tenant.id, item.orderId, token]
+          [org, item.orderId, token]
         );
         await admin.query("update inventory_reservations set expires_at = now() - interval '2 hours' where id = $1", [item.id]);
         const enqueue = (overrides) => enqueuePaymentCallbackEvent(
-          request, { provider: 'iyzico', token, orderCode, status: 'paid', ...overrides }, admin, scope
+          request, { provider: 'iyzico', token, orderCode, status: 'paid', ...overrides }, admin, { verifiedOrganizationId: org }
         );
         return { item, enqueue, token };
       }
@@ -7322,6 +7321,39 @@ const integrationService = require('../../modules/integrations/service');
         { value: { ...auditValue(0, { callback_pending: 1 }), byMethod: during.body.byMethod } },
         { value: auditValue(1, {}) },
       ]);
+
+      for (const [sql, value] of [
+        ['delete from orders where id = $1', lateCase.order_id],
+        ['delete from payment_callback_events where id = $1', lateCase.callback_event_id],
+        ['delete from organizations where id = $1', tenant.id],
+      ]) {
+        await assert.rejects(async () => {
+          await admin.query('begin');
+          try { await admin.query(sql, [value]); }
+          finally { await admin.query('rollback'); }
+        }, { code: '23503' });
+        assert.deepEqual(await cases(), allCases);
+      }
+      const target = '075_payment_reconciliation_cases.sql';
+      const migration = () => committedRows('select * from schema_migrations where filename = $1', [target]);
+      const beforeRollback = await migration();
+      await assert.rejects(runRollback({ pool: migratorPool, target }), /retained reconciliation evidence/);
+      assert.deepEqual(await migration(), beforeRollback);
+      assert.deepEqual(await cases(), allCases);
+      for (const [reset, pool] of [[resetWorkspaceData, runtimePool], [cleanupWorkspace, systemPool]]) {
+        await asTenant(pool, tenant.id, async (client) => {
+          const statements = [];
+          const store = { query(sql, params) {
+            statements.push(sql);
+            return client.query(sql, params);
+          } };
+          await assert.rejects(reset(store, tenant.id), /saklanan odeme mutabakat vakalari/);
+          assert.equal(statements.length, 1);
+          assert.match(statements[0], /^select 1 from payment_reconciliation_cases/);
+        });
+        assert.deepEqual(await cases(), allCases);
+        assert.deepEqual(await stateOf(expired.item), afterLateCallback);
+      }
 
       const foreignEvent = await enqueuePaymentCallbackEvent(
         request, { provider: 'iyzico', token: expired.token, eventId: 'foreign-' + stamp }, admin,
@@ -7447,7 +7479,7 @@ const integrationService = require('../../modules/integrations/service');
         assert.deepEqual(await operator('', undefined, foreignToken), {
           status: 200, body: { cases: [], nextCursor: null },
         });
-        assert.equal((await operator(`/${lateCase.id}/resolve`, { resolution: 'dismissed' }, foreignToken)).status, 404);
+        assert.equal((await operator(`/${lateCase.id}/resolve`, { resolution: 'dismissed', note: 'Manual review' }, foreignToken)).status, 404);
       }
       await checkOperatorIsolation();
       await admin.query('alter table payment_reconciliation_cases disable row level security');
@@ -7461,25 +7493,105 @@ const integrationService = require('../../modules/integrations/service');
       assert.deepEqual(secondPage.body.cases.map(({ id }) => id), [caseIds[1], caseIds[0]]);
       const resolvePath = (id) => `/${id}/resolve`;
       assert.equal((await operator(resolvePath(lateCase.id), { resolution: 'dismissed' }, appToken('viewer'))).status, 403);
+      const refund = {
+        resolution: 'resolved_refunded', note: 'Manual review',
+        externalReference: 'dashboard-123456', evidenceType: 'provider_dashboard_reference',
+      };
+      for (const invalid of [
+        { resolution: 'dismissed' }, { resolution: 'dismissed', note: 'short' },
+        { ...refund, externalReference: undefined }, { ...refund, evidenceType: undefined },
+        { ...refund, evidenceType: 'provider_verified' }, { ...refund, externalReference: 'a\nb' },
+        { ...refund, resolution: 'dismissed' }, { ...refund, resolution: 'resolved_accepted' },
+      ]) {
+        assert.equal((await operator(resolvePath(lateCase.id), invalid)).status, 400);
+      }
       await withRejectedInsert('activity_logs', "action <> 'PAYMENT_RECONCILIATION_RESOLVED'", async () => {
-        assert.equal((await operator(resolvePath(lateCase.id), { resolution: 'dismissed' })).status, 500);
+        assert.equal((await operator(resolvePath(lateCase.id), refund)).status, 500);
         assert.equal((await cases())[0].status, 'open');
+        assert.equal((await cases())[0].external_refund_reference, null);
+        assert.equal((await cases())[0].refund_evidence_type, null);
+        assert.equal((await cases())[0].refund_verification, 'not_applicable');
         assert.deepEqual(await reconciliationAudits('PAYMENT_RECONCILIATION_RESOLVED'), []);
       });
+      const mismatchEvent = await contended.enqueue({ eventId: 'mismatch-' + stamp });
+      const mismatchState = await stateOf(contended.item);
+      const beforeMismatch = await cases();
+      await assert.rejects(process(mismatchEvent, { retrieve: async () => verifyPayment(expired.token) }),
+        { code: 'PAYMENT_ID_ORDER_MISMATCH' });
+      assert.deepEqual(await stateOf(contended.item), mismatchState);
+      assert.deepEqual(await cases(), beforeMismatch);
+      const [failedMismatch] = await committedRows(
+        'select processing_status, last_error, next_retry_at from payment_callback_events where id = $1', [mismatchEvent.id]
+      );
+      assert.equal(failedMismatch.processing_status, 'failed');
+      assert.ok(failedMismatch.next_retry_at);
+      assert.equal(failedMismatch.last_error, 'PAYMENT_ID_ORDER_MISMATCH');
+
       const items = [expired.item, contended.item, retry.item];
       const beforeResolution = [];
       for (const item of items) beforeResolution.push(await stateOf(item));
+      platformAdmin = (await admin.query(
+        "insert into admins (username, password_hash, role) values ($1, 'unused', 'super_admin') returning id, username, role",
+        ['reconciliation-' + stamp]
+      )).rows[0];
+      const operatorTokens = [
+        appToken('owner'),
+        createAdminAccessToken(platformAdmin),
+        createImpersonationToken({ adminId: platformAdmin.id, ownerUserId: user.id, organization: tenant }),
+      ];
       for (const [index, resolution] of ['resolved_refunded', 'resolved_accepted', 'dismissed'].entries()) {
         const id = caseIds[index];
-        const result = await operator(resolvePath(id), { resolution, note: 'Manual review' });
+        const input = index === 0 ? refund : { resolution, note: 'Manual review', organizationSlug: tenant.slug };
+        const result = await operator(resolvePath(id), input, operatorTokens[index]);
         assert.equal(result.status, 200, JSON.stringify(result.body));
         assert.equal(result.body.case.status, resolution);
-        assert.equal(result.body.case.resolved_by, user.id);
+        assert.equal(result.body.case.resolved_by, index === 0 ? user.id : null);
+        assert.equal(result.body.case.resolved_by_admin_id, index === 0 ? null : String(platformAdmin.id));
         assert.equal(result.body.case.resolution_note, 'Manual review');
-        assert.equal((await operator(resolvePath(id), { resolution })).status, 409);
+        assert.ok(result.body.case.resolved_at);
+        assert.equal((await operator(resolvePath(id), input, operatorTokens[index])).status, 409);
+        await assert.rejects(admin.query('update payment_reconciliation_cases set resolution_note = $2 where id = $1',
+          [id, 'Changed after resolution']), /immutable/i);
+        if (index === 0) {
+          assert.equal(result.body.case.external_refund_reference, refund.externalReference);
+          assert.equal(result.body.case.refundVerification, 'operator_asserted_unverified');
+        }
       }
       assert.deepEqual(await reconciliationAudits('PAYMENT_RECONCILIATION_RESOLVED'),
-        caseIds.map((entity_id) => ({ entity_id, actor_user_id: user.id })));
+        caseIds.map((entity_id, index) => ({ entity_id, actor_user_id: index === 1 ? null : user.id })));
+      const listed = await operator('?status=resolved_refunded');
+      assert.equal(listed.body.cases[0].refundVerification, 'operator_asserted_unverified');
+      const [resolutionAudit] = await committedRows(
+        "select metadata->'newValue' as value from activity_logs where organization_id = $1 and action = 'PAYMENT_RECONCILIATION_RESOLVED' and entity_id = $2",
+        [tenant.id, lateCase.id]
+      );
+      assert.equal(resolutionAudit.value.evidenceType, refund.evidenceType);
+      assert.equal(resolutionAudit.value.refundVerification, 'operator_asserted_unverified');
+      assert.equal(resolutionAudit.value.externalReferenceLast4, '3456');
+      assert.ok(!JSON.stringify(resolutionAudit).includes(refund.externalReference));
+
+      const resolvedCases = await cases();
+      const detectionAudits = await reconciliationAudits();
+      const repeat = await process(await expired.enqueue({ eventId: 'resolved-repeat-' + stamp }), {
+        audit: async () => assert.fail('an idempotent callback must not write audit records'),
+      });
+      assert.equal(repeat.reconciliationCaseId, lateCase.id);
+      assert.equal(repeat.idempotentReplay, true);
+      assert.deepEqual(await cases(), resolvedCases);
+      assert.deepEqual(await reconciliationAudits(), detectionAudits);
+      const foreignCard = await seedCard('foreign-payment-id', {}, foreignTenant.id);
+      await admin.query("update orders set status = 'cancelled' where organization_id = $1 and id = $2",
+        [foreignTenant.id, foreignCard.item.orderId]);
+      const foreignResult = await process(await foreignCard.enqueue(), {
+        verifiedOrganizationId: foreignTenant.id,
+        retrieve: async () => verifyPayment(expired.token),
+      });
+      assert.notEqual(foreignResult.reconciliationCaseId, lateCase.id);
+      const [foreignCase] = await asTenant(runtimePool, foreignTenant.id, async (client) => (await client.query(
+        'select order_id, provider_payment_id from payment_reconciliation_cases where id = $1', [foreignResult.reconciliationCaseId]
+      )).rows);
+      assert.deepEqual(foreignCase, { order_id: foreignCard.item.orderId, provider_payment_id: lateCase.provider_payment_id });
+      assert.deepEqual(await cases(), resolvedCases);
       for (const [index, item] of items.entries()) assert.deepEqual(await stateOf(item), beforeResolution[index]);
       await assertPoolsDrained();
     }
@@ -7956,6 +8068,10 @@ const integrationService = require('../../modules/integrations/service');
           await admin.query('delete from audit_logs where admin_id = $1', [platformAdmin.id]);
           await admin.query('delete from admins where id = $1', [platformAdmin.id]);
         }
+        // Remove synthetic evidence before disposing of the payment race fixtures.
+        if (paymentRace) {
+          await admin.query('delete from payment_reconciliation_cases where organization_id = any($1::uuid[])', [tenantIds]);
+        }
         // Append-only events restrict deletion of their orders. Retain both in
         // suspended throwaway tenants and remove the mutable fixture rows.
         for (const table of [
@@ -8222,6 +8338,28 @@ const integrationService = require('../../modules/integrations/service');
         }
       }
     }
+  });
+
+  test('phase16 runtime roles cannot delete reconciliation evidence', async () => {
+    for (const role of ['panelya_runtime', 'panelya_system_runtime']) {
+      const { rows: [privileges] } = await admin.query(
+        "select has_table_privilege($1, 'payment_reconciliation_cases', 'DELETE') as allowed", [role]
+      );
+      assert.equal(privileges.allowed, false, role);
+    }
+  });
+
+  test('phase16 empty case table can roll back and reapply migration 075', async () => {
+    const target = '075_payment_reconciliation_cases.sql';
+    const applied = () => admin.query('select checksum from schema_migrations where filename = $1', [target]);
+    const original = await applied();
+    assert.equal(original.rowCount, 1);
+    await runRollback({ pool: migratorPool, target, logger: { log() {}, warn() {} } });
+    assert.equal((await applied()).rowCount, 0);
+    assert.equal((await admin.query("select to_regclass('payment_reconciliation_cases') as name")).rows[0].name, null);
+    assert.equal((await admin.query("select 1 from pg_constraint where conname = 'payment_callback_events_org_id_key'")).rowCount, 0);
+    await runMigrations({ pool: migratorPool, logger: { log() {}, warn() {} } });
+    assert.deepEqual((await applied()).rows, original.rows);
   });
 
   test('safe rollback retains tenant columns; cross-tenant corruption blocks reapply', async () => {

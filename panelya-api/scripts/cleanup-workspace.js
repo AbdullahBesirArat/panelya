@@ -1,6 +1,7 @@
 require('dotenv').config();
 
 const db = require('../db');
+const { assertWorkspaceHasNoReconciliationCases } = require('./assert-workspace-evidence-retained');
 const { resolveOrganization, requestedOrganizationSlug, slugify } = require('../services/tenant');
 
 function parseArgs(argv) {
@@ -91,6 +92,7 @@ async function collectCounts(client, organizationId) {
 }
 
 async function cleanupWorkspace(client, organizationId) {
+  await assertWorkspaceHasNoReconciliationCases(client, organizationId);
   await client.query('delete from activity_logs where organization_id = $1', [organizationId]);
   await client.query('delete from campaigns where organization_id = $1', [organizationId]);
   await client.query('delete from slider_items where organization_id = $1', [organizationId]);
@@ -198,11 +200,15 @@ async function main() {
   }
 }
 
-main()
-  .catch((error) => {
-    console.error('Workspace cleanup hatasi:', error.message);
-    process.exitCode = 1;
-  })
-  .finally(async () => {
-    await db.getSystemPool().end();
-  });
+if (require.main === module) {
+  main()
+    .catch((error) => {
+      console.error('Workspace cleanup hatasi:', error.message);
+      process.exitCode = 1;
+    })
+    .finally(async () => {
+      await db.getSystemPool().end();
+    });
+}
+
+module.exports = { cleanupWorkspace };

@@ -67,6 +67,16 @@ select count(*) from organizations where (metadata->>'cleanup_reason')='verified
 -- Asagidaki blogu yorumdan cikararak tam silme yapabilirsiniz.
 -- FK-guvenli sira dev'de dogrulandi.
 -- ============================================================
+-- Silmeleri acmadan once ayni transaction icinde korumayi da acin.
+-- Tablo sahibi veya tum hedef tenantlari gorebilen bakim rolu kullanin.
+-- lock table payment_reconciliation_cases in share mode;
+-- do $$
+-- begin
+--   if exists (select 1 from payment_reconciliation_cases
+--              where organization_id in (select id from _test_orgs)) then
+--     raise exception 'Saklanan odeme mutabakat vakalari var. Islem durduruldu.';
+--   end if;
+-- end $$;
 -- delete from customer_wishlist        where organization_id in (select id from _test_orgs);
 -- delete from order_items              where order_id in (select id from orders where organization_id in (select id from _test_orgs));
 -- delete from orders                   where organization_id in (select id from _test_orgs);
