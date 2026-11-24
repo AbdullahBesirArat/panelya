@@ -484,34 +484,54 @@ if (!ADMIN_URL) {
     });
   });
 
+  function activityLogsMigrationSql(direction) {
+    const suffix = direction === 'down' ? '.down' : '';
+    return fs.readFileSync(
+      path.join(__dirname, '../../db/migrations', `074_activity_logs_rls${suffix}.sql`), 'utf8'
+    );
+  }
+
+  async function verifyActivityLogsRls(enabled) {
+    const { rows: [state] } = await admin.query(`
+      select relrowsecurity, relforcerowsecurity,
+             has_table_privilege('panelya_runtime', oid, 'UPDATE') as can_update,
+             has_table_privilege('panelya_runtime', oid, 'DELETE') as can_delete,
+             (select count(*)::int from pg_policy where polrelid = pg_class.oid) as policies
+      from pg_class where oid = 'public.activity_logs'::regclass
+    `);
+    assert.deepEqual(state, {
+      relrowsecurity: enabled, relforcerowsecurity: enabled,
+      can_update: !enabled, can_delete: !enabled, policies: enabled ? 3 : 0,
+    });
+  }
+
+  async function migrateActivityLogs(direction, { guardLockTest = false } = {}) {
+    const client = await migratorPool.connect();
+    try {
+      await client.query('begin');
+      if (guardLockTest) {
+        // Bound the blocked query even if 074 stops setting its own lock_timeout.
+        await client.query("set local statement_timeout = '14s'");
+      }
+      await client.query(activityLogsMigrationSql(direction));
+      await client.query('commit');
+    } catch (error) {
+      await client.query('rollback');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
   test('activity_logs migration can be reapplied and unwound without rewriting history', async () => {
     await withActivityFixtures(async ({ marker, snapshot }) => {
-      const readSql = (suffix) => fs.readFileSync(
-        path.join(__dirname, '../../db/migrations', `074_activity_logs_rls${suffix}.sql`), 'utf8'
-      );
-      const forward = readSql('');
-      const down = readSql('.down');
       const before = await snapshot();
-      const verify = async (enabled) => {
-        const { rows: [state] } = await admin.query(`
-          select relrowsecurity, relforcerowsecurity,
-                 has_table_privilege('panelya_runtime', oid, 'UPDATE') as can_update,
-                 has_table_privilege('panelya_runtime', oid, 'DELETE') as can_delete,
-                 (select count(*)::int from pg_policy where polrelid = pg_class.oid) as policies
-          from pg_class where oid = 'public.activity_logs'::regclass
-        `);
-        assert.deepEqual(state, {
-          relrowsecurity: enabled, relforcerowsecurity: enabled,
-          can_update: !enabled, can_delete: !enabled, policies: enabled ? 3 : 0,
-        });
-      };
       try {
         // The fixture superuser can inspect all rows with FORCE enabled while holding the DDL lock.
         await admin.query('begin');
-        for (const sql of [forward, forward, down, forward]) {
-          await admin.query(sql);
-          const enabled = sql === forward;
-          await verify(enabled);
+        for (const direction of ['up', 'up', 'down', 'up']) {
+          await admin.query(activityLogsMigrationSql(direction));
+          await verifyActivityLogsRls(direction === 'up');
           assert.deepEqual(await snapshot(admin), before);
         }
       } finally {
@@ -520,6 +540,179 @@ if (!ADMIN_URL) {
       const after = await snapshot();
       assert.equal(after.length, 3, marker);
       assert.deepEqual(after, before);
+    });
+  });
+
+  // Frozen from origin/main services/audit.js. The catch returns the swallowed error
+  // to the test so it can assert SQLSTATE without changing the legacy INSERT.
+  async function legacyAuditLog(req, entry, store = appDb) {
+    try {
+      await store.query(
+        `insert into activity_logs
+         (organization_id, actor_user_id, action, entity_type, entity_id, metadata, ip_address, user_agent)
+         values ($1,$2,$3,$4,$5,$6,$7,$8)`,
+        [
+          entry.organizationId || null,
+          entry.actorUserId || null,
+          entry.action,
+          entry.resourceType,
+          entry.resourceId == null ? null : String(entry.resourceId),
+          JSON.stringify({
+            oldValue: entry.oldValue,
+            newValue: entry.newValue,
+            success: entry.success,
+            errorMessage: entry.errorMessage,
+          }),
+          req.ip || null,
+          String(req.get('user-agent') || '').slice(0, 500),
+        ]
+      );
+    } catch (err) {
+      console.warn('Audit log yazilamadi', { message: err.message });
+      return err;
+    }
+  }
+
+  const stageBRequest = { auth: { actorType: 'app' }, get: () => 'integration-agent' };
+  const stageBEntry = (marker, action, organizationId) => ({
+    action,
+    organizationId,
+    resourceType: 'activity_rls',
+    resourceId: marker,
+    oldValue: null,
+    newValue: null,
+    success: true,
+    errorMessage: null,
+  });
+
+  async function committedStageBEvents(marker, actions) {
+    const result = await admin.query(
+      'select action, organization_id from activity_logs where entity_id = $1 and action = any($2::text[])',
+      [marker, actions]
+    );
+    return result.rows;
+  }
+
+  async function assertCommittedStageBEvents(marker, entries) {
+    const byAction = (a, b) => a.action.localeCompare(b.action);
+    const rows = await committedStageBEvents(marker, entries.map((entry) => entry.action));
+    assert.deepEqual(rows.sort(byAction), entries.map((entry) => ({
+      action: entry.action, organization_id: entry.organizationId,
+    })).sort(byAction));
+  }
+
+  test('Stage B: the previous writer silently loses audit events under RLS (forbidden state), the Stage A writer does not', async () => {
+    await verifyActivityLogsRls(true);
+    const { rows: [runtime] } = await appDb.query(`
+      select current_user as role, nullif(current_setting('app.current_organization_id', true), '') as tenant
+    `);
+    assert.deepEqual(runtime, { role: 'panelya_runtime', tenant: null });
+    assert.equal((await appDb.getSystemPool().query('select current_user')).rows[0].current_user,
+      'panelya_system_runtime');
+
+    await withActivityFixtures(async ({ marker }) => {
+      for (const [action, organizationId] of [['standalone-tenant', orgA], ['standalone-global', null]]) {
+        const entry = stageBEntry(marker, action, organizationId);
+        const error = await legacyAuditLog(stageBRequest, entry);
+        assert.equal(error?.code, '42501', action);
+        assert.deepEqual(await committedStageBEvents(marker, [action]), []);
+
+        await auditLog(stageBRequest, entry);
+        await assertCommittedStageBEvents(marker, [entry]);
+      }
+    });
+  });
+
+  test('Stage B: rolling transition simulation', async (t) => {
+    await withActivityFixtures(async ({ marker }) => {
+      const batchSize = 20;
+      const batch = (phase) => Array.from({ length: batchSize }, (_, index) =>
+        stageBEntry(marker, `${phase}-${index}`, [orgA, orgB, null][index % 3]));
+      try {
+        await migrateActivityLogs('down');
+        await verifyActivityLogsRls(false);
+
+        const legacyBefore = batch('legacy-before');
+        const stageABefore = batch('stage-a-before');
+        for (const entry of legacyBefore) {
+          assert.equal(await legacyAuditLog(stageBRequest, entry), undefined);
+        }
+        for (const entry of stageABefore) await auditLog(stageBRequest, entry);
+        await assertCommittedStageBEvents(marker, [...legacyBefore, ...stageABefore]);
+
+        // auditLog swallows write errors. Check warnings as well as the committed rows.
+        const warnings = t.mock.method(console, 'warn', () => {});
+        const completed = [];
+        let migrationFinished = false;
+        let sequence = 0;
+        const callers = [orgA, orgB, null].map(async (organizationId) => {
+          do {
+            const entry = stageBEntry(marker, `during-${sequence++}`, organizationId);
+            await auditLog(stageBRequest, entry);
+            completed.push(entry);
+          } while (!migrationFinished);
+        });
+        // Attach handlers immediately so a failed caller cannot bypass migration cleanup.
+        const callerResults = Promise.allSettled(callers);
+        let results;
+        try {
+          await migrateActivityLogs('up');
+        } finally {
+          migrationFinished = true;
+          results = await callerResults;
+          warnings.mock.restore();
+        }
+        assert.deepEqual(results.filter(({ status }) => status === 'rejected'), []);
+        assert.deepEqual(warnings.mock.calls.filter(({ arguments: args }) =>
+          args[0] === 'Audit log yazilamadi' || args[0] === 'Activity log organization mismatch'
+        ).map(({ arguments: args }) => args), []);
+        assert.equal(completed.length, sequence);
+        assert.ok(completed.length >= callers.length);
+        await verifyActivityLogsRls(true);
+        await assertCommittedStageBEvents(marker, completed);
+
+        const legacyAfter = batch('legacy-after');
+        const stageAAfter = batch('stage-a-after');
+        for (const entry of legacyAfter) {
+          assert.equal((await legacyAuditLog(stageBRequest, entry))?.code, '42501');
+        }
+        const legacyRows = await committedStageBEvents(marker, legacyAfter.map((entry) => entry.action));
+        assert.equal(legacyAfter.length - legacyRows.length, batchSize);
+        for (const entry of stageAAfter) await auditLog(stageBRequest, entry);
+        await assertCommittedStageBEvents(marker, [...legacyBefore, ...stageABefore, ...stageAAfter]);
+      } finally {
+        await migrateActivityLogs('up');
+      }
+    });
+  });
+
+  test('Stage B: migration 074 does not hang behind an open audit write and leaves the schema unchanged when it times out', {
+    timeout: 15_000,
+  }, async () => {
+    await withActivityFixtures(async ({ insert }) => {
+      try {
+        await migrateActivityLogs('down');
+        await verifyActivityLogsRls(false);
+
+        const writerId = await asTenant(runtimePool, orgA, async (client) => {
+          const { rows: [{ id }] } = await insert(client, orgA);
+          const started = performance.now();
+          await assert.rejects(migrateActivityLogs('up', { guardLockTest: true }), { code: '55P03' });
+          const elapsed = performance.now() - started;
+          assert.ok(elapsed >= 9_500 && elapsed < 15_000, `migration lock wait: ${elapsed.toFixed(0)} ms`);
+          await verifyActivityLogsRls(false);
+          return id;
+        });
+
+        await migrateActivityLogs('up');
+        await verifyActivityLogsRls(true);
+        const { rows } = await admin.query(
+          'select id, organization_id from activity_logs where id = $1', [writerId]
+        );
+        assert.deepEqual(rows, [{ id: writerId, organization_id: orgA }]);
+      } finally {
+        await migrateActivityLogs('up');
+      }
     });
   });
 

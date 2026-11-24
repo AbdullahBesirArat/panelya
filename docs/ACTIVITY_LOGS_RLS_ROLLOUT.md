@@ -139,3 +139,27 @@ Stage A'da migration/RLS testi geri yüklemek, production/DB değişikliği, wor
 açmak, ödeme sağlayıcısını değiştirmek, replica/draining ayarlarını varsayımsal
 olarak doğrulanmış saymak ve repo dışı consumer envanterini kanıtsız tamamlamak
 kapsam dışıdır. Bu çalışma integration doğrulaması yapmaz.
+
+
+## Stage B uygulama prosedürü
+
+1. Stage B release gate listesindeki tüm maddeleri kanıtlarıyla tamamlayın.
+   Stage B PostgreSQL entegrasyon testlerinin sonuçlarını doğrulayın.
+2. Stage B PR'ını merge edin ve Railway API deploy'unu başlatın. Yeni instance,
+   trafik almadan önce `db:migrate` komutunu `panelya_migrator` rolüyle çalıştırır.
+   074, kendi transaction'ında `SET LOCAL lock_timeout = '10s'` ile kilit
+   bekleme süresini sınırlar. Açık bir audit yazısı kilidi bırakmazsa migration
+   `55P03` ile başarısız olur ve transaction geri alınır. Yeni instance açılmaz,
+   önceki Stage A deployment'ı trafik sunmaya devam eder.
+3. Deploy sağlıklı olduktan sonra yukarıdaki **Stage B sonrası salt okunur SQL
+   doğrulaması** sorgularını çalıştırın. Her iki RLS flag'ini, üç policy'yi ve
+   runtime/system tablo yetkilerini belirtilen beklenen değerlerle karşılaştırın.
+4. İlk saat Railway API loglarında `Audit log yazilamadi` ve
+   `Activity log organization mismatch` kayıtlarını izleyin. HTTP 5xx oranını
+   deploy öncesindeki oranla karşılaştırın. Audit uyarısı veya 5xx artışı
+   görülürse deployment zamanıyla ilişkilendirip inceleyin.
+5. Rollback gerekirse deploy ve restart işlemlerini koordine edin. Herhangi bir
+   kod rollback'inden önce **Rollback sırası** bölümündeki komutla 074 down
+   migration'ını çalıştırın. `activity_logs` için her iki RLS flag'inin
+   `false` olduğunu ve policy kalmadığını SQL ile doğrulayın. Ardından 074'ü
+   yeniden uygulamayacak onaylı kod sürümüne dönün.
