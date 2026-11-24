@@ -3,11 +3,12 @@ const db = require('../db');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { auditLog } = require('../services/audit');
 const { resolveOrganization } = require('../services/tenant');
+const { presentEvidence, recordBankTransferEvidence } = require('../services/paymentEvidence');
 
 const router = express.Router();
 const resolutions = ['resolved_refunded', 'resolved_accepted', 'dismissed'];
 const refundEvidenceTypes = ['provider_dashboard_reference', 'bank_transfer_reference', 'documented_evidence'];
-const columns = `id, organization_id, order_id, callback_event_id, case_type, provider,
+const columns = `id, organization_id, order_id, callback_event_id, evidence_id, case_type, provider,
   provider_payment_id, provider_paid_amount, currency, order_total, order_status_at_detection,
   status, resolution_note, resolved_by, resolved_by_admin_id, resolved_at, detected_at, created_at, updated_at,
   external_refund_reference, refund_evidence_type, refund_verification as "refundVerification"`;
@@ -41,6 +42,29 @@ function operatorRoute(handler) {
     }
   }];
 }
+
+router.post('/orders/:orderId/bank-transfers', ...operatorRoute(async (req, client, organizationId) => {
+  const { orderId } = req.params;
+  if (!isCaseId(orderId)) throw httpError(400, 'Gecersiz siparis kimligi');
+  const { amount, currency, reference, receivedAt, level, note } = req.body || {};
+  return recordBankTransferEvidence(client, {
+    organizationId, orderId, amount, currency, reference, receivedAt, level, note, req,
+  });
+}));
+
+router.get('/orders/:orderId/evidence', ...operatorRoute(async (req, client, organizationId) => {
+  const { orderId } = req.params;
+  if (!isCaseId(orderId)) throw httpError(400, 'Gecersiz siparis kimligi');
+  const { rows: [order] } = await client.query(
+    'select id from orders where organization_id = $1 and id = $2', [organizationId, orderId]
+  );
+  if (!order) throw httpError(404, 'Siparis bulunamadi');
+  const { rows } = await client.query(
+    'select * from payment_evidence where organization_id = $1 and order_id = $2 order by id desc',
+    [organizationId, orderId]
+  );
+  return { evidence: rows.map(presentEvidence) };
+}));
 
 router.get('/', ...operatorRoute(async (req, client, organizationId) => {
   const { status = 'open', before } = req.query;

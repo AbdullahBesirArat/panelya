@@ -2,6 +2,34 @@
 
 `WORKER_READY=NO` bu fazda geçerliliğini korur. İzleyici sistem veritabanı rolüyle salt okunur bir işlem açar. Ödeme durumunu, tutarı ve iade kaydını operatör sağlayıcı panelinden doğrular. İzleyici sağlayıcıya bağlanmaz, ödeme veya iade başlatmaz ve vaka kapatmaz.
 
+## Ödeme kanıtı ve vaka incelemesi
+
+Yetkili operatör havaleyi `POST /api/payment-reconciliation/orders/:orderId/bank-transfers` ile kaydeder, kanıt geçmişini `GET /api/payment-reconciliation/orders/:orderId/evidence` ile açar.
+
+| Kanıt seviyesi | Kaynak ve tutar hesabı |
+| --- | --- |
+| `customer_claim` | Müşteri beyanı. Ödenen tutar hesabına girmez. |
+| `operator_recorded` | Operatörün girdiği havale kaydı. Tutar hesabına girer ve `operator_asserted_unverified` etiketi taşır. |
+| `operator_asserted_verified` | Operatörün 10–2000 karakterlik notla kaydettiği harici kontrol. Tutar hesabına girer ve `operator_asserted_unverified` etiketi taşır. |
+| `provider_verified` | Başarılı kart bildiriminin tutarı ve para birimi siparişle eşleşir. Bu seviye kart callback işleminden gelir. |
+
+Banka API bağlantısı yoktur. Havalenin hesaba geçtiğini banka ekstresinden kontrol edin. Uygulama iadenin gerçekleştiğini doğrulayamaz ve `provider_refund_verified` seviyesi yoktur.
+
+| Vaka | Müdahale |
+| --- | --- |
+| `bank_transfer_underpaid` | Sipariş toplamını ekstre ile kuruş bazında karşılaştırın. Eksik tutar için finans ekibinin kararını bekleyin. |
+| `bank_transfer_overpaid` | Fazla tutarı ve işlem sahibini ekstrede kontrol edin. Finans ekibinin kararını ve varsa harici iade referansını kaydedin. |
+| `bank_transfer_multiple` | Her havaleyi ayrı ayrı ekstreyle eşleyin. Tekrar sayımı giderin ve toplamı sipariş tutarıyla karşılaştırın. |
+| `bank_transfer_conflict` | Referansın hangi siparişe ait olduğunu aynı organizasyonun ekstresinde inceleyin. Aynı havaleyi ikinci siparişe saymayın. |
+| `bank_transfer_late` | Bankadaki işlem ve siparişin iptal zamanını karşılaştırın. Sipariş ve rezervasyon durumunu değiştirmeden finans ekibine yönlendirin. |
+| `provider_amount_mismatch` | Sağlayıcı panelinde tutarı, para birimini ve sipariş bağlantısını kontrol edin. Eksik veya farklı alanı gerekçeye yazın ve finans ekibine yönlendirin. |
+
+Kanıt kaydı ve vaka çözümü sipariş durumunu, stok rezervasyonunu veya kuponu değiştirmez. IBAN siparişinde mevcut kanıtla ödeme durumunu `paid` yapmak için sayılan tutarın sipariş toplamına tam eşit olması gerekir. Kanıtsız eski akış sipariş geçmişine `operator_declared_without_evidence` yazar.
+
+İzleyici, açık havale uyuşmazlıklarını `partial_or_duplicate_payment_suspected`, eski havale kanıtlarını `unverified_transfer_evidence_over_age` ve kanıtsız ödenmiş IBAN siparişlerini `iban_paid_without_evidence` ile bildirir. Kartta rezervasyon süresi ve ek süreyi aşan bildirimsiz siparişler `callback_missing_suspected`, sağlayıcı kanıtı olmayan yerel ödemeler `provider_local_state_mismatch` olarak raporlanır. Bulguları ekstre veya sağlayıcı paneliyle inceleyin.
+
+Migration 076’yı API dağıtımından önce uygulayın. Geri alma koşulları [saklama dokümanında](PAYMENT_RECONCILIATION_RETENTION.md) yer alır.
+
 ## Alarm ve müdahale sırası
 
 P1 olay sorumlusunu hemen bilgilendirin. P2 bulgularını aynı vardiyada inceleyin. P3 bulgularını mutabakat kuyruğunda izleyin. Birden çok alarm varsa önce kapsamı ve tenant etkisini belirleyin, ardından sağlayıcı panelinde sipariş bazında doğrulama yapın.

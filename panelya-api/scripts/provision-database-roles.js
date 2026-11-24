@@ -74,6 +74,9 @@ async function main() {
         if to_regclass('public.payment_reconciliation_cases') is not null then
           revoke delete on public.payment_reconciliation_cases from panelya_runtime, panelya_system_runtime;
         end if;
+        if to_regclass('public.payment_evidence') is not null then
+          revoke update, delete, truncate on public.payment_evidence from panelya_runtime, panelya_system_runtime;
+        end if;
       end $$;
       grant usage, select on all sequences in schema public to panelya_runtime, panelya_system_runtime;
       alter default privileges for role panelya_migrator in schema public

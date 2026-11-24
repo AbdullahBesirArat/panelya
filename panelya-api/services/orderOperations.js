@@ -2,6 +2,7 @@ const db = require('../db');
 const { transitionOrderInventory } = require('./inventoryReservations');
 const { transitionOrderPromotion } = require('./promotionEngine');
 const { sendOrderStatusEmail } = require('./email');
+const { amountInKurus, bankEvidenceTotals } = require('./paymentEvidence');
 
 const ORDER_TRANSITIONS = Object.freeze({
   pending_payment: ['confirmed', 'paid', 'cancelled'],
@@ -160,6 +161,19 @@ async function transitionOrderOperation(client, {
   const { next, changedDomains } = normalizeChanges(row, changes);
   if (!changedDomains.length) return { order: row, previous: row, changed: false, changedDomains: [] };
 
+  if (row.order_status === 'cancelled' && next.order === 'confirmed'
+    && ['iban', 'card'].includes(row.payment_method) && row.payment_status !== 'paid') {
+    throw operationError('Siparis odeme incelemesi gerektiriyor', 409, 'ORDER_REOPEN_REQUIRES_PAYMENT_REVIEW');
+  }
+  let declaredWithoutEvidence = false;
+  if (row.payment_method === 'iban' && next.payment === 'paid' && changedDomains.includes('payment')) {
+    const totals = await bankEvidenceTotals(client, organizationId, row.id);
+    declaredWithoutEvidence = BigInt(totals.entries) === 0n;
+    if (!declaredWithoutEvidence && amountInKurus(totals.amount) !== amountInKurus(row.total)) {
+      throw operationError('Havale tutari siparisle uyusmuyor', 409, 'PAYMENT_EVIDENCE_AMOUNT_MISMATCH');
+    }
+  }
+
   const nextLegacyStatus = changes.order
     ? projectLegacyStatus(next.order, row.status)
     : row.status;
@@ -182,6 +196,12 @@ async function transitionOrderOperation(client, {
   );
   if (!result.rows[0]) {
     throw operationError('Siparis baska bir kullanici tarafindan guncellendi', 409, 'ORDER_VERSION_CONFLICT');
+  }
+  if (declaredWithoutEvidence) {
+    await appendOrderEvent(client, {
+      organizationId, orderId: row.id, actor, eventType: 'payment_verification_recorded',
+      metadata: { paymentVerification: 'operator_declared_without_evidence' },
+    });
   }
   return { order: result.rows[0], previous: row, changed: true, changedDomains };
 }

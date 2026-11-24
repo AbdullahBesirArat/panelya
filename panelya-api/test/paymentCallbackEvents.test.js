@@ -595,14 +595,19 @@ test('036 migration event_key + partial unique index ekler ve down rollback icer
 
 test('verified late payment returns a reconciliation case while the order stays cancelled', async () => {
   const event = { id: 91, processing_status: 'pending', payload: { provider: 'iyzico', token: 'late' } };
-  const order = { id: 12, organization_id: 'org-1', order_code: '#12', payment_token: 'late', status: 'cancelled', total: '20.00' };
+  const order = { id: 12, organization_id: 'org-1', order_code: '#12', payment_token: 'late', status: 'cancelled', total: '20.00', currency: 'TRY' };
   const { calls, deps } = makeHarness({ event, order });
   const client = await deps.pool.connect();
   const query = client.query;
   const audits = [];
+  const retrieve = deps.retrieve;
+  deps.retrieve = async () => ({ ...await retrieve(), paidPrice: '20.00', currency: 'TRY' });
   deps.audit = async (_req, entry) => { audits.push(entry); };
-  client.query = (sql, params) => sql.includes('insert into payment_reconciliation_cases')
-    ? { rows: [{ id: '42' }] } : query(sql, params);
+  client.query = (sql, params) => {
+    if (sql.includes('insert into payment_evidence')) return { rows: [{ id: '41' }] };
+    if (sql.includes('insert into payment_reconciliation_cases')) return { rows: [{ id: '42' }] };
+    return query(sql, params);
+  };
   const outcome = await processPaymentCallbackEvent(req, event.id, deps);
   assert.equal(outcome.ok, false);
   assert.equal(outcome.order.status, 'cancelled');

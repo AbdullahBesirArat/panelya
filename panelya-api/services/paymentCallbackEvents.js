@@ -4,6 +4,7 @@ const { providerName, retrievePayment, successUrl, failureUrl } = require('./pay
 const { sendOrderStatusEmail } = require('./email');
 const { transitionOrderInventory } = require('./inventoryReservations');
 const { transitionOrderPromotion } = require('./promotionEngine');
+const { amountInKurus, decimalAmount, paymentIdentityMismatch, recordCardEvidence } = require('./paymentEvidence');
 
 const TERMINAL_STATUSES = ['paid', 'cancelled'];
 
@@ -319,7 +320,7 @@ async function processPaymentCallbackEvent(req, eventId, deps = {}) {
       proposedStatus = payment.status === 'success' && payment.paymentStatus === 'SUCCESS' ? 'paid' : 'cancelled';
       if (proposedStatus === 'paid') verifiedPayment = payment;
       paymentId = payment.paymentId || null;
-      paymentError = payment.errorMessage || null;
+      paymentError = payment.errorMessage ? 'PAYMENT_PROVIDER_REJECTED' : null;
     }
 
     const currentOrder = await lockOrderForCallback(client, payload, callbackContext);
@@ -328,36 +329,74 @@ async function processPaymentCallbackEvent(req, eventId, deps = {}) {
     }
 
     const currentStatus = currentOrder.status;
+    if (verifiedPayment) {
+      paymentId = firstPresent(verifiedPayment.paymentId);
+      if (!paymentId) throw new Error('Dogrulanmis odeme icin saglayici odeme kimligi eksik');
+      const amount = amountInKurus(verifiedPayment.paidPrice);
+      const currency = verifiedPayment.currency;
+      const validAmount = amount !== null && amount > 0n;
+      const validCurrency = typeof currency === 'string' && /^[A-Z]{3}$/.test(currency);
+      const matches = validAmount && amount === amountInKurus(currentOrder.total)
+        && validCurrency && currency === currentOrder.currency;
+      const late = currentStatus === 'cancelled';
+      const evidence = matches
+        ? await recordCardEvidence(client, {
+          order: currentOrder, event, provider, paymentId, amount: decimalAmount(amount), currency,
+        })
+        : null;
+      if (!matches || late) {
+        const reconciliationCase = await recordLatePayment(client, req, audit, currentOrder, event, {
+          provider, paymentId, token: payload.token,
+          amount: validAmount ? decimalAmount(amount) : null,
+          currency: validCurrency ? currency : null,
+          caseType: matches ? 'paid_on_cancelled_order' : 'provider_amount_mismatch',
+          evidenceId: evidence?.id ?? null,
+        });
+        const reconciliationCaseId = reconciliationCase.id;
+        let order = currentOrder;
+        if (matches && !reconciliationCase.existing) {
+          // Retain the legacy late-payment metadata without running stock or promotion transitions.
+          order = await updateCallbackOrder(client, currentOrder, currentStatus, paymentId,
+            `Final durum korunuyor: ${currentStatus}`);
+        }
+        const processed = await finalizeEvent(client, event.id, {
+          processing_status: 'processed',
+          processed_order_id: currentOrder.id,
+          result_status: matches ? currentStatus : 'provider_amount_mismatch',
+          last_error: `reconciliation_case:${reconciliationCaseId}`,
+          last_processed_at: new Date().toISOString(),
+          next_retry_at: null,
+        }, organizationId);
+        await client.query('commit');
+        return {
+          ...processed, reconciliationCaseId, order, ok: false,
+          redirectUrl: buildFailureUrl(req, currentOrder.order_code),
+          ...(reconciliationCase.existing && { idempotentReplay: true }),
+        };
+      }
+      if (evidence.replay && currentStatus === 'paid') {
+        const processed = await finalizeEvent(client, event.id, {
+          processing_status: 'processed',
+          processed_order_id: currentOrder.id,
+          result_status: 'paid',
+          last_error: null,
+          last_processed_at: new Date().toISOString(),
+          next_retry_at: null,
+        }, organizationId);
+        await client.query('commit');
+        return {
+          ...processed, order: currentOrder, ok: true,
+          redirectUrl: buildSuccessUrl(req, currentOrder.order_code),
+          idempotentReplay: true,
+        };
+      }
+    }
 
     // Out-of-order/terminal koruma: paid/cancelled geri alinmaz.
     const guard = resolveTerminalGuardedStatus(currentStatus, proposedStatus);
     const nextStatus = guard.status;
     if (guard.guarded) {
       paymentError = paymentError || `Final durum korunuyor: ${currentStatus}`;
-    }
-    const latePaymentCase = currentStatus === 'cancelled' && verifiedPayment
-      ? await recordLatePayment(client, req, audit, currentOrder, event, payload.token, verifiedPayment)
-      : null;
-
-    const reconciliationCaseId = latePaymentCase?.id;
-    if (latePaymentCase?.existing) {
-      const replay = await finalizeEvent(client, event.id, {
-        processing_status: 'processed',
-        processed_order_id: currentOrder.id,
-        result_status: currentStatus,
-        last_error: `reconciliation_case:${reconciliationCaseId}`,
-        last_processed_at: new Date().toISOString(),
-        next_retry_at: null,
-      }, organizationId);
-      await client.query('commit');
-      return {
-        ...replay,
-        reconciliationCaseId,
-        order: currentOrder,
-        ok: false,
-        redirectUrl: buildFailureUrl(req, currentOrder.order_code),
-        idempotentReplay: true,
-      };
     }
 
     // Reservation transition is itself idempotent. Duplicate callbacks cannot
@@ -369,35 +408,24 @@ async function processPaymentCallbackEvent(req, eventId, deps = {}) {
       organizationId: currentOrder.organization_id,
     });
 
-    const updatedOrder = await client.query(
-      `update orders
-       set status = $1,
-           payment_id = coalesce($2, payment_id),
-           payment_error = $3,
-           updated_at = now()
-       where id = $4
-         and organization_id = $5
-       returning *`,
-      [nextStatus, paymentId, paymentError, currentOrder.id, currentOrder.organization_id]
-    );
+    const updatedOrder = await updateCallbackOrder(client, currentOrder, nextStatus, paymentId, paymentError);
 
     const finalizedEvent = await finalizeEvent(client, event.id, {
       processing_status: 'processed',
       processed_order_id: currentOrder.id,
       result_status: nextStatus,
-      last_error: reconciliationCaseId ? `reconciliation_case:${reconciliationCaseId}` : paymentError,
+      last_error: paymentError,
       last_processed_at: new Date().toISOString(),
       next_retry_at: null,
     }, organizationId);
 
-    await audit(req, {
+    await audit({ auth: req.auth, admin: req.admin, get() { return ''; } }, {
       action: 'PAYMENT_CALLBACK',
       resourceType: 'order',
       resourceId: currentOrder.id,
       oldValue: { status: currentOrder.status, callbackEventId: event.id },
-      newValue: { status: nextStatus, provider, paymentId, paymentError, callbackEventId: event.id },
+      newValue: { status: nextStatus, provider, callbackEventId: event.id },
       success: nextStatus === 'paid',
-      errorMessage: paymentError,
     });
 
     await client.query('commit');
@@ -409,23 +437,19 @@ async function processPaymentCallbackEvent(req, eventId, deps = {}) {
        from customers
        where id = $1 and organization_id = $2
        limit 1`,
-      [updatedOrder.rows[0].customer_id, organizationId]
+      [updatedOrder.customer_id, organizationId]
     );
-    await sendEmail(updatedOrder.rows[0], customerResult.rows[0]).catch((error) => {
-      console.warn('Order status email gonderilemedi', {
-        orderCode: updatedOrder.rows[0].order_code,
-        message: error.message,
-      });
+    await sendEmail(updatedOrder, customerResult.rows[0]).catch(() => {
+      console.warn('Order status email gonderilemedi');
     });
 
     return {
       ...finalizedEvent,
-      ...(reconciliationCaseId && { reconciliationCaseId }),
-      order: updatedOrder.rows[0],
+      order: updatedOrder,
       ok: nextStatus === 'paid',
       redirectUrl: nextStatus === 'paid'
-        ? buildSuccessUrl(req, updatedOrder.rows[0].order_code)
-        : buildFailureUrl(req, updatedOrder.rows[0].order_code),
+        ? buildSuccessUrl(req, updatedOrder.order_code)
+        : buildFailureUrl(req, updatedOrder.order_code),
     };
   } catch (error) {
     if (!client) throw error;
@@ -441,7 +465,7 @@ async function processPaymentCallbackEvent(req, eventId, deps = {}) {
       processing_status: 'failed',
       last_error: error.code === 'PAYMENT_ID_ORDER_MISMATCH'
         ? error.code
-        : String(error.message || error).slice(0, 1000),
+        : 'PAYMENT_CALLBACK_PROCESSING_FAILED',
       last_processed_at: new Date().toISOString(),
       next_retry_at: new Date(Date.now() + retryDelayMs(claimedEvent?.attempts)).toISOString(),
     }, organizationId).catch(() => {});
@@ -452,20 +476,32 @@ async function processPaymentCallbackEvent(req, eventId, deps = {}) {
   }
 }
 
-async function recordLatePayment(client, req, audit, order, event, token, payment) {
-  const paymentId = firstPresent(payment.paymentId);
-  if (!paymentId) throw new Error('Dogrulanmis odeme icin saglayici odeme kimligi eksik');
+async function updateCallbackOrder(client, order, status, paymentId, paymentError) {
+  const { rows: [updated] } = await client.query(
+    `update orders
+     set status = $1,
+         payment_id = coalesce($2, payment_id),
+         payment_error = $3,
+         updated_at = now()
+     where id = $4 and organization_id = $5
+     returning *`,
+    [status, paymentId, paymentError, order.id, order.organization_id]
+  );
+  return updated;
+}
 
-  const identity = [order.organization_id, 'iyzico', paymentId, 'paid_on_cancelled_order'];
+async function recordLatePayment(client, req, audit, order, event, {
+  provider, paymentId, token, amount, currency, caseType, evidenceId,
+}) {
+  const identity = [order.organization_id, provider, paymentId, caseType];
   const { rows: [created] } = await client.query(
     `insert into payment_reconciliation_cases
        (organization_id, provider, provider_payment_id, case_type, order_id, callback_event_id,
-        payment_token, provider_paid_amount, currency, order_total, order_status_at_detection)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+        payment_token, provider_paid_amount, currency, order_total, order_status_at_detection, evidence_id)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
      on conflict (organization_id, provider, provider_payment_id, case_type) do nothing
      returning id`,
-    [...identity, order.id, event.id, token, payment.paidPrice ?? null, payment.currency ?? null,
-      order.total, order.status]
+    [...identity, order.id, event.id, token, amount, currency, order.total, order.status, evidenceId]
   );
   if (!created) {
     const { rows: [existing] } = await client.query(
@@ -474,19 +510,17 @@ async function recordLatePayment(client, req, audit, order, event, token, paymen
       identity
     );
     if (existing?.organization_id !== order.organization_id || existing?.order_id !== order.id) {
-      const code = 'PAYMENT_ID_ORDER_MISMATCH';
-      console.warn(code);
-      throw Object.assign(new Error('Odeme kaydi beklenen siparisle eslesmiyor'), { code });
+      throw paymentIdentityMismatch();
     }
     return { id: existing.id, existing: true };
   }
-  await audit(req, {
+  await audit({ auth: req.auth, get() { return ''; } }, {
     action: 'PAYMENT_RECONCILIATION_REQUIRED',
     actorType: 'app',
     organizationId: order.organization_id,
     resourceType: 'payment_reconciliation_case',
     resourceId: created.id,
-    newValue: { orderId: order.id, callbackEventId: event.id, providerPaymentId: paymentId },
+    newValue: { orderId: order.id, callbackEventId: event.id, caseType, evidenceId },
     store: client,
     throwOnError: true,
   });
@@ -522,7 +556,8 @@ async function processPendingPaymentCallbackEvents(limit = 20, deps = {}) {
       });
       processed.push({ id: row.id, status: outcome?.processing_status || 'unknown' });
     } catch (error) {
-      processed.push({ id: row.id, status: 'failed', error: error.message });
+      const reason = error.code === 'PAYMENT_ID_ORDER_MISMATCH' ? error.code : 'PAYMENT_CALLBACK_PROCESSING_FAILED';
+      processed.push({ id: row.id, status: 'failed', error: reason });
     }
   }
 

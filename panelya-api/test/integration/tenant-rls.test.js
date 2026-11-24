@@ -7203,7 +7203,7 @@ const integrationService = require('../../modules/integrations/service');
         [tenant.id, action]
       );
       const verifyPayment = (token) => ({
-        status: 'success', paymentStatus: 'SUCCESS', paymentId: `paid-${token}`, paidPrice: '101.25', currency: 'TRY',
+        status: 'success', paymentStatus: 'SUCCESS', paymentId: `paid-${token}`, paidPrice: '100.00', currency: 'TRY',
       });
       async function seedCard(tag, options, org = tenant.id) {
         const item = await seed(org, tag, options);
@@ -7306,7 +7306,7 @@ const integrationService = require('../../modules/integrations/service');
       assert.equal(lateCase.id, late.reconciliationCaseId);
       assert.equal(lateCase.status, 'open');
       assert.equal(lateCase.provider_payment_id, late.order.payment_id);
-      assert.equal(lateCase.provider_paid_amount, '101.25');
+      assert.equal(lateCase.provider_paid_amount, '100.00');
       assert.equal(lateCase.currency, 'TRY');
       assert.equal(lateCase.order_total, '100.00');
       assert.equal(lateCase.order_id, expired.item.orderId);

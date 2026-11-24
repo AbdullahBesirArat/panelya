@@ -1,5 +1,7 @@
 ﻿const { createHash } = require('node:crypto');
 
+const { reservationTtlMinutes, cardGraceMinutes } = require('./inventoryReservations');
+
 const ranks = { ok: 0, warning: 1, critical: 2 };
 const fingerprints = Symbol('finding fingerprints');
 // Signature of a pre-reconciliation late success: the terminal guard kept the order cancelled
@@ -8,6 +10,8 @@ const cancelledNote = 'İncelenmeli, kesin tahsilat değil.';
 const checkNames = [
   'open_cases', 'open_cases_over_age', 'payment_id_order_mismatch', 'failing_callback_retry',
   'stale_processing', 'verified_payment_on_cancelled_without_case', 'payment_id_anomaly',
+  'partial_or_duplicate_payment_suspected', 'unverified_transfer_evidence_over_age',
+  'iban_paid_without_evidence', 'callback_missing_suspected', 'provider_local_state_mismatch',
 ];
 
 function bounded(value, fallback, maximum) {
@@ -35,7 +39,8 @@ function resolveThresholds(overrides = {}, env = process.env) {
 const reportSql = `
 with settings as (
   select $1::uuid as org, $2::timestamptz as as_of, $3::int as warn_hours,
-    $4::int as failed_attempts, $5::int as stale_minutes, $6::int as lookback_hours
+    $4::int as failed_attempts, $5::int as stale_minutes, $6::int as lookback_hours,
+    $7::int as card_wait_minutes
 ), case_rows as (
   select c.id, c.organization_id, c.order_id, c.callback_event_id as event_id,
     c.status, c.detected_at as observed_at
@@ -56,6 +61,36 @@ with settings as (
   from payment_reconciliation_cases
   group by provider, provider_payment_id
   having count(distinct organization_id) > 1 or count(distinct order_id) > 1
+), evidence_findings as (
+  select flags.check_name, o.id, o.organization_id, o.id as order_id, null::bigint as event_id,
+    o.status, flags.observed_at, o.id as group_id
+  from orders o cross join settings s
+  left join lateral (
+    select min(e.received_at) filter (where e.channel = 'bank_transfer') as first_transfer,
+      count(*) filter (where e.channel = 'card' and e.evidence_level = 'provider_verified') as card_entries
+    from payment_evidence e
+    where e.organization_id = o.organization_id and e.order_id = o.id
+  ) evidence on true
+  cross join lateral (values
+    ('unverified_transfer_evidence_over_age', evidence.first_transfer,
+      o.payment_method = 'iban' and o.payment_status = 'manual_pending'
+        and evidence.first_transfer < s.as_of - make_interval(hours => s.warn_hours)),
+    ('iban_paid_without_evidence', o.updated_at,
+      o.payment_method = 'iban' and o.payment_status = 'paid' and evidence.first_transfer is null
+        and o.updated_at between s.as_of - make_interval(hours => s.lookback_hours) and s.as_of),
+    ('callback_missing_suspected', o.created_at,
+      o.payment_method = 'card' and o.status = 'payment_pending' and nullif(o.payment_token, '') is not null
+        and o.created_at < s.as_of - make_interval(mins => s.card_wait_minutes)
+        and not exists (
+          select 1 from payment_callback_events e where e.organization_id = o.organization_id
+            and (e.payment_token = o.payment_token or e.processed_order_id = o.id or e.order_code = o.order_code)
+        )),
+    ('provider_local_state_mismatch', o.updated_at,
+      o.payment_method = 'card' and o.status = 'paid' and o.payment_provider is distinct from 'mock'
+        and evidence.card_entries = 0
+        and o.updated_at between s.as_of - make_interval(hours => s.lookback_hours) and s.as_of)
+  ) flags(check_name, observed_at, present)
+  where flags.present and (s.org is null or o.organization_id = s.org)
 ), findings as (
   select 'open_cases' as check_name, c.*, c.id as group_id from case_rows c
   union all
@@ -64,6 +99,14 @@ with settings as (
   where c.observed_at < s.as_of - make_interval(hours => s.warn_hours)
   union all
   select check_name, id, organization_id, order_id, event_id, status, observed_at, id from callback_rows
+  union all
+  select 'partial_or_duplicate_payment_suspected', c.id, c.organization_id, c.order_id, c.callback_event_id,
+    c.status, c.detected_at, c.id
+  from payment_reconciliation_cases c cross join settings s
+  where c.status = 'open' and (s.org is null or c.organization_id = s.org)
+    and c.case_type in ('bank_transfer_underpaid', 'bank_transfer_overpaid', 'bank_transfer_multiple', 'bank_transfer_conflict')
+  union all
+  select * from evidence_findings
   union all
   select 'verified_payment_on_cancelled_without_case', o.id, o.organization_id, o.id, e.id,
     o.status, e.last_processed_at, o.id
@@ -136,7 +179,7 @@ async function collectPaymentReconciliationReport({
     }
     const { rows: [data] } = await client.query(reportSql, [
       organizationId, generatedAt, limits.warnHours, limits.failedAttempts, limits.staleMinutes,
-      limits.lookbackHours,
+      limits.lookbackHours, reservationTtlMinutes() + cardGraceMinutes(),
     ]);
     const byName = new Map((data.checks || []).map((row) => [row.check_name, row]));
     const checks = {};
@@ -149,6 +192,7 @@ async function collectPaymentReconciliationReport({
       if (ranks[severity] > ranks[overall]) overall = severity;
     }
     checks.verified_payment_on_cancelled_without_case.note = cancelledNote;
+    for (const name of checkNames.slice(-5)) checks[name].note = cancelledNote;
     const perOrganization = (data.orgs || []).map(({ organization_id, counts }) => ({
       organizationId: organization_id,
       ...Object.fromEntries(checkNames.map((name) => [
