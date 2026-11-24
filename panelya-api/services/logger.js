@@ -28,8 +28,7 @@ function initSentry() {
   return sentry;
 }
 
-const logger = pino({
-  level: logLevel(),
+const loggerOptions = {
   base: {
     service: 'panelya-api',
     env: process.env.NODE_ENV || 'development',
@@ -94,7 +93,13 @@ const logger = pino({
       return { level: label };
     },
   },
-});
+};
+
+function createLogger(destination) {
+  return pino({ ...loggerOptions, level: logLevel() }, destination);
+}
+
+const logger = createLogger();
 
 function requestLogger(req) {
   if (req?.log) return req.log;
@@ -140,6 +145,7 @@ function captureException(error, context = {}) {
 module.exports = {
   attachRequestLogger,
   captureException,
+  createLogger,
   initSentry,
   logger,
   requestLogger,

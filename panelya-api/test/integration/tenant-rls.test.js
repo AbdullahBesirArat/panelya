@@ -7526,6 +7526,9 @@ const integrationService = require('../../modules/integrations/service');
       assert.equal(failedMismatch.processing_status, 'failed');
       assert.ok(failedMismatch.next_retry_at);
       assert.equal(failedMismatch.last_error, 'PAYMENT_ID_ORDER_MISMATCH');
+      const { collectPaymentReconciliationReport } = require('../../services/paymentReconciliationMonitor');
+      const mismatchReport = await collectPaymentReconciliationReport({ pool: systemPool, organizationId: tenant.id });
+      assert.deepEqual(mismatchReport.checks.payment_id_order_mismatch.samples.map(({ id }) => id), [mismatchEvent.id]);
 
       const items = [expired.item, contended.item, retry.item];
       const beforeResolution = [];
@@ -8337,6 +8340,171 @@ const integrationService = require('../../modules/integrations/service');
           else delete require.cache[modulePath];
         }
       }
+    }
+  });
+
+  test('phase17 reconciliation monitor checks read-only, scoped and global findings', async () => {
+    const { collectPaymentReconciliationReport: collect } = require('../../services/paymentReconciliationMonitor');
+    const { main } = require('../../scripts/check-payment-reconciliation');
+    const now = new Date();
+    const age = (minutes) => new Date(now.getTime() - minutes * 60000);
+    const stamp = crypto.randomUUID();
+    const secrets = ['provider-' + stamp, 'token-' + stamp, 'reference-' + stamp, 'note-' + stamp, 'payload-' + stamp, 'name-' + stamp, stamp + '@example.test'];
+    const { rows: orgs } = await admin.query(
+      'insert into organizations (name, slug) values ($1,$2), ($1,$3) returning id',
+      [secrets[5], 'recon-a-' + stamp, 'recon-b-' + stamp]
+    );
+    const [a, b] = orgs.map(({ id }) => id);
+    const run = (options) => collect({ pool: systemPool, now, ...options });
+    const thresholds = { warnHours: 24, criticalHours: 72, failedAttempts: 5, staleMinutes: 15 };
+    const scoped = (options) => run({ organizationId: a, thresholds, ...options });
+
+    async function insertOrder(org, paymentId, error = null) {
+      const { rows: [customer] } = await admin.query(
+        'insert into customers (organization_id, name, email) values ($1,$2,$3) returning id', [org, secrets[5], crypto.randomUUID() + '-' + secrets[6]]
+      );
+      const { rows: [order] } = await admin.query(
+        "insert into orders (organization_id, order_code, customer_id, total, status, payment_id, payment_error) values ($1,$2,$3,100,'cancelled',$4,$5) returning id",
+        [org, 'RECON-' + crypto.randomUUID(), customer.id, paymentId, error]
+      );
+      return order.id;
+    }
+
+    async function event(org, order, status, attempts, updated, error = null, result = 'cancelled') {
+      const { rows: [row] } = await admin.query(
+        `insert into payment_callback_events
+          (organization_id, provider, processed_order_id, processing_status, attempts, updated_at,
+            last_processed_at, result_status, last_error, payment_token, payload, event_key)
+         values ($1,'iyzico',$2,$3,$4,$5,$5,$6,$7,$8,$9,$10) returning id`,
+        [org, order, status, attempts, updated, result, error, secrets[1], JSON.stringify({ secret: secrets[4] }), crypto.randomUUID()]
+      );
+      return row.id;
+    }
+
+    async function createCase(org, order, callback, providerId, detectedAt) {
+      const { rows: [row] } = await admin.query(
+        `insert into payment_reconciliation_cases (organization_id, order_id, callback_event_id, provider,
+           provider_payment_id, payment_token, case_type, order_total, order_status_at_detection, detected_at)
+         values ($1,$2,$3,'iyzico',$4,$5,'paid_on_cancelled_order',100,'cancelled',$6) returning id`,
+        [org, order, callback, providerId, secrets[1], detectedAt]
+      );
+      return row.id;
+    }
+
+    try {
+      const orderA = await insertOrder(a, secrets[0]);
+      const orderB = await insertOrder(b, secrets[0]);
+      const caseA = await createCase(a, orderA, await event(a, orderA, 'processed', 20, age(1)), secrets[0], age(24 * 60));
+      assert.equal((await scoped()).overall, 'ok');
+      assert.equal((await scoped()).checks.open_cases.count, 1);
+      assert.equal((await scoped({ now: new Date(now.getTime() + 1000) })).overall, 'warning');
+      assert.equal((await scoped({ now: new Date(now.getTime() + 48 * 3600000) })).overall, 'warning');
+      assert.equal((await scoped({ now: new Date(now.getTime() + 48 * 3600000 + 1000) })).overall, 'critical');
+      await admin.query(
+        `update payment_reconciliation_cases set status = 'resolved_refunded', resolution_note = $2,
+           external_refund_reference = $3, refund_evidence_type = 'provider_dashboard_reference',
+           refund_verification = 'operator_asserted_unverified', resolved_at = now(), resolved_by_admin_id = 'test'
+         where id = $1`, [caseA, secrets[3], secrets[2]]
+      );
+      assert.equal((await scoped()).checks.open_cases.count, 0);
+      assert.equal((await scoped()).overall, 'ok');
+      const caseB = await createCase(b, orderB, await event(b, orderB, 'processed', 1, age(1)), secrets[0], age(1));
+      await event(a, orderA, 'failed', 4, age(20));
+      const retry = await event(a, orderA, 'failed', 5, age(25));
+      await event(a, orderA, 'pending', 10, age(20));
+      await event(a, orderA, 'processing', 10, age(15));
+      const stale = await event(a, orderA, 'processing', 10, age(16));
+      const suspectOrder = await insertOrder(a, secrets[0], 'Final durum korunuyor: cancelled');
+      await event(a, suspectOrder, 'processed', 5, age(1), 'Final durum korunuyor: cancelled');
+      const silentOrder = await insertOrder(a, secrets[0]);
+      await event(a, silentOrder, 'processed', 5, age(1));
+      const oldOrder = await insertOrder(a, secrets[0], 'Final durum korunuyor: cancelled');
+      await event(a, oldOrder, 'processed', 1, age(721 * 60), 'Final durum korunuyor: cancelled');
+      const mockOrder = await insertOrder(a, 'mock-' + secrets[0]);
+      await event(a, mockOrder, 'processed', 5, age(1));
+      const failedOrder = await insertOrder(a, secrets[0], 'failed-payment');
+      await event(a, failedOrder, 'processed', 5, age(1), 'failed-payment');
+
+      async function digest() {
+        const { rows: [row] } = await admin.query(`
+          select md5(concat(
+            (select jsonb_agg(o order by id) from orders o),
+            (select jsonb_agg(e order by id) from payment_callback_events e),
+            (select jsonb_agg(c order by id) from payment_reconciliation_cases c),
+            (select jsonb_agg(l order by id) from activity_logs l)
+          )) as digest`);
+        return row.digest;
+      }
+
+      const before = await digest();
+      const statements = [];
+      const observedPool = { connect: async () => {
+        const client = await systemPool.connect();
+        return {
+          async query(sql, params) {
+            statements.push(sql.trim());
+            if (sql.includes('app_rls_bypassed')) {
+              assert.equal((await client.query('show transaction_read_only')).rows[0].transaction_read_only, 'on');
+            }
+            return client.query(sql, params);
+          },
+          release(error) { client.release(error); },
+        };
+      } };
+      const report = await scoped({ pool: observedPool });
+      assert.equal(report.overall, 'critical');
+      const ids = (check) => report.checks[check].samples.map(({ id }) => id);
+      assert.deepEqual(ids('failing_callback_retry'), [retry]);
+      assert.deepEqual(ids('stale_processing'), [stale]);
+      assert.deepEqual(ids('verified_payment_on_cancelled_without_case'), [suspectOrder]);
+      assert.deepEqual(ids('payment_id_anomaly'), [caseA]);
+      assert.deepEqual(report.perOrganization.map(({ organizationId }) => organizationId), [a]);
+      const global = await run({ thresholds });
+      assert.ok(global.checks.payment_id_anomaly.samples.some(({ id, organizationId }) => id === caseB && organizationId === b));
+      assert.ok(global.checks.payment_id_anomaly.samples.some(({ id, organizationId }) => id === caseA && organizationId === a));
+      assert.equal((await runtimePool.query('select id from payment_reconciliation_cases')).rowCount, 0);
+      await assert.rejects(scoped({ pool: runtimePool }), { code: 'PAYMENT_RECON_RLS_REQUIRED' });
+      const client = await systemPool.connect();
+      try {
+        await client.query('begin read only');
+        await assert.rejects(client.query('update orders set status = status where id = $1', [orderA]), { code: '25006' });
+      } finally {
+        try { await client.query('rollback'); } finally { client.release(); }
+      }
+
+      const { rows: [activityRls] } = await admin.query("select relrowsecurity as enabled from pg_class where oid = 'activity_logs'::regclass");
+      const savedMode = activityRls.enabled ? 'enable' : 'disable';
+      await admin.query('alter table activity_logs ' + (activityRls.enabled ? 'disable' : 'enable') + ' row level security');
+      try { assert.deepEqual(await scoped(), report); }
+      finally { await admin.query('alter table activity_logs ' + savedMode + ' row level security'); }
+
+      const cli = async (args, role) => {
+        const output = [];
+        const getPool = () => new Pool({ connectionString: urlWithUser(ADMIN_URL, role,
+          role === 'panelya_runtime' ? PASSWORDS.runtime : PASSWORDS.system), max: 1 });
+        const append = (value) => output.push(value);
+        const code = await main(args, { getPool, stdout: append, stderr: append, logger: { warn: append, error: append } });
+        for (const secret of secrets) assert.ok(!JSON.stringify(output).includes(secret));
+        return { code, output };
+      };
+      for (const format of ['json', 'text', 'prometheus']) {
+        const result = await cli(['--organization-id', a, '--format', format], 'panelya_system_runtime');
+        assert.equal(result.code, 1);
+        if (format === 'prometheus') assert.doesNotMatch(result.output.at(-1), /[{}]|[a-f0-9]{8}-/);
+      }
+      assert.equal((await cli(['--organization-id', crypto.randomUUID()], 'panelya_system_runtime')).code, 0);
+      assert.equal((await cli([], 'panelya_runtime')).code, 2);
+      assert.equal((await cli(['--invalid', secrets[0]], 'panelya_system_runtime')).code, 2);
+      for (const secret of secrets) assert.ok(!JSON.stringify(report).includes(secret));
+      assert.deepEqual(statements.map((sql) => sql.split(/\s+/)[0]), ['begin', 'select', 'with', 'commit']);
+      assert.doesNotMatch(statements[2], /\b(?:insert into|update orders|delete from)\b/i);
+      assert.equal(await digest(), before);
+    } finally {
+      for (const table of ['payment_reconciliation_cases', 'payment_callback_events', 'customers']) {
+        await admin.query('delete from ' + table + ' where organization_id = any($1::uuid[])', [[a, b]]);
+      }
+      // Append-only order events retain their orders until the disposable database is removed.
+      await admin.query("update organizations set status = 'suspended' where id = any($1::uuid[])", [[a, b]]);
     }
   });
 
