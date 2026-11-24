@@ -132,6 +132,26 @@ if (!ADMIN_URL) {
   let fixtures;
   const mediaStorage = createMemoryStorage();
 
+  async function deletePaymentFixtures(organizationIds) {
+    const scope = 'where $1::uuid[] is null or organization_id = any($1::uuid[])';
+    await admin.query('begin');
+    try {
+      // Cases can reference evidence, and both can reference orders and callbacks.
+      await admin.query(`delete from payment_reconciliation_cases ${scope}`, [organizationIds]);
+      await admin.query('alter table payment_evidence disable trigger user');
+      try {
+        await admin.query(`delete from payment_evidence ${scope}`, [organizationIds]);
+      } finally {
+        await admin.query('alter table payment_evidence enable trigger user');
+      }
+      await admin.query('commit');
+    } catch (error) {
+      // Transactional DDL restores trigger state even if the delete aborted the transaction.
+      await admin.query('rollback');
+      throw error;
+    }
+  }
+
   async function setRolePassword(client, role, password) {
     await client.query(`alter role ${client.escapeIdentifier(role)} password ${client.escapeLiteral(password)}`);
   }
@@ -521,6 +541,7 @@ if (!ADMIN_URL) {
         const remaining = await systemPool.query('select id from activity_logs where id = any($1::uuid[])', [ids]);
         assert.equal(remaining.rowCount, 3);
       } finally {
+        await deletePaymentFixtures([workspaceId]);
         await admin.query('delete from organizations where id = $1', [workspaceId]);
       }
     });
@@ -5024,6 +5045,7 @@ if (!ADMIN_URL) {
     );
     assert.equal(queued.rows[0].n, 1, 'exactly one reminder reaches the shared A23 outbox');
 
+    await deletePaymentFixtures([workerOrg]);
     await admin.query('delete from organizations where id = $1', [workerOrg]);
   });
 
@@ -5426,6 +5448,7 @@ if (!ADMIN_URL) {
 
     await admin.query('delete from theme_publications where organization_id = $1', [createdOrg]);
     await admin.query('delete from theme_versions where organization_id = $1', [createdOrg]);
+    await deletePaymentFixtures([createdOrg]);
     await admin.query('delete from organizations where id = $1', [createdOrg]);
   });
 
@@ -7586,15 +7609,27 @@ const integrationService = require('../../modules/integrations/service');
       const foreignCard = await seedCard('foreign-payment-id', {}, foreignTenant.id);
       await admin.query("update orders set status = 'cancelled' where organization_id = $1 and id = $2",
         [foreignTenant.id, foreignCard.item.orderId]);
-      const foreignResult = await process(await foreignCard.enqueue(), {
+      const foreignBefore = await stateOf(foreignCard.item);
+      const foreignDuplicate = await foreignCard.enqueue();
+      await assert.rejects(process(foreignDuplicate, {
         verifiedOrganizationId: foreignTenant.id,
         retrieve: async () => verifyPayment(expired.token),
+      }), { code: 'PAYMENT_ID_ORDER_MISMATCH' });
+      const [foreignFailure] = await committedRows(
+        `select processing_status, last_error, next_retry_at is not null as retryable
+           from payment_callback_events where organization_id = $1 and id = $2`,
+        [foreignTenant.id, foreignDuplicate.id]
+      );
+      assert.deepEqual(foreignFailure, {
+        processing_status: 'failed', last_error: 'PAYMENT_ID_ORDER_MISMATCH', retryable: true,
       });
-      assert.notEqual(foreignResult.reconciliationCaseId, lateCase.id);
-      const [foreignCase] = await asTenant(runtimePool, foreignTenant.id, async (client) => (await client.query(
-        'select order_id, provider_payment_id from payment_reconciliation_cases where id = $1', [foreignResult.reconciliationCaseId]
-      )).rows);
-      assert.deepEqual(foreignCase, { order_id: foreignCard.item.orderId, provider_payment_id: lateCase.provider_payment_id });
+      for (const table of ['payment_reconciliation_cases', 'payment_evidence']) {
+        assert.deepEqual(await committedRows(
+          `select id from ${table} where organization_id = $1 and order_id = $2`,
+          [foreignTenant.id, foreignCard.item.orderId]
+        ), [], table);
+      }
+      assert.deepEqual(await stateOf(foreignCard.item), foreignBefore);
       assert.deepEqual(await cases(), resolvedCases);
       for (const [index, item] of items.entries()) assert.deepEqual(await stateOf(item), beforeResolution[index]);
       await assertPoolsDrained();
@@ -8063,6 +8098,7 @@ const integrationService = require('../../modules/integrations/service');
       }
       if (server) await new Promise((resolve) => server.close(resolve));
       await dropSlowTrigger();
+      await deletePaymentFixtures(tenantIds);
       if (insertedHeartbeat) {
         await admin.query("delete from inventory_worker_health where job_name = 'inventory_reservation_expiry'");
       }
@@ -8071,10 +8107,6 @@ const integrationService = require('../../modules/integrations/service');
         if (platformAdmin) {
           await admin.query('delete from audit_logs where admin_id = $1', [platformAdmin.id]);
           await admin.query('delete from admins where id = $1', [platformAdmin.id]);
-        }
-        // Remove synthetic evidence before disposing of the payment race fixtures.
-        if (paymentRace) {
-          await admin.query('delete from payment_reconciliation_cases where organization_id = any($1::uuid[])', [tenantIds]);
         }
         // Append-only events restrict deletion of their orders. Retain both in
         // suspended throwaway tenants and remove the mutable fixture rows.
@@ -8329,7 +8361,10 @@ const integrationService = require('../../modules/integrations/service');
         });
         await admin.query('delete from activity_logs where user_agent like $1', [userAgent('%')]);
         await admin.query('delete from api_rate_limits where key like $1', [`%:${prefix}/auth:%`]);
-        await admin.query('delete from organizations where slug = any($1::text[])', [[organizationSlug, neighborSlug]]);
+        const slugs = [organizationSlug, neighborSlug];
+        const { rows: tenants } = await admin.query('select id from organizations where slug = any($1::text[])', [slugs]);
+        await deletePaymentFixtures(tenants.map(({ id }) => id));
+        await admin.query('delete from organizations where slug = any($1::text[])', [slugs]);
         await admin.query('delete from app_users where email = any($1::text[])', [[email, inviteEmail]]);
       } finally {
         for (const [key, previous] of Object.entries(previousEnv)) {
@@ -8502,7 +8537,8 @@ const integrationService = require('../../modules/integrations/service');
     scenario('04 late bank transfer leaves cancelled order and released stock untouched', async () => {
       const item = await seed();
       await due(item);
-      await expire(item);
+      const report = await expire(item, { graceMinutes: 60, methods: ['iban'] });
+      assert.ok(report.expired.includes(item.id));
       const before = await snapshot(item);
       assert.equal(before.orders.status, 'cancelled');
       assert.equal((await submit(item)).evaluation.status, 'late');
@@ -8831,7 +8867,7 @@ const integrationService = require('../../modules/integrations/service');
         organizationId: item.org, orderId: item.orderId, status: 'paid',
       }));
       assert.equal(result.order.status, 'paid');
-      const events = await rows('select metadata from order_events where organization_id = $1 and order_id = $2',
+      const events = await rows('select internal_metadata as metadata from order_events where organization_id = $1 and order_id = $2',
         [item.org, item.orderId]);
       assert.ok(events.some(({ metadata }) =>
         metadata?.paymentVerification === 'operator_declared_without_evidence'));
@@ -9078,7 +9114,8 @@ const integrationService = require('../../modules/integrations/service');
       assert.doesNotMatch(statements[2], /\b(?:insert into|update orders|delete from)\b/i);
       assert.equal(await digest(), before);
     } finally {
-      for (const table of ['payment_reconciliation_cases', 'payment_callback_events', 'customers']) {
+      await deletePaymentFixtures([a, b]);
+      for (const table of ['payment_callback_events', 'customers']) {
         await admin.query('delete from ' + table + ' where organization_id = any($1::uuid[])', [[a, b]]);
       }
       // Append-only order events retain their orders until the disposable database is removed.
@@ -9095,21 +9132,34 @@ const integrationService = require('../../modules/integrations/service');
     }
   });
 
-  test('phase16 empty case table can roll back and reapply migration 075', async () => {
-    const target = '075_payment_reconciliation_cases.sql';
-    const applied = () => admin.query('select checksum from schema_migrations where filename = $1', [target]);
-    const original = await applied();
-    assert.equal(original.rowCount, 1);
-    await runRollback({ pool: migratorPool, target, logger: { log() {}, warn() {} } });
-    assert.equal((await applied()).rowCount, 0);
+  const paymentRollbackTargets = ['076_payment_evidence.sql', '075_payment_reconciliation_cases.sql'];
+  const appliedPaymentMigrations = async () => (await admin.query(
+    'select filename, checksum from schema_migrations where filename = any($1::text[]) order by filename',
+    [paymentRollbackTargets]
+  )).rows;
+
+  async function rollbackPaymentMigrations() {
+    const original = await appliedPaymentMigrations();
+    assert.equal(original.length, paymentRollbackTargets.length);
+    // Rollback tests use the disposable integration database and require empty tables.
+    await deletePaymentFixtures(null);
+    for (const target of paymentRollbackTargets) {
+      await runRollback({ pool: migratorPool, target, logger: { log() {}, warn() {} } });
+    }
+    assert.deepEqual(await appliedPaymentMigrations(), []);
+    return original;
+  }
+
+  test('phase16 empty case table can roll back and reapply migrations 075 and 076', async () => {
+    const original = await rollbackPaymentMigrations();
     assert.equal((await admin.query("select to_regclass('payment_reconciliation_cases') as name")).rows[0].name, null);
     assert.equal((await admin.query("select 1 from pg_constraint where conname = 'payment_callback_events_org_id_key'")).rowCount, 0);
     await runMigrations({ pool: migratorPool, logger: { log() {}, warn() {} } });
-    assert.deepEqual((await applied()).rows, original.rows);
+    assert.deepEqual(await appliedPaymentMigrations(), original);
   });
 
   test('safe rollback retains tenant columns; cross-tenant corruption blocks reapply', async () => {
-    await runRollback({ pool: migratorPool, target: '075_payment_reconciliation_cases.sql', logger: { log() {}, warn() {} } });
+    const original = await rollbackPaymentMigrations();
     assert.equal((await admin.query("select to_regclass('payment_reconciliation_cases') as name")).rows[0].name, null);
     await runRollback({ pool: migratorPool, target: '074_activity_logs_rls.sql', logger: { log() {}, warn() {} } });
     // A34's five FORCE-RLS policies also depend on the helper introduced in 038.
@@ -9175,6 +9225,7 @@ const integrationService = require('../../modules/integrations/service');
     );
     await admin.query('update products set category_id = null where id = $1', [corrupt.rows[0].id]);
     await runMigrations({ pool: migratorPool, logger: { log() {}, warn() {} } });
+    assert.deepEqual(await appliedPaymentMigrations(), original);
     const { rows: [reconciliationTable] } = await admin.query(
       "select relrowsecurity, relforcerowsecurity from pg_class where oid = 'payment_reconciliation_cases'::regclass"
     );
