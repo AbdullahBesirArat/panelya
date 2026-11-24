@@ -9668,6 +9668,149 @@ const integrationService = require('../../modules/integrations/service');
       void legacyOrder;
     });
 
+    // ---- Phase 19 B/C: operator payment screen API contract (masking, totals, cases, roles, tenancy).
+    async function withOperatorApi(run) {
+      const express = require('express');
+      const { createAppAccessToken } = require('../../services/authTokens');
+      const app = express();
+      app.use(express.json());
+      app.use(appDb.requestContextMiddleware);
+      app.use('/api/payment-reconciliation', require('../../routes/paymentReconciliation'));
+      app.use((error, _req, res, _next) => res.status(error.status || 500).json({ error: error.message, code: error.code }));
+      const server = app.listen(0, '127.0.0.1');
+      await require('node:events').once(server, 'listening');
+      try {
+        const [user] = await rows(
+          "insert into app_users (email, name) values ($1,'UI operator') returning id, email, name",
+          [crypto.randomUUID() + '@example.test']
+        );
+        await run(async (role, org, method, route, body) => {
+          const [organization] = await rows('select id, slug from organizations where id = $1', [org]);
+          const token = createAppAccessToken({ user, membership: { role, organization } });
+          const response = await fetch('http://127.0.0.1:' + server.address().port + '/api/payment-reconciliation' + route, {
+            method, signal: AbortSignal.timeout(5000),
+            headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' },
+            body: body ? JSON.stringify(body) : undefined,
+          });
+          const text = await response.text();
+          return { status: response.status, text, json: text ? JSON.parse(text) : null };
+        });
+      } finally {
+        await new Promise((resolve) => server.close(resolve));
+      }
+    }
+
+    finalGate('operator evidence view masks references and reports totals, difference, approval blockers and cases', async () => {
+      const item = await seed('iban');
+      await submit(item, { amount: '60.00', reference: 'TR-SECRET-REF-1234', note: 'Operator partial note' });
+      await submit(item, { amount: '1.00', reference: 'CLAIM-9999-ABCD', level: 'customer_claim' });
+      await withOperatorApi(async (api) => {
+        const res = await api('owner', item.org, 'GET', '/orders/' + item.orderId + '/evidence');
+        assert.equal(res.status, 200);
+        assert.ok(!res.text.includes('TR-SECRET-REF-1234') && !res.text.includes('TRSECRETREF1234'), 'full reference must not be returned');
+        assert.ok(!res.text.includes('provider_payment_id'));
+        const [partial] = res.json.evidence.filter(({ evidence_level: level }) => level === 'operator_recorded');
+        assert.equal(partial.referenceLast4, '1234');
+        assert.equal(partial.verification, 'operator_asserted_unverified');
+        assert.equal(res.json.order.paymentMethod, 'iban');
+        assert.deepEqual(res.json.totals, {
+          currency: 'TRY', orderTotal: '100.00', counted: '60.00', claimed: '1.00', difference: '40.00',
+        });
+        assert.deepEqual(res.json.paymentApproval, { allowed: false, blocker: 'PAYMENT_EVIDENCE_AMOUNT_MISMATCH' });
+        assert.ok(res.json.cases.length >= 1);
+        const [open] = res.json.cases;
+        assert.equal(open.case_type, 'bank_transfer_underpaid');
+        assert.equal(open.priority, 'medium');
+        assert.ok(!('provider_payment_id' in open));
+        // The partial transfer opened a case, so expiry would skip the still-pending order: stock is held.
+        assert.equal(res.json.stockHeld, true);
+      });
+    });
+
+    finalGate('operator evidence view: approval allowed for exact justified evidence, over-payment and held stock are visible', async () => {
+      const exact = await seed('iban');
+      await submit(exact);
+      const over = await seed('iban');
+      await submit(over, { amount: '100.01' });
+      const held = await seed('card');
+      await callback(held, await enqueue(held), { paidPrice: '99.99' });
+      await withOperatorApi(async (api) => {
+        const a = await api('admin', exact.org, 'GET', '/orders/' + exact.orderId + '/evidence');
+        assert.deepEqual(a.json.paymentApproval, { allowed: true, blocker: null });
+        assert.equal(a.json.totals.difference, '0.00');
+        const o = await api('admin', over.org, 'GET', '/orders/' + over.orderId + '/evidence');
+        assert.equal(o.json.totals.difference, '-0.01');
+        assert.equal(o.json.cases[0].case_type, 'bank_transfer_overpaid');
+        assert.equal(o.json.cases[0].priority, 'high');
+        const c = await api('owner', held.org, 'GET', '/orders/' + held.orderId + '/evidence');
+        assert.equal(c.json.order.paymentMethod, 'card');
+        assert.deepEqual(c.json.paymentApproval, { allowed: false, blocker: 'CARD_PAYMENT_PROVIDER_CONFIRMATION_ONLY' });
+        assert.equal(c.json.stockHeld, true);
+        assert.equal(c.json.cases[0].case_type, 'provider_amount_mismatch');
+        assert.equal(c.json.cases[0].priority, 'high');
+      });
+    });
+
+    finalGate('operator payment API enforces roles and tenant on the backend', async () => {
+      const item = await seed('iban');
+      await withOperatorApi(async (api) => {
+        for (const role of ['member', 'viewer']) {
+          assert.equal((await api(role, item.org, 'GET', '/orders/' + item.orderId + '/evidence')).status, 403);
+          assert.equal((await api(role, item.org, 'POST', '/orders/' + item.orderId + '/bank-transfers', {
+            amount: '100.00', currency: 'TRY', reference: 'ROLE-' + role + '-REF', level: 'operator_recorded', note: 'role check',
+          })).status, 403);
+          assert.equal((await api(role, item.org, 'GET', '/')).status, 403);
+        }
+        assert.equal((await api('owner', orgB, 'GET', '/orders/' + item.orderId + '/evidence')).status, 404);
+        assert.equal((await api('owner', orgB, 'POST', '/orders/' + item.orderId + '/bank-transfers', {
+          amount: '100.00', currency: 'TRY', reference: 'FOREIGN-TENANT-REF', level: 'operator_recorded', note: 'tenant check',
+        })).status, 404);
+        assert.deepEqual(await evidence(item), []);
+      });
+    });
+
+    finalGate('case list exposes type, priority and held stock and supports an order filter', async () => {
+      const item = await seed('card');
+      await callback(item, await enqueue(item), { paidPrice: '99.99' });
+      const other = await seed('card');
+      await callback(other, await enqueue(other), { paidPrice: '98.00' });
+      await withOperatorApi(async (api) => {
+        const list = await api('owner', item.org, 'GET', '/?status=open&orderId=' + item.orderId);
+        assert.equal(list.status, 200);
+        assert.equal(list.json.cases.length, 1);
+        const [entry] = list.json.cases;
+        assert.deepEqual([entry.case_type, entry.priority, entry.stockHeld, String(entry.order_id)],
+          ['provider_amount_mismatch', 'high', true, String(item.orderId)]);
+        assert.equal((await api('owner', item.org, 'GET', '/?orderId=abc')).status, 400);
+      });
+      await admin.query("update payment_reconciliation_cases set detected_at = now() - interval '80 hours' where order_id = $1", [item.orderId]);
+      await withOperatorApi(async (api) => {
+        const [entry] = (await api('owner', item.org, 'GET', '/?orderId=' + item.orderId)).json.cases;
+        assert.equal(entry.priority, 'critical');
+      });
+    });
+
+    finalGate('case resolution keeps backend-enforced justification and refund evidence rules, and refunds stay operator-asserted', async () => {
+      const item = await seed('card');
+      await callback(item, await enqueue(item), { paidPrice: '99.99' });
+      const [open] = await cases(item);
+      await withOperatorApi(async (api) => {
+        const short = await api('owner', item.org, 'POST', '/' + open.id + '/resolve', { resolution: 'resolved_accepted', note: 'short' });
+        assert.equal(short.status, 400);
+        const noEvidence = await api('owner', item.org, 'POST', '/' + open.id + '/resolve', { resolution: 'resolved_refunded', note: 'Refund done in provider panel' });
+        assert.equal(noEvidence.status, 400);
+        assert.equal((await cases(item))[0].status, 'open');
+        const ok = await api('owner', item.org, 'POST', '/' + open.id + '/resolve', {
+          resolution: 'resolved_refunded', note: 'Refund done in provider panel',
+          externalReference: 'REFUND-REF-0042', evidenceType: 'provider_dashboard_reference',
+        });
+        assert.equal(ok.status, 200);
+        assert.equal(ok.json.case.refundVerification, 'operator_asserted_unverified');
+        // Resolving never touches the order, stock or payment state.
+        assert.equal((await snapshot(item)).orders.status, 'payment_pending');
+      });
+    });
+
     finalGate('payment identity claim table forces RLS and keys each provider payment globally', async () => {
       const [flags] = await rows(
         `select relrowsecurity, relforcerowsecurity from pg_class
@@ -9979,6 +10122,12 @@ const integrationService = require('../../modules/integrations/service');
     );
     assert.deepEqual(reconciliationTable, { relrowsecurity: true, relforcerowsecurity: true });
   });
+  // The payment fixtures above create hundreds of orders in the shared tenants and would exhaust the
+  // monthly order quota that the HTTP checkout test depends on. Age them out of the current month.
+  test('payment fixtures do not consume the monthly order quota of later checkout tests', async () => {
+    await admin.query("update orders set created_at = created_at - interval '70 days' where order_code like 'RES-p18-%'");
+  });
+
   test('checkout idempotency over HTTP: exact retries replay one order, changed requests conflict, tenants and routes stay separate', async () => {
     const express = require('express');
     const app = express();

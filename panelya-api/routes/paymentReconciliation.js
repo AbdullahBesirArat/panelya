@@ -3,7 +3,9 @@ const db = require('../db');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { auditLog } = require('../services/audit');
 const { resolveOrganization } = require('../services/tenant');
-const { presentEvidence, recordBankTransferEvidence } = require('../services/paymentEvidence');
+const {
+  amountInKurus, bankEvidenceTotals, formatKurus, ibanPaymentBlocker, presentEvidence, recordBankTransferEvidence,
+} = require('../services/paymentEvidence');
 
 const router = express.Router();
 const resolutions = ['resolved_refunded', 'resolved_accepted', 'dismissed'];
@@ -12,6 +14,33 @@ const columns = `id, organization_id, order_id, callback_event_id, evidence_id, 
   provider_payment_id, provider_paid_amount, currency, order_total, order_status_at_detection,
   status, resolution_note, resolved_by, resolved_by_admin_id, resolved_at, detected_at, created_at, updated_at,
   external_refund_reference, refund_evidence_type, refund_verification as "refundVerification"`;
+
+// Cases where a customer may have been charged, or money is unaccounted for, rank above bookkeeping gaps.
+const highPriorityCases = new Set([
+  'paid_on_cancelled_order', 'provider_amount_mismatch', 'provider_duplicate_payment',
+  'bank_transfer_overpaid', 'bank_transfer_late',
+]);
+const criticalAfterMs = 72 * 3600 * 1000;
+function casePriority(row) {
+  if (row.status !== 'open') return 'none';
+  if (Date.now() - new Date(row.detected_at).getTime() > criticalAfterMs) return 'critical';
+  return highPriorityCases.has(row.case_type) ? 'high' : 'medium';
+}
+// Provider payment ids and refund references stay out of the operator list view.
+const caseViewColumns = `id, order_id, case_type, status, detected_at, provider_paid_amount, currency, order_total,
+  order_status_at_detection, resolution_note, resolved_at, refund_evidence_type,
+  refund_verification as "refundVerification"`;
+async function heldStockOrderIds(client, organizationId, orderIds) {
+  if (!orderIds.length) return new Set();
+  const { rows } = await client.query(
+    `select o.id from orders o
+      where o.organization_id = $1 and o.id = any($2::bigint[]) and o.status = 'payment_pending'
+        and exists (select 1 from inventory_reservations r
+                     where r.organization_id = o.organization_id and r.order_id = o.id and r.status = 'active')`,
+    [organizationId, orderIds]
+  );
+  return new Set(rows.map(({ id }) => String(id)));
+}
 
 function httpError(status, message) {
   return Object.assign(new Error(message), { status });
@@ -56,31 +85,68 @@ router.get('/orders/:orderId/evidence', ...operatorRoute(async (req, client, org
   const { orderId } = req.params;
   if (!isCaseId(orderId)) throw httpError(400, 'Gecersiz siparis kimligi');
   const { rows: [order] } = await client.query(
-    'select id from orders where organization_id = $1 and id = $2', [organizationId, orderId]
+    `select id, total, currency, payment_method, payment_status, status, order_status
+       from orders where organization_id = $1 and id = $2`, [organizationId, orderId]
   );
   if (!order) throw httpError(404, 'Siparis bulunamadi');
   const { rows } = await client.query(
     'select * from payment_evidence where organization_id = $1 and order_id = $2 order by id desc',
     [organizationId, orderId]
   );
-  return { evidence: rows.map(presentEvidence) };
+  const totals = await bankEvidenceTotals(client, organizationId, orderId, order.currency);
+  const orderTotal = amountInKurus(order.total);
+  const counted = amountInKurus(totals.amount);
+  const claimed = rows
+    .filter(({ evidence_level: level, channel }) => channel === 'bank_transfer' && level === 'customer_claim')
+    .reduce((sum, { amount }) => sum + amountInKurus(amount), 0n);
+  const { rows: caseRows } = await client.query(
+    `select ${caseViewColumns} from payment_reconciliation_cases
+      where organization_id = $1 and order_id = $2 order by id desc limit 50`, [organizationId, orderId]
+  );
+  const cases = caseRows.map((row) => ({ ...row, priority: casePriority(row) }));
+  const held = await heldStockOrderIds(client, organizationId, [orderId]);
+  const offlineOpen = order.payment_method === 'iban' && ['pending', 'manual_pending'].includes(order.payment_status);
+  let blocker = null;
+  if (order.payment_method === 'card') blocker = 'CARD_PAYMENT_PROVIDER_CONFIRMATION_ONLY';
+  else if (!offlineOpen) blocker = 'PAYMENT_NOT_AWAITING_CONFIRMATION';
+  else blocker = ibanPaymentBlocker(totals, order);
+  return {
+    order: {
+      id: String(order.id), paymentMethod: order.payment_method, paymentStatus: order.payment_status,
+      status: order.status,
+    },
+    evidence: rows.map(presentEvidence),
+    totals: {
+      currency: order.currency, orderTotal: formatKurus(orderTotal), counted: formatKurus(counted ?? 0n),
+      claimed: formatKurus(claimed), difference: formatKurus(orderTotal - (counted ?? 0n)),
+    },
+    paymentApproval: { allowed: blocker === null, blocker },
+    cases,
+    stockHeld: cases.some(({ status }) => status === 'open') && held.has(String(order.id)),
+  };
 }));
 
 router.get('/', ...operatorRoute(async (req, client, organizationId) => {
-  const { status = 'open', before } = req.query;
+  const { status = 'open', before, orderId } = req.query;
   const limit = Number(req.query.limit ?? 25);
   if (!['open', ...resolutions].includes(status) || !Number.isInteger(limit) || limit < 1
-    || limit > 100 || (before !== undefined && !isCaseId(before))) {
+    || limit > 100 || (before !== undefined && !isCaseId(before))
+    || (orderId !== undefined && !isCaseId(orderId))) {
     throw httpError(400, 'Gecersiz liste parametresi');
   }
   const { rows } = await client.query(
-    `select ${columns} from payment_reconciliation_cases
+    `select ${caseViewColumns} from payment_reconciliation_cases
       where organization_id = $1 and status = $2 and ($3::bigint is null or id < $3)
+        and ($5::bigint is null or order_id = $5)
       order by id desc limit $4`,
-    [organizationId, status, before ?? null, limit + 1]
+    [organizationId, status, before ?? null, limit + 1, orderId ?? null]
   );
-  const cases = rows.slice(0, limit);
-  return { cases, nextCursor: rows.length > limit ? cases.at(-1).id : null };
+  const page = rows.slice(0, limit);
+  const held = await heldStockOrderIds(client, organizationId, [...new Set(page.map((row) => String(row.order_id)))]);
+  const cases = page.map((row) => ({
+    ...row, priority: casePriority(row), stockHeld: row.status === 'open' && held.has(String(row.order_id)),
+  }));
+  return { cases, nextCursor: rows.length > limit ? page.at(-1).id : null };
 }));
 
 router.post('/:id/resolve', ...operatorRoute(async (req, client, organizationId) => {

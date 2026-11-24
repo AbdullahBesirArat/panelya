@@ -2,7 +2,7 @@ const db = require('../db');
 const { transitionOrderInventory } = require('./inventoryReservations');
 const { transitionOrderPromotion } = require('./promotionEngine');
 const { sendOrderStatusEmail } = require('./email');
-const { amountInKurus, bankEvidenceTotals } = require('./paymentEvidence');
+const { bankEvidenceTotals, ibanPaymentBlocker } = require('./paymentEvidence');
 
 const ORDER_TRANSITIONS = Object.freeze({
   pending_payment: ['confirmed', 'paid', 'cancelled'],
@@ -182,17 +182,15 @@ async function transitionOrderOperation(client, {
     // There is no bank feed: the only basis for paid is counted operator evidence that matches
     // the order exactly and carries an explicit justification. It stays operator-asserted.
     const totals = await bankEvidenceTotals(client, organizationId, row.id, row.currency);
-    if (Number(totals.counted) === 0) {
-      throw operationError('Havale kaniti olmadan odeme onaylanamaz', 409, 'PAYMENT_EVIDENCE_REQUIRED');
-    }
-    if (Number(totals.currency_mismatch) > 0) {
-      throw operationError('Havale para birimi siparisle uyusmuyor', 409, 'PAYMENT_EVIDENCE_CURRENCY_MISMATCH');
-    }
-    if (amountInKurus(totals.amount) === null || amountInKurus(totals.amount) !== amountInKurus(row.total)) {
-      throw operationError('Havale tutari siparisle uyusmuyor', 409, 'PAYMENT_EVIDENCE_AMOUNT_MISMATCH');
-    }
-    if (!totals.justified) {
-      throw operationError('Odeme onayi icin operator gerekcesi zorunlu', 409, 'PAYMENT_EVIDENCE_JUSTIFICATION_REQUIRED');
+    const blocker = ibanPaymentBlocker(totals, row);
+    if (blocker) {
+      const messages = {
+        PAYMENT_EVIDENCE_REQUIRED: 'Havale kaniti olmadan odeme onaylanamaz',
+        PAYMENT_EVIDENCE_CURRENCY_MISMATCH: 'Havale para birimi siparisle uyusmuyor',
+        PAYMENT_EVIDENCE_AMOUNT_MISMATCH: 'Havale tutari siparisle uyusmuyor',
+        PAYMENT_EVIDENCE_JUSTIFICATION_REQUIRED: 'Odeme onayi icin operator gerekcesi zorunlu',
+      };
+      throw operationError(messages[blocker], 409, blocker);
     }
     ibanEvidence = { ids: totals.counted_ids.map(String), count: Number(totals.counted) };
   }

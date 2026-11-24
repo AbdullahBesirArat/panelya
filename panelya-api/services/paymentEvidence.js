@@ -17,15 +17,45 @@ function httpError(status, message) {
   return Object.assign(new Error(message), { status });
 }
 
+function formatKurus(kurus) {
+  const negative = kurus < 0n;
+  const abs = negative ? -kurus : kurus;
+  return `${negative ? '-' : ''}${abs / 100n}.${String(abs % 100n).padStart(2, '0')}`;
+}
+
+// Operators never need the full bank reference or provider payment id back: only its last four
+// characters (and length) identify a record. Full values stay in the database for audit.
+function maskedTail(value) {
+  const characters = [...String(value ?? '')];
+  return { last4: characters.length > 4 ? characters.slice(-4).join('') : null, length: characters.length || null };
+}
+
 function presentEvidence(row) {
   if (!row) return null;
+  const { reference, reference_key: _key, provider_payment_id: providerPaymentId, ...rest } = row;
   const verification = {
     customer_claim: 'customer_claim',
     operator_recorded: 'operator_asserted_unverified',
     operator_asserted_verified: 'operator_asserted_unverified',
     provider_verified: 'provider_verified',
   }[row.evidence_level];
-  return { ...row, verification };
+  return {
+    ...rest,
+    verification,
+    referenceLast4: maskedTail(reference).last4,
+    referenceLength: maskedTail(reference).length,
+    ...(providerPaymentId ? { providerPaymentIdLast4: maskedTail(providerPaymentId).last4 } : {}),
+  };
+}
+
+// The single decision both the transition gate and the operator screen use for IBAN payment approval.
+function ibanPaymentBlocker(totals, order) {
+  if (Number(totals.counted) === 0) return 'PAYMENT_EVIDENCE_REQUIRED';
+  if (Number(totals.currency_mismatch) > 0) return 'PAYMENT_EVIDENCE_CURRENCY_MISMATCH';
+  const counted = amountInKurus(totals.amount);
+  if (counted === null || counted !== amountInKurus(order.total)) return 'PAYMENT_EVIDENCE_AMOUNT_MISMATCH';
+  if (!totals.justified) return 'PAYMENT_EVIDENCE_JUSTIFICATION_REQUIRED';
+  return null;
 }
 
 async function bankEvidenceTotals(client, organizationId, orderId, currency = null) {
@@ -221,6 +251,6 @@ async function bindPaymentIdentity(client, { order, provider, paymentId }) {
 }
 
 module.exports = {
-  amountInKurus, bankEvidenceTotals, bindPaymentIdentity, decimalAmount, paymentIdentityMismatch,
+  amountInKurus, bankEvidenceTotals, formatKurus, ibanPaymentBlocker, maskedTail, bindPaymentIdentity, decimalAmount, paymentIdentityMismatch,
   presentEvidence, recordBankTransferEvidence, recordCardEvidence,
 };
