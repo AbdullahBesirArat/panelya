@@ -101,4 +101,3 @@ Yaş eşikleri kesin olarak aşıldığında alarm oluşur. Başarısız deneme 
 - **Migration 077 kilit süresi:** `lock_timeout = 10s`; eski instance kilit tutuyorsa migration güvenle hata verir ve yeniden denenir. Boş `provider_payment_id` taşıyan eski satırlar claim'e alınmaz.
 - **Çalışma alanı temizliği:** mutabakat vakası, ödeme kanıtı veya kimlik claim'i olan çalışma alanı temizlenmez/yeniden tohumlanmaz (ilgili tablolar salt eklemelidir); arşivleme kanıtı korur.
 - **Bilinen açık:** `PAYMENT_ID_ORDER_MISMATCH` ile başarısız olan callback olayı 15 dakikada bir sınırsız yeniden denenir; sonlandırma (park) durumu henüz yoktur.
-
