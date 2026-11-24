@@ -6850,7 +6850,7 @@ const integrationService = require('../../modules/integrations/service');
     }));
   }
 
-  async function exerciseExpiryHttp({ lifecycle = false, auditIsolation = false, atomicAudit = false } = {}) {
+  async function exerciseExpiryHttp({ lifecycle = false, auditIsolation = false, atomicAudit = false, paymentRace = false } = {}) {
     const express = require('express');
     const { attachAuthIfPresent } = require('../../middleware/auth');
     const { attachSession } = require('../../middleware/authSession');
@@ -6885,11 +6885,12 @@ const integrationService = require('../../modules/integrations/service');
           ...headers,
         },
         body: JSON.stringify(body),
-        signal: lifecycle || auditIsolation || atomicAudit ? AbortSignal.timeout(25000) : undefined,
+        signal: lifecycle || auditIsolation || atomicAudit || paymentRace ? AbortSignal.timeout(25000) : undefined,
       });
       return { status: response.status, body: await response.json() };
     }
     function assertReport(result, ids, skipped = {}, methods = ['iban', 'card']) {
+      assert.equal(result.status, 200, JSON.stringify(result.body));
       const { byMethod, ...body } = result.body;
       assert.equal(Object.values(byMethod).reduce((sum, entry) => sum + entry.expired, 0), ids.length);
       const skippedTotals = {};
@@ -6915,6 +6916,7 @@ const integrationService = require('../../modules/integrations/service');
     });
     const stateOf = async ({ org, id, orderId, variantId }) => (await admin.query(
       `select r.status as reservation_status, o.status as order_status, o.payment_status, v.reserved, v.on_hand,
+              p.stock as product_stock, v.stock as variant_stock,
               md5(to_jsonb(r)::text) as reservation_hash, md5(to_jsonb(o)::text) as order_hash,
               md5(to_jsonb(v)::text) as variant_hash,
               (select md5(coalesce(jsonb_agg(to_jsonb(m) order by m.id)::text, ''))
@@ -6929,6 +6931,7 @@ const integrationService = require('../../modules/integrations/service');
          from inventory_reservations r
          join orders o on o.organization_id = r.organization_id and o.id = r.order_id
          join product_variants v on v.organization_id = r.organization_id and v.id = $4
+         join products p on p.organization_id = v.organization_id and p.id = v.product_id
         where r.organization_id = $1 and r.id = $2 and o.id = $3`,
       [org, id, orderId, variantId]
     )).rows[0];
@@ -6979,71 +6982,294 @@ const integrationService = require('../../modules/integrations/service');
     }
     async function checkAtomicAudit() {
       const { expirePendingOrders } = require('../../services/pendingOrders');
+      async function addCoupon(item) {
+        const { rows: [coupon] } = await admin.query(
+          `insert into coupons (organization_id, code, name, discount_type, value)
+           values ($1,$2,'Atomic expiry','fixed',10) returning id`, [item.org, `ATOMIC-${stamp}`]
+        );
+        await admin.query(
+          `insert into coupon_redemptions (organization_id, coupon_id, order_id, customer_id, discount_amount)
+           values ($1,$2,$3,$4,10)`, [item.org, coupon.id, item.orderId, customerIds.get(item.org)]
+        );
+        return async () => (await admin.query(
+          `select to_jsonb(c) as coupon,
+                  count(r.id) filter (where r.status in ('reserved','redeemed'))::int as total_usage,
+                  count(r.id) filter (where r.status in ('reserved','redeemed') and r.customer_id = $3)::int as customer_usage
+             from coupons c left join coupon_redemptions r
+               on r.organization_id = c.organization_id and r.coupon_id = c.id
+            where c.organization_id = $1 and c.id = $2 group by c.id`,
+          [item.org, coupon.id, customerIds.get(item.org)]
+        )).rows[0];
+      }
       const foreign = await seed(foreignTenant.id, 'atomic-foreign');
+      const foreignCoupon = await addCoupon(foreign);
       const foreignBefore = await stateOf(foreign);
+      const foreignCouponBefore = await foreignCoupon();
+      insertedHeartbeat = (await admin.query(
+        `insert into inventory_worker_health (job_name, last_started_at, last_succeeded_at, processed_count)
+         values ('inventory_reservation_expiry', now(), now(), 7) on conflict (job_name) do nothing`
+      )).rowCount === 1;
       const healthBefore = await heartbeat();
+      assert.equal(healthBefore.length, 1);
       platformAdmin = (await admin.query(
         "insert into admins (username, password_hash, role) values ($1,'unused','super_admin') returning id, username, role",
         [`atomic-${stamp}`]
       )).rows[0];
       const operator = { token: createAdminAccessToken(platformAdmin), body: { organizationSlug: tenant.slug } };
       const activityRows = async () => (await admin.query(
-        "select organization_id, metadata->'newValue' as value from activity_logs where organization_id = any($1::uuid[]) and action = 'EXPIRE_PENDING'",
+        "select organization_id, metadata->'newValue' as value, xmin::text as xid from activity_logs where organization_id = any($1::uuid[]) and action = 'EXPIRE_PENDING'",
         [tenantIds]
       )).rows;
       const adminRows = async () => (await admin.query(
-        "select new_value as value from audit_logs where admin_id = $1 and action = 'EXPIRE_PENDING'", [platformAdmin.id]
+        "select new_value as value, xmin::text as xid from audit_logs where admin_id = $1 and action = 'EXPIRE_PENDING'", [platformAdmin.id]
       )).rows;
-      const item = await seed(tenant.id, 'atomic-owner');
-      const before = await stateOf(item);
-      assertHeld(before);
-      assert.equal(before.order_status, 'payment_pending');
+      async function seedBatch(tag) {
+        const items = [];
+        for (const [index, paymentMethod] of ['iban', 'card', 'card'].entries()) {
+          const item = await seed(tenant.id, `${tag}-${index}`, { paymentMethod });
+          await admin.query(
+            "update inventory_reservations set expires_at = now() - $2::int * interval '1 hour' where id = $1",
+            [item.id, 4 - index]
+          );
+          items.push(item);
+        }
+        return items;
+      }
+      const items = await seedBatch('atomic-owner');
+      const coupon = await addCoupon(items[0]);
+      const couponBefore = await coupon();
+      assert.deepEqual([couponBefore.total_usage, couponBefore.customer_usage], [1, 1]);
+      async function snapshot(batch) {
+        const states = [];
+        for (const item of batch) states.push(await stateOf(item));
+        return states;
+      }
+      const before = await snapshot(items);
+      for (const state of before) {
+        assertHeld(state);
+        assert.equal(state.order_status, 'payment_pending');
+      }
       for (const [token, status] of [[null, 401], [appToken('viewer'), 403]]) {
         assert.equal((await post({ token })).status, status);
-        assert.deepEqual(await stateOf(item), before);
+        assert.deepEqual(await snapshot(items), before);
         assert.deepEqual(await activityRows(), []);
       }
-      async function rejectAudit(table, predicate, options, fixture, initial, rows) {
-        await admin.query(`alter table ${table} add constraint test_expiry_audit_failure check (${predicate})`);
-        try {
-          const response = await post(options);
-          assert.equal(response.status, 500);
-          assert.match(response.body.error, /test_expiry_audit_failure/);
-          assert.deepEqual(await stateOf(fixture), initial);
-          assert.deepEqual(await rows(), []);
-        } finally {
-          await admin.query(`alter table ${table} drop constraint test_expiry_audit_failure`);
-        }
+      // The app audit INSERT uses a savepoint and therefore has a subtransaction xmin.
+      // Record its top-level PostgreSQL transaction ID from inside the actual INSERT.
+      await admin.query(`
+        create table test_expiry_activity_xid (xid text not null);
+        create function test_capture_expiry_activity_xid() returns trigger
+          language plpgsql security definer set search_path = pg_catalog as $$
+        begin
+          insert into public.test_expiry_activity_xid values (pg_current_xact_id()::xid::text);
+          return new;
+        end;
+        $$;
+        create trigger test_capture_expiry_activity_xid after insert on activity_logs for each row
+          when (new.organization_id = ${admin.escapeLiteral(tenant.id)}::uuid and new.action = 'EXPIRE_PENDING')
+          execute function test_capture_expiry_activity_xid();
+      `);
+      try {
+        await exerciseAtomicBatch();
+      } finally {
+        await admin.query(`
+          drop trigger test_capture_expiry_activity_xid on activity_logs;
+          drop function test_capture_expiry_activity_xid();
+          drop table test_expiry_activity_xid;
+        `);
       }
-      await rejectAudit('activity_logs',
-        `action <> 'EXPIRE_PENDING' or organization_id <> ${admin.escapeLiteral(tenant.id)}`,
-        {}, item, before, activityRows);
-      await assert.rejects(expirePendingOrders({
-        organizationId: tenant.id, graceMinutes: 60, cardGrace: 30,
-        beforeCommit: async (client, report) => {
-          assert.deepEqual(report.expired, [item.id]);
-          await appDb.setTenantContext(client, tenant.id);
-          await auditLog({ auth: { actorType: 'app', userId: user.id, organizationId: tenant.id }, get() {} }, {
-            action: 'EXPIRE_PENDING', resourceType: 'order', organizationId: foreignTenant.id,
-            store: client, throwOnError: true,
+
+      async function exerciseAtomicBatch() {
+        const activityXids = () => committedRows('select xid from test_expiry_activity_xid');
+        async function rejectAudit(table, predicate, options, batch, initial, expectedActivity = []) {
+          await admin.query(`alter table ${table} add constraint test_expiry_audit_failure check (${predicate})`);
+          try {
+            const response = await post(options);
+            assert.equal(response.status, 500);
+            assert.match(response.body.error, /test_expiry_audit_failure/);
+            assert.deepEqual(await snapshot(batch), initial);
+            assert.deepEqual(await activityRows(), expectedActivity);
+            assert.deepEqual(await adminRows(), []);
+            assert.deepEqual(await heartbeat(), healthBefore);
+          } finally {
+            await admin.query(`alter table ${table} drop constraint test_expiry_audit_failure`);
+          }
+        }
+        async function assertDisabledMethods() {
+          process.env.INVENTORY_EXPIRY_METHODS = '';
+          try {
+            const disabled = await post();
+            assertReport(disabled, [], { method_disabled: 3 }, []);
+            const rows = await activityRows();
+            assert.deepEqual(rows.map(({ organization_id, value }) => ({ organization_id, value })), [{
+              organization_id: tenant.id,
+              value: { ...auditValue(0, { method_disabled: 3 }), methods: [], byMethod: disabled.body.byMethod },
+            }]);
+            assert.deepEqual(await snapshot(items), before);
+            assert.deepEqual(await coupon(), couponBefore);
+            assert.deepEqual(await adminRows(), []);
+            assert.deepEqual(await heartbeat(), healthBefore);
+            await admin.query("delete from activity_logs where organization_id = $1 and action = 'EXPIRE_PENDING'", [tenant.id]);
+            await admin.query('delete from test_expiry_activity_xid');
+          } finally {
+            process.env.INVENTORY_EXPIRY_METHODS = 'iban,card';
+          }
+        }
+        await assertDisabledMethods();
+        await rejectAudit('activity_logs',
+          `action <> 'EXPIRE_PENDING' or organization_id <> ${admin.escapeLiteral(tenant.id)}
+            or metadata->'newValue'->>'expiredCount' is distinct from '3'`,
+          {}, items, before);
+        assert.deepEqual(await coupon(), couponBefore);
+        await assert.rejects(expirePendingOrders({
+          organizationId: tenant.id, graceMinutes: 60, cardGrace: 30,
+          beforeCommit: async (client, report) => {
+            assert.deepEqual(report.expired, items.map(({ id }) => id));
+            await appDb.setTenantContext(client, tenant.id);
+            await auditLog({ auth: { actorType: 'app', userId: user.id, organizationId: tenant.id }, get() {} }, {
+              action: 'EXPIRE_PENDING', resourceType: 'order', organizationId: foreignTenant.id,
+              store: client, throwOnError: true,
+            });
+          },
+        }), /organization mismatch/);
+        assert.deepEqual(await snapshot(items), before);
+        assert.deepEqual(await coupon(), couponBefore);
+        assert.deepEqual(await activityRows(), []);
+        assert.deepEqual(await activityXids(), []);
+        assert.deepEqual(await adminRows(), []);
+        assert.deepEqual(await stateOf(foreign), foreignBefore);
+        assert.deepEqual(await foreignCoupon(), foreignCouponBefore);
+
+        async function assertBatchCommit(batch, options, readAudit, organizationColumn, couponItem = null) {
+          const response = await post(options);
+          assertReport(response, batch.map(({ id }) => id));
+          for (const item of batch) {
+            const state = await assertReleased(item, item === couponItem ? ['released'] : []);
+            assert.equal(state.product_stock, 5);
+            assert.equal(state.variant_stock, 5);
+          }
+          const rows = await readAudit();
+          assert.equal(rows.length, 1);
+          if (organizationColumn) assert.equal(rows[0].organization_id, tenant.id);
+          assert.deepEqual(rows[0].value, {
+            ...auditValue(batch.length, {}),
+            byMethod: { iban: { due: 1, skipped: {}, expired: 1 }, card: { due: 2, skipped: {}, expired: 2 } },
           });
-        },
-      }), /organization mismatch/);
-      assert.deepEqual(await stateOf(item), before);
-      assert.deepEqual(await activityRows(), []);
+          const xids = organizationColumn ? await activityXids() : [{ xid: rows[0].xid }];
+          assert.equal(xids.length, 1);
+          assert.deepEqual(await committedRows(
+            'select xmin::text as xid from orders where organization_id = $1 and id = any($2::bigint[])',
+            [tenant.id, batch.map(({ orderId }) => orderId)]
+          ), batch.map(() => xids[0]));
+          return rows;
+        }
+        const ownerAudit = await assertBatchCommit(items, {}, activityRows, true, items[0]);
+        assert.deepEqual(await coupon(), { ...couponBefore, total_usage: 0, customer_usage: 0 });
 
-      assertReport(await post(), [item.id]);
-      await assertReleased(item);
-      assert.deepEqual(await activityRows(), [{ organization_id: tenant.id, value: auditValue(1, {}) }]);
+        const operatorItems = await seedBatch('atomic-operator');
+        await rejectAudit('audit_logs', `action <> 'EXPIRE_PENDING' or admin_id <> ${Number(platformAdmin.id)}
+          or new_value->>'expiredCount' is distinct from '3'`,
+          operator, operatorItems, await snapshot(operatorItems), ownerAudit);
+        await assertBatchCommit(operatorItems, operator, adminRows, false);
+        assert.deepEqual(await activityRows(), ownerAudit);
+        assert.deepEqual(await stateOf(foreign), foreignBefore);
+        assert.deepEqual(await foreignCoupon(), foreignCouponBefore);
+        assert.deepEqual(await heartbeat(), healthBefore);
+        await assertPoolsDrained();
+      }
+    }
+    async function checkPaymentRace() {
+      const { enqueuePaymentCallbackEvent, processPaymentCallbackEvent } = require('../../services/paymentCallbackEvents');
+      const request = { get() { return ''; } };
+      const scope = { verifiedOrganizationId: tenant.id };
+      const auditRows = () => committedRows(
+        `select metadata->'newValue' as value from activity_logs
+          where organization_id = $1 and action = 'EXPIRE_PENDING'
+          order by (metadata->'newValue'->>'expiredCount')::int`, [tenant.id]
+      );
+      async function seedCard(tag) {
+        const item = await seed(tenant.id, tag);
+        const token = `${stamp}-${tag}`;
+        const [{ order_code: orderCode }] = await committedRows(
+          'update orders set payment_token = $3 where organization_id = $1 and id = $2 returning order_code',
+          [tenant.id, item.orderId, token]
+        );
+        await admin.query("update inventory_reservations set expires_at = now() - interval '2 hours' where id = $1", [item.id]);
+        const enqueue = () => enqueuePaymentCallbackEvent(request, { provider: 'iyzico', token, orderCode }, admin, scope);
+        return { item, enqueue };
+      }
+      function process(event, audit = async () => {}) {
+        return processPaymentCallbackEvent(request, event.id, {
+          ...scope,
+          retrieve: async () => ({ status: 'success', paymentStatus: 'SUCCESS', paymentId: `paid-${event.id}` }),
+          audit,
+          sendEmail: async () => {},
+          buildSuccessUrl: () => '/success',
+          buildFailureUrl: () => '/failure',
+        });
+      }
+      const paid = await seedCard('callback-wins');
+      const before = await stateOf(paid.item);
+      assertHeld(before);
+      const event = await paid.enqueue();
+      const locked = Promise.withResolvers();
+      const release = Promise.withResolvers();
+      // The service reaches its audit hook with its real order and stock writes still uncommitted.
+      const callback = process(event, async () => {
+        locked.resolve();
+        await release.promise;
+      });
+      let during;
+      try {
+        await Promise.race([locked.promise, callback.then(() => assert.fail('callback completed before the barrier'))]);
+        await assert.rejects(admin.query(
+          'select id from orders where organization_id = $1 and id = $2 for update nowait',
+          [tenant.id, paid.item.orderId]
+        ), { code: '55P03' });
+        assert.equal((await stateOf(paid.item)).order_status, 'payment_pending');
+        during = await post();
+        assertReport(during, [], { callback_pending: 1 });
+        assert.deepEqual(await stateOf(paid.item), before);
+        assert.deepEqual(await auditRows(), [{ value: {
+          ...auditValue(0, { callback_pending: 1 }), byMethod: during.body.byMethod,
+        } }]);
+      } finally {
+        release.resolve();
+        await callback;
+      }
+      assert.equal((await callback).ok, true);
+      const consumed = await stateOf(paid.item);
+      assert.equal(consumed.order_status, 'paid');
+      assert.equal(consumed.reservation_status, 'consumed');
+      assert.equal(consumed.on_hand, 3);
+      assert.equal(consumed.reserved, 0);
+      assert.equal(consumed.product_stock, 3);
+      assert.equal(consumed.variant_stock, 3);
+      assert.deepEqual(consumed.releases, []);
+      assert.deepEqual(await committedRows(
+        `select on_hand_delta, reserved_delta from inventory_movements
+          where organization_id = $1 and variant_id = $2 and on_hand_delta < 0`, [tenant.id, paid.item.variantId]
+      ), [{ on_hand_delta: -2, reserved_delta: -2 }]);
+      assert.equal((await process(event)).idempotentReplay, true);
+      assert.deepEqual(await stateOf(paid.item), consumed);
 
-      const operatorItem = await seed(tenant.id, 'atomic-operator');
-      await rejectAudit('audit_logs', `action <> 'EXPIRE_PENDING' or admin_id <> ${Number(platformAdmin.id)}`,
-        operator, operatorItem, await stateOf(operatorItem), adminRows);
-      assertReport(await post(operator), [operatorItem.id]);
-      await assertReleased(operatorItem);
-      assert.deepEqual(await adminRows(), [{ value: auditValue(1, {}) }]);
-      assert.deepEqual(await stateOf(foreign), foreignBefore);
-      assert.deepEqual(await heartbeat(), healthBefore);
+      const expired = await seedCard('expiry-wins');
+      const expiry = await post();
+      assertReport(expiry, [expired.item.id]);
+      const released = await assertReleased(expired.item);
+      const late = await process(await expired.enqueue());
+      assert.equal(late.ok, false);
+      assert.equal(late.result_status, 'cancelled');
+      assert.equal(late.order.status, 'cancelled');
+      assert.equal(late.order.payment_id, `paid-${late.id}`);
+      assert.match(late.order.payment_error, /Final durum korunuyor: cancelled/);
+      const afterLateCallback = await stateOf(expired.item);
+      assert.deepEqual(afterLateCallback, { ...released, order_hash: afterLateCallback.order_hash });
+      assert.deepEqual(await stateOf(paid.item), consumed);
+      assert.deepEqual(await auditRows(), [
+        { value: { ...auditValue(0, { callback_pending: 1 }), byMethod: during.body.byMethod } },
+        { value: auditValue(1, {}) },
+      ]);
       await assertPoolsDrained();
     }
     async function assertPoolsDrained() {
@@ -7260,6 +7486,10 @@ const integrationService = require('../../modules/integrations/service');
       }
       if (atomicAudit) {
         await checkAtomicAudit();
+        return;
+      }
+      if (paymentRace) {
+        await checkPaymentRace();
         return;
       }
       const heartbeatInsert = await admin.query(
@@ -7549,6 +7779,15 @@ const integrationService = require('../../modules/integrations/service');
       try {
         await verifyActivityLogsRls(enabled);
         await exerciseExpiryHttp({ atomicAudit: true });
+      } finally {
+        if (!enabled) await admin.query(activityLogsMigrationSql('up'));
+      }
+    });
+    test(`expire-pending versus payment callback with activity_logs RLS ${enabled ? 'enabled' : 'disabled'}`, async () => {
+      if (!enabled) await admin.query(activityLogsMigrationSql('down'));
+      try {
+        await verifyActivityLogsRls(enabled);
+        await exerciseExpiryHttp({ paymentRace: true });
       } finally {
         if (!enabled) await admin.query(activityLogsMigrationSql('up'));
       }
