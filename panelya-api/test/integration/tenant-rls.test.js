@@ -50,6 +50,7 @@ const {
   createOrderTag,
   packingListSnapshot,
   replaceOrderTags,
+  transitionLegacyOrderStatus,
   transitionOrderOperation,
 } = require('../../services/orderOperations');
 const {
@@ -8342,6 +8343,583 @@ const integrationService = require('../../modules/integrations/service');
       }
     }
   });
+
+
+  // Phase 18 payment evidence contract. All provider responses below are local fixtures.
+  function checkPaymentEvidence() {
+    const scenario = (name, run) => test('phase18 ' + name, { timeout: 30000 }, run);
+    const req = { get() { return ''; } };
+    const { enqueuePaymentCallbackEvent, processPaymentCallbackEvent } = require('../../services/paymentCallbackEvents');
+    const { collectPaymentReconciliationReport } = require('../../services/paymentReconciliationMonitor');
+    const { expireInventoryReservationsWithReport } = require('../../services/inventoryReservations');
+    const rows = async (sql, params) => (await admin.query(sql, params)).rows;
+
+    async function seed(method = 'iban', org = orgA) {
+      const key = crypto.randomUUID();
+      const item = await seedExpiryReservation(org, 'p18-' + key, { paymentMethod: method });
+      const token = method === 'card' ? 'token-' + key : null;
+      await admin.query(
+        'update orders set payment_provider = $2, payment_status = $3, payment_token = $4 where id = $1',
+        [item.orderId, method === 'card' ? 'iyzico' : 'manual', method === 'card' ? 'pending' : 'manual_pending', token]
+      );
+      const [coupon] = await rows(
+        "insert into coupons (organization_id, code, name, discount_type, value) values ($1,$2,'Evidence fixture','fixed',10) returning id",
+        [org, 'P18-' + key]
+      );
+      await admin.query(
+        'insert into coupon_redemptions (organization_id, coupon_id, order_id, discount_amount) values ($1,$2,$3,10)',
+        [org, coupon.id, item.orderId]
+      );
+      return { ...item, token, reference: 'bank-' + key };
+    }
+
+    const record = async (client, item, overrides = {}) => {
+      const { recordBankTransferEvidence } = require('../../services/paymentEvidence');
+      return recordBankTransferEvidence(client, {
+        organizationId: item.org, orderId: item.orderId, amount: '100.00', currency: 'TRY',
+        reference: item.reference, receivedAt: new Date(), level: 'operator_recorded',
+        note: 'Operator entered transfer details', actor: { type: 'system', source: 'test' }, req, ...overrides,
+      });
+    };
+    const submit = (item, overrides, org = item.org) =>
+      asTenant(runtimePool, org, (client) => record(client, item, { organizationId: org, ...overrides }));
+    const evidence = (item) => rows(
+      'select * from payment_evidence where organization_id = $1 and order_id = $2 order by id', [item.org, item.orderId]
+    );
+    const cases = (item) => rows(
+      'select * from payment_reconciliation_cases where organization_id = $1 and order_id = $2 order by id', [item.org, item.orderId]
+    );
+    const audits = (item) => rows(
+      "select * from activity_logs where organization_id = $1 and action = 'PAYMENT_EVIDENCE_RECORDED' order by id", [item.org]
+    );
+    const snapshot = async (item) => (await rows(
+      'select to_jsonb(o) as orders, to_jsonb(r) as reservation, to_jsonb(v) as variant, to_jsonb(p) as product,' +
+      ' (select jsonb_agg(m order by m.id) from inventory_movements m where m.variant_id = v.id) as movements,' +
+      ' (select jsonb_agg(c order by c.id) from coupon_redemptions c where c.order_id = o.id) as coupons' +
+      ' from orders o join inventory_reservations r on r.order_id = o.id and r.organization_id = o.organization_id' +
+      ' join product_variants v on v.id = $2 join products p on p.id = v.product_id where o.id = $1',
+      [item.orderId, item.variantId]
+    ))[0];
+    const monitor = (item) => collectPaymentReconciliationReport({
+      pool: systemPool, organizationId: item.org, thresholds: { warnHours: 1 },
+    });
+    const due = (item) => admin.query(
+      "update inventory_reservations set expires_at = now() - interval '3 hours' where id = $1", [item.id]
+    );
+    const expire = (item, overrides = {}) => expireInventoryReservationsWithReport({
+      pool: systemPool, organizationId: item.org, cardGrace: 30, methods: ['card', 'iban'],
+      updateHeartbeat: false, ...overrides,
+    });
+    const enqueue = (item, eventId) => enqueuePaymentCallbackEvent(
+      req, { provider: 'iyzico', token: item.token, eventId }, admin, { verifiedOrganizationId: item.org }
+    );
+    const callback = (item, event, payment = {}, deps = {}) => processPaymentCallbackEvent(req, event.id, {
+      verifiedOrganizationId: item.org, sendEmail: async () => {},
+      buildSuccessUrl: () => '/success', buildFailureUrl: () => '/failure',
+      retrieve: async () => ({
+        status: 'success', paymentStatus: 'SUCCESS', paymentId: 'card-' + item.token,
+        paidPrice: '100.00', currency: 'TRY', ...payment,
+      }),
+      ...deps,
+    });
+
+    async function withEvidenceApi(run) {
+      const express = require('express');
+      const { createAppAccessToken } = require('../../services/authTokens');
+      const app = express();
+      app.use(express.json());
+      app.use(appDb.requestContextMiddleware);
+      app.use('/api/payment-reconciliation', require('../../routes/paymentReconciliation'));
+      app.use((error, _req, res, _next) => res.status(error.status || 500).json({ error: error.message }));
+      const server = app.listen(0, '127.0.0.1');
+      await require('node:events').once(server, 'listening');
+      try {
+        const [user] = await rows(
+          "insert into app_users (email, name) values ($1,'Evidence operator') returning id, email, name",
+          [crypto.randomUUID() + '@example.test']
+        );
+        await run(async (item, org, body) => {
+          const [organization] = await rows('select id, slug from organizations where id = $1', [org]);
+          const token = createAppAccessToken({
+            user,
+            membership: { role: 'owner', organization },
+          });
+          const leaf = body ? 'bank-transfers' : 'evidence';
+          const response = await fetch(
+            'http://127.0.0.1:' + server.address().port + '/api/payment-reconciliation/orders/' + item.orderId + '/' + leaf,
+            {
+              method: body ? 'POST' : 'GET', signal: AbortSignal.timeout(5000),
+              headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' },
+              body: body ? JSON.stringify(body) : undefined,
+            }
+          );
+          return { status: response.status, text: await response.text() };
+        });
+      } finally {
+        await new Promise((resolve) => server.close(resolve));
+      }
+    }
+
+    // No bank feed exists. An unpaid IBAN order has no observed transfer.
+    scenario('01 unpaid IBAN remains pending without evidence or payment findings', async () => {
+      const item = await seed();
+      await admin.query("update orders set created_at = now() - interval '2 days' where id = $1", [item.orderId]);
+      const before = await snapshot(item);
+      assert.equal(before.orders.payment_status, 'manual_pending');
+      const report = await monitor(item);
+      // The evidence-age check needs evidence. An aged order alone cannot satisfy it.
+      assert.ok(report.checks.unverified_transfer_evidence_over_age);
+      assert.ok(!Object.values(report.checks).some(({ samples }) =>
+        samples.some(({ orderId }) => String(orderId) === String(item.orderId))));
+      assert.deepEqual(await evidence(item), []);
+      assert.deepEqual(await snapshot(item), before);
+    });
+
+    // No bank feed exists. The operator's partial amount is a manual declaration.
+    scenario('02 partial transfer opens a case and blocks manual paid transition', async () => {
+      const item = await seed();
+      const result = await submit(item, { amount: '99.99' });
+      assert.equal(result.evaluation.status, 'underpaid');
+      assert.deepEqual((await cases(item)).map((c) => c.case_type), ['bank_transfer_underpaid']);
+      const before = await snapshot(item);
+      await assert.rejects(asTenant(runtimePool, item.org, (client) => transitionLegacyOrderStatus(client, {
+        organizationId: item.org, orderId: item.orderId, status: 'paid',
+      })), { status: 409, code: 'PAYMENT_EVIDENCE_AMOUNT_MISMATCH' });
+      assert.deepEqual(await snapshot(item), before);
+      assert.ok((await monitor(item)).checks.partial_or_duplicate_payment_suspected.samples.some(
+        ({ orderId }) => orderId === String(item.orderId)
+      ));
+    });
+
+    // No bank feed exists. The operator's excess amount is a manual declaration.
+    scenario('03 overpayment by one kurus opens an overpaid case', async () => {
+      const item = await seed();
+      assert.equal((await submit(item, { amount: '100.01' })).evaluation.status, 'overpaid');
+      assert.deepEqual((await cases(item)).map((c) => c.case_type), ['bank_transfer_overpaid']);
+    });
+
+    // No bank feed exists. Late receipt is reported through operator evidence.
+    scenario('04 late bank transfer leaves cancelled order and released stock untouched', async () => {
+      const item = await seed();
+      await due(item);
+      await expire(item);
+      const before = await snapshot(item);
+      assert.equal(before.orders.status, 'cancelled');
+      assert.equal((await submit(item)).evaluation.status, 'late');
+      assert.deepEqual((await cases(item)).map((c) => c.case_type), ['bank_transfer_late']);
+      assert.deepEqual(await snapshot(item), before);
+    });
+
+    // No bank feed exists. Both transfer amounts are entered by an operator.
+    scenario('05 distinct transfers sum exactly while opening a multiple-transfer case', async () => {
+      const item = await seed();
+      await submit(item, { amount: '99.90' });
+      const result = await submit(item, { amount: '0.10', reference: item.reference + '-second' });
+      assert.ok(['matches', 'multiple'].includes(result.evaluation.status));
+      assert.equal((await evidence(item)).length, 2);
+      assert.equal((await cases(item)).filter((c) => c.case_type === 'bank_transfer_multiple').length, 1);
+      const paid = await asTenant(runtimePool, item.org, (client) => transitionLegacyOrderStatus(client, {
+        organizationId: item.org, orderId: item.orderId, status: 'paid',
+      }));
+      assert.equal(paid.order.payment_status, 'paid');
+    });
+
+    // No bank feed exists. Replay is keyed by the operator-entered reference.
+    scenario('06 normalized bank reference replays without a second row, case, or audit', async () => {
+      const item = await seed();
+      const before = await audits(item);
+      const initial = await submit(item, { amount: '99.99', reference: item.reference + ' a-_b' });
+      const replay = await submit(item, { amount: '99.99', reference: item.reference.toUpperCase() + 'AB' });
+      assert.equal(replay.replay, true);
+      assert.equal(replay.evidence.id, initial.evidence.id);
+      assert.equal(replay.evaluation.caseId, initial.evaluation.caseId);
+      assert.equal((await evidence(item)).length, 1);
+      assert.equal((await cases(item)).length, 1);
+      assert.equal((await audits(item)).length, before.length + 1);
+    });
+
+    // No bank feed exists. The reference collision concerns two operator declarations.
+    scenario('07 transfer reference on a different order yields one conflict and no evidence', async () => {
+      const original = await seed();
+      const other = await seed();
+      await submit(original);
+      const first = await submit(other, { reference: original.reference });
+      const again = await submit(other, { reference: original.reference });
+      assert.equal(first.evaluation.status, 'conflict');
+      assert.equal(again.evaluation.caseId, first.evaluation.caseId);
+      assert.deepEqual(await evidence(other), []);
+      assert.deepEqual((await cases(other)).map((c) => c.case_type), ['bank_transfer_conflict']);
+    });
+
+    // No bank feed exists. The protected rows contain operator evidence.
+    scenario('08 foreign bank evidence access returns 404 and RLS exposes zero rows', async () => {
+      const item = await seed();
+      const { evidence: recorded } = await submit(item);
+      await withEvidenceApi(async (call) => {
+        assert.equal((await call(item, item.org)).status, 200);
+        const foreign = await call(item, orgB);
+        assert.equal(foreign.status, 404);
+        assert.ok(!foreign.text.includes(item.reference));
+        assert.equal((await call(item, orgB, {
+          amount: '100.00', currency: 'TRY', reference: 'foreign-' + item.reference, level: 'operator_recorded',
+        })).status, 404);
+      });
+      await assert.rejects(submit(item, {}, orgB), { status: 404 });
+      const read = await asTenant(runtimePool, orgB, (client) =>
+        client.query('select id from payment_evidence where id = $1', [recorded.id]));
+      assert.equal(read.rowCount, 0);
+      assert.equal((await evidence(item)).length, 1);
+    });
+
+    scenario('09 missing card callback is suspected without auto-cancel or auto-pay', async () => {
+      const item = await seed('card');
+      await due(item);
+      await admin.query("update orders set created_at = now() - interval '3 hours' where id = $1", [item.orderId]);
+      const before = await snapshot(item);
+      const report = await monitor(item);
+      const finding = report.checks.callback_missing_suspected;
+      assert.ok(finding?.samples.some(({ orderId }) => orderId === String(item.orderId)));
+      assert.ok(!JSON.stringify(report).includes(item.token));
+      assert.deepEqual(await snapshot(item), before);
+      const pending = await enqueue(item);
+      assert.equal(pending.processing_status, 'pending');
+      assert.ok(!(await monitor(item)).checks.callback_missing_suspected.samples.some(
+        ({ orderId }) => orderId === String(item.orderId)
+      ));
+    });
+
+    scenario('10 identical card callback redelivery stores exactly one verified evidence row', async () => {
+      const item = await seed('card');
+      const event = await enqueue(item);
+      assert.equal((await callback(item, event)).ok, true);
+      assert.equal((await callback(item, await enqueue(item))).idempotentReplay, true);
+      const entries = await evidence(item);
+      assert.equal(entries.length, 1);
+      assert.equal(entries[0].evidence_level, 'provider_verified');
+      assert.equal(String(entries[0].callback_event_id), String(event.id));
+    });
+
+    scenario('11 expiry before card success leaves order cancelled and records late evidence', async () => {
+      const item = await seed('card');
+      await due(item);
+      await expire(item);
+      const before = await snapshot(item);
+      assert.equal(before.orders.status, 'cancelled');
+      const result = await callback(item, await enqueue(item));
+      assert.equal(result.order.status, 'cancelled');
+      assert.deepEqual((await cases(item)).map((c) => c.case_type), ['paid_on_cancelled_order']);
+      const { orders, ...inventory } = await snapshot(item);
+      assert.equal(orders.status, 'cancelled');
+      const { orders: previousOrder, ...previousInventory } = before;
+      assert.equal(orders.payment_status, previousOrder.payment_status);
+      assert.deepEqual(inventory, previousInventory);
+      assert.equal((await evidence(item)).length, 1);
+    });
+
+    scenario('12 card payment before expiry consumes one reservation and expiry skips it', async () => {
+      const item = await seed('card');
+      await due(item);
+      await callback(item, await enqueue(item));
+      const paid = await snapshot(item);
+      assert.equal(paid.orders.status, 'paid');
+      assert.equal(paid.reservation.status, 'consumed');
+      assert.equal(paid.variant.on_hand, 3);
+      assert.equal(paid.variant.reserved, 0);
+      assert.equal(paid.coupons[0].status, 'redeemed');
+      assert.ok(!(await expire(item)).expired.includes(item.id));
+      assert.deepEqual(await snapshot(item), paid);
+      assert.equal((await evidence(item)).length, 1);
+    });
+
+    scenario('13 concurrent card payment and expiry serialize on real PostgreSQL connections', async () => {
+      const item = await seed('card');
+      await due(item);
+      const event = await enqueue(item);
+      const callbackLocked = Promise.withResolvers();
+      const release = Promise.withResolvers();
+      const paying = callback(item, event, {}, { audit: async () => {
+        callbackLocked.resolve();
+        await release.promise;
+      } });
+      try {
+        await Promise.race([callbackLocked.promise, paying.then(() => assert.fail('payment missed lock barrier'))]);
+        await assert.rejects(admin.query('select id from orders where id = $1 for update nowait', [item.orderId]),
+          { code: '55P03' });
+        assert.ok(!(await expire(item)).expired.includes(item.id));
+      } finally {
+        release.resolve();
+        await paying;
+      }
+      const paid = await snapshot(item);
+      assert.equal(paid.orders.status, 'paid');
+      assert.equal(paid.reservation.status, 'consumed');
+      assert.equal(paid.variant.on_hand, 3);
+      assert.equal(paid.variant.reserved, 0);
+      assert.equal(paid.coupons[0].status, 'redeemed');
+      assert.deepEqual(await cases(item), []);
+      assert.equal((await evidence(item)).length, 1);
+    });
+
+    scenario('14 provider payment ID cannot pay a second order in either tenant', async (t) => {
+      const first = await seed('card');
+      const paymentId = 'shared-' + first.token;
+      assert.equal((await callback(first, await enqueue(first), { paymentId })).ok, true);
+      for (const org of [orgA, orgB]) await t.test(org === orgA ? 'same tenant' : 'other tenant', async () => {
+        const other = await seed('card', org);
+        const before = await snapshot(other);
+        const event = await enqueue(other);
+        await assert.rejects(callback(other, event, { paymentId }), { code: 'PAYMENT_ID_ORDER_MISMATCH' });
+        assert.deepEqual(await snapshot(other), before);
+        assert.deepEqual(await evidence(other), []);
+        const [failed] = await rows(
+          'select processing_status, last_error, next_retry_at is not null as retryable from payment_callback_events where id = $1',
+          [event.id]
+        );
+        assert.deepEqual(failed, { processing_status: 'failed', last_error: 'PAYMENT_ID_ORDER_MISMATCH', retryable: true });
+      });
+    });
+
+    async function rejectInsert(table, predicate, run) {
+      await admin.query('alter table ' + table + ' add constraint p18_reject_insert check (' + predicate + ') not valid');
+      try { await run(); }
+      finally { await admin.query('alter table ' + table + ' drop constraint p18_reject_insert'); }
+    }
+
+    for (const [name, table, predicate] of [
+      ['15 audit failure', 'activity_logs', "action <> 'PAYMENT_EVIDENCE_RECORDED'"],
+      ['16 case insert failure', 'payment_reconciliation_cases', "case_type <> 'bank_transfer_underpaid'"],
+    ]) {
+      // No bank feed exists. Fault injection applies to an operator-recorded transfer.
+      scenario(name + ' rolls back evidence, case, and audit', async () => {
+        const item = await seed();
+        const before = await audits(item);
+        await rejectInsert(table, predicate, async () => {
+          await assert.rejects(submit(item, { amount: '50.00' }), { code: '23514' });
+        });
+        assert.deepEqual(await evidence(item), []);
+        assert.deepEqual(await cases(item), []);
+        assert.deepEqual(await audits(item), before);
+      });
+    }
+
+    // No bank feed exists. The caller rolls back the operator declaration's transaction.
+    scenario('17 explicit caller rollback leaves no evidence, case, or audit', async () => {
+      const item = await seed();
+      const before = await audits(item);
+      const rollback = new Error('intentional caller rollback');
+      await assert.rejects(asTenant(runtimePool, item.org, async (client) => {
+        const result = await record(client, item, { amount: '50.00' });
+        assert.equal(result.evaluation.status, 'underpaid');
+        assert.ok(result.evaluation.caseId);
+        throw rollback;
+      }), (error) => error === rollback);
+      assert.deepEqual(await evidence(item), []);
+      assert.deepEqual(await cases(item), []);
+      assert.deepEqual(await audits(item), before);
+    });
+
+    // No bank feed exists. A customer claim is only a claim.
+    scenario('18 claim and matched evidence leave complete order, stock, reservation, and coupon snapshots equal', async () => {
+      const item = await seed();
+      const before = await snapshot(item);
+      assert.equal((await submit(item, { level: 'customer_claim' })).evaluation.status, 'claim_only');
+      assert.deepEqual(await snapshot(item), before);
+      const result = await submit(item, { reference: item.reference + '-operator' });
+      assert.equal(result.evaluation.status, 'matches');
+      assert.deepEqual(await snapshot(item), before);
+    });
+
+    // No bank feed exists. Query isolation is exercised against operator evidence.
+    scenario('19 recorder scopes queries even with RLS disabled', async () => {
+      const item = await seed();
+      await submit(item);
+      await assert.rejects(submit(item, {}, orgB), { status: 404 });
+      const tables = ['payment_evidence', 'orders'];
+      const disabled = [];
+      try {
+        for (const table of tables) {
+          await admin.query('alter table ' + table + ' disable row level security');
+          disabled.push(table);
+        }
+        assert.equal((await asTenant(runtimePool, orgB, (client) => client.query(
+          'select id from payment_evidence where order_id = $1', [item.orderId]
+        ))).rowCount, 1);
+        await assert.rejects(submit(item, {}, orgB), { status: 404 });
+        assert.equal((await evidence(item)).length, 1);
+      } finally {
+        for (const table of disabled.reverse()) await admin.query('alter table ' + table + ' enable row level security');
+      }
+    });
+
+    // No bank feed exists. The two concurrent recorders submit the same manual reference.
+    scenario('20 concurrent recorders do not deadlock and failures drain the connection pool', async () => {
+      const item = await seed();
+      const pool = new Pool({ connectionString: runtimePool.options.connectionString, max: 2, connectionTimeoutMillis: 5000 });
+      const run = (overrides) => asTenant(pool, item.org, async (client) => {
+        await client.query("set local statement_timeout = '5s'");
+        return record(client, item, overrides);
+      });
+      try {
+        const outcomes = await Promise.allSettled([run(), run()]);
+        for (const outcome of outcomes) if (outcome.status === 'rejected') throw outcome.reason;
+        const [a, b] = outcomes.map(({ value }) => value);
+        assert.deepEqual([a.replay, b.replay].sort(), [false, true]);
+        assert.equal(a.evidence.id, b.evidence.id);
+        await assert.rejects(run({ orderId: '9223372036854775807' }), { status: 404 });
+        assert.equal(pool.waitingCount, 0);
+        assert.equal(pool.idleCount, pool.totalCount);
+      } finally {
+        await pool.end();
+      }
+      assert.equal(pool.totalCount, 0);
+    });
+
+    // No bank feed exists. An operator may assert verification only as unverified evidence.
+    scenario('21 manual evidence cannot impersonate provider or refund verification', async () => {
+      const item = await seed();
+      for (const level of ['provider_verified', 'provider_refund_verified']) {
+        await assert.rejects(submit(item, { level }), { status: 400 });
+        assert.deepEqual(await evidence(item), []);
+        await assert.rejects(admin.query(
+          "insert into payment_evidence (organization_id, order_id, channel, evidence_level, amount, currency, reference, reference_key, received_at)" +
+          " values ($1,$2,'bank_transfer',$3,100,'TRY','test','TEST',now())",
+          [item.org, item.orderId, level]
+        ), { code: '23514' });
+      }
+      const result = await submit(item, { level: 'operator_asserted_verified' });
+      assert.equal((await evidence(item))[0].evidence_level, 'operator_asserted_verified');
+      assert.ok(result.evidence);
+      await withEvidenceApi(async (call) => {
+        const body = {
+          amount: '100.00', currency: 'TRY', reference: item.reference + '-api',
+          level: 'operator_asserted_verified', note: 'Operator entered evidence from a statement',
+        };
+        for (const level of ['provider_verified', 'provider_refund_verified']) {
+          assert.equal((await call(item, item.org, { ...body, level })).status, 400);
+        }
+        const response = await call(item, item.org, body);
+        assert.ok([200, 201].includes(response.status), response.text);
+        assert.equal(JSON.parse(response.text).evidence.verification, 'operator_asserted_unverified');
+        const listed = await call(item, item.org);
+        assert.equal(listed.status, 200);
+        assert.ok(listed.text.includes('operator_asserted_unverified'));
+      });
+    });
+
+    scenario('22 repeated late card events preserve one case, evidence row, audit, and stock state', async () => {
+      const item = await seed('card');
+      await due(item);
+      await expire(item);
+      const first = await callback(item, await enqueue(item));
+      const before = await snapshot(item);
+      const replay = await callback(item, await enqueue(item, 'second-delivery-' + item.token));
+      assert.equal(replay.reconciliationCaseId, first.reconciliationCaseId);
+      assert.deepEqual(await snapshot(item), before);
+      assert.equal((await cases(item)).length, 1);
+      const action = await rows(
+        "select id from activity_logs where organization_id = $1 and action = 'PAYMENT_RECONCILIATION_REQUIRED' and entity_id = $2",
+        [item.org, String(first.reconciliationCaseId)]
+      );
+      assert.equal(action.length, 1);
+      assert.equal((await evidence(item)).length, 1);
+    });
+
+    // No bank feed exists. The legacy transition must identify the operator declaration.
+    scenario('legacy IBAN payment without evidence records its declaration in the order event', async () => {
+      const item = await seed();
+      const result = await asTenant(runtimePool, item.org, (client) => transitionLegacyOrderStatus(client, {
+        organizationId: item.org, orderId: item.orderId, status: 'paid',
+      }));
+      assert.equal(result.order.status, 'paid');
+      const events = await rows('select metadata from order_events where organization_id = $1 and order_id = $2',
+        [item.org, item.orderId]);
+      assert.ok(events.some(({ metadata }) =>
+        metadata?.paymentVerification === 'operator_declared_without_evidence'));
+      const report = await monitor(item);
+      assert.ok(report.checks.iban_paid_without_evidence.samples.some(({ orderId }) =>
+        orderId === String(item.orderId)));
+    });
+
+    scenario('monitor flags a locally paid non-mock card order with no provider evidence', async () => {
+      const item = await seed('card');
+      await admin.query("update orders set status = 'paid' where id = $1", [item.orderId]);
+      const before = await snapshot(item);
+      const report = await monitor(item);
+      assert.ok(report.checks.provider_local_state_mismatch?.samples.some(({ orderId }) =>
+        orderId === String(item.orderId)));
+      assert.deepEqual(await snapshot(item), before);
+    });
+
+    // No bank feed exists. A stale customer claim must never be reported as verified.
+    scenario('monitor flags stale transfer evidence without publishing the reference', async () => {
+      const item = await seed();
+      const recorded = await submit(item, { level: 'customer_claim', receivedAt: new Date(Date.now() - 7200000) });
+      assert.equal(recorded.evaluation.status, 'claim_only');
+      const before = await snapshot(item);
+      const report = await monitor(item);
+      assert.ok(report.checks.unverified_transfer_evidence_over_age.samples.some(({ orderId }) =>
+        orderId === String(item.orderId)));
+      assert.ok(!JSON.stringify(report).includes(item.reference));
+      assert.deepEqual(await snapshot(item), before);
+    });
+
+    // No bank feed exists. Test the database controls with operator evidence.
+    scenario('evidence is append-only for both runtime and privileged SQL clients', async () => {
+      const item = await seed();
+      const { evidence: entry } = await submit(item);
+      const [flags] = await rows(
+        "select relrowsecurity, relforcerowsecurity from pg_class where oid = 'payment_evidence'::regclass"
+      );
+      assert.deepEqual(flags, { relrowsecurity: true, relforcerowsecurity: true });
+      for (const sql of [
+        'update payment_evidence set amount = 1 where id = $1',
+        'delete from payment_evidence where id = $1',
+      ]) {
+        await assert.rejects(asTenant(runtimePool, item.org, (client) => client.query(sql, [entry.id])),
+          { code: '42501' });
+        await assert.rejects(admin.query(sql, [entry.id]));
+      }
+      assert.equal((await evidence(item)).length, 1);
+    });
+
+    // No bank feed exists. The down migration protects committed operator evidence.
+    scenario('migration 076 down refuses to discard existing evidence', async () => {
+      const filename = path.join(__dirname, '../../db/migrations/076_payment_evidence.down.sql');
+      const sql = fs.readFileSync(filename, 'utf8');
+      const item = await seed();
+      await submit(item);
+      await admin.query('begin');
+      try {
+        await assert.rejects(admin.query(sql), { code: 'P0001' });
+      } finally {
+        await admin.query('rollback');
+      }
+      assert.equal((await evidence(item)).length, 1);
+    });
+
+    for (const [name, payment] of [
+      ['wrong amount', { paidPrice: '99.99' }], ['wrong currency', { currency: 'USD' }],
+      ['missing amount', { paidPrice: undefined }],
+    ]) {
+      scenario('card ' + name + ' opens one mismatch case and leaves inventory and coupon held', async () => {
+        const item = await seed('card');
+        const before = await snapshot(item);
+        const event = await enqueue(item);
+        const result = await callback(item, event, payment);
+        assert.equal(result.processing_status, 'processed');
+        assert.equal((await snapshot(item)).orders.status, 'payment_pending');
+        await callback(item, await enqueue(item, 'mismatch-redelivery-' + item.token), payment);
+        const after = await snapshot(item);
+        for (const key of ['reservation', 'product', 'variant', 'movements', 'coupons']) {
+          assert.deepEqual(after[key], before[key]);
+        }
+        assert.deepEqual((await cases(item)).map((c) => c.case_type), ['provider_amount_mismatch']);
+        assert.deepEqual(await evidence(item), []);
+      });
+    }
+  }
+  checkPaymentEvidence();
+  // End Phase 18 payment evidence contract.
 
   test('phase17 reconciliation monitor checks read-only, scoped and global findings', async () => {
     const { collectPaymentReconciliationReport: collect } = require('../../services/paymentReconciliationMonitor');
