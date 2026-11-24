@@ -9506,6 +9506,178 @@ const integrationService = require('../../modules/integrations/service');
       }
     });
 
+    // ---- Phase 19 A1: provider evidence is not a manual-approval authority for card orders.
+    async function seedProviderEvidence(item, { amount = '100.00', paymentId = 'ev-' + crypto.randomUUID() } = {}) {
+      const event = await enqueue(item, 'ev-' + paymentId);
+      await admin.query(
+        `insert into payment_identity_claims (provider, provider_payment_id, organization_id, order_id)
+         values ('iyzico',$1,$2,$3) on conflict do nothing`, [paymentId, item.org, item.orderId]
+      );
+      await admin.query(
+        `insert into payment_evidence
+           (organization_id, order_id, channel, evidence_level, amount, currency, provider, provider_payment_id,
+            callback_event_id, received_at)
+         values ($1,$2,'card','provider_verified',$3,'TRY','iyzico',$4,$5,now())`,
+        [item.org, item.orderId, amount, paymentId, event.id]
+      );
+      return { paymentId, event };
+    }
+    const MANUAL_CARD = { status: 409, code: 'CARD_PAYMENT_PROVIDER_CONFIRMATION_ONLY' };
+    async function assertManualCardRefused(item) {
+      const before = await snapshot(item);
+      const events = await orderEvents(item);
+      const caseCount = (await cases(item)).length;
+      await assert.rejects(legacy(item, 'paid'), MANUAL_CARD);
+      await assert.rejects(operate(item, { payment: 'paid' }), MANUAL_CARD);
+      await assert.rejects(operate(item, { order: 'paid', payment: 'paid' }), MANUAL_CARD);
+      assert.deepEqual(await snapshot(item), before);
+      assert.deepEqual(await orderEvents(item), events);
+      assert.equal((await cases(item)).length, caseCount);
+    }
+
+    finalGate('card manual paid refused although provider evidence exists and the callback never completed', async () => {
+      const item = await seed('card');
+      await seedProviderEvidence(item);
+      await assertManualCardRefused(item);
+    });
+
+    finalGate('card manual paid refused while a provider_amount_mismatch case is open', async () => {
+      const item = await seed('card');
+      await callback(item, await enqueue(item), { paidPrice: '99.99' });
+      assert.equal((await cases(item))[0].status, 'open');
+      await seedProviderEvidence(item, { amount: '100.00' });
+      await assertManualCardRefused(item);
+    });
+
+    finalGate('card manual paid refused while a paid_on_cancelled_order case is open and the order was reopened', async () => {
+      const item = await seed('card');
+      await due(item);
+      await expire(item);
+      await callback(item, await enqueue(item));
+      const [open] = await cases(item);
+      assert.equal(open.case_type, 'paid_on_cancelled_order');
+      await operate(item, { order: 'pending_payment' });
+      await operate(item, { payment: 'pending' });
+      await assertManualCardRefused(item);
+    });
+
+    finalGate('card manual paid refused when the evidence amount differs from the order total', async () => {
+      const item = await seed('card');
+      await seedProviderEvidence(item, { amount: '99.00' });
+      await assertManualCardRefused(item);
+    });
+
+    finalGate('card manual paid refused when a different payment id is already bound to the order', async () => {
+      const item = await seed('card');
+      const bound = await seedProviderEvidence(item);
+      await admin.query('update payment_identity_claims set provider_payment_id = provider_payment_id where false');
+      assert.equal((await claimRows(bound.paymentId)).length, 1);
+      await assertManualCardRefused(item);
+    });
+
+    finalGate('a callback-paid card order keeps working and repeated callbacks stay idempotent', async () => {
+      const item = await seed('card');
+      const pid = 'idem-' + crypto.randomUUID();
+      const event = await enqueue(item);
+      await callback(item, event, { paymentId: pid });
+      assert.equal((await snapshot(item)).orders.payment_status, 'paid');
+      const settled = await snapshot(item);
+      const events = await orderEvents(item);
+      await callback(item, event, { paymentId: pid });
+      await callback(item, await enqueue(item, 'again-' + pid), { paymentId: pid });
+      // Re-asserting an already paid state is a no-op and never an error or a new financial record.
+      const noop = await legacy(item, 'paid');
+      assert.equal(noop.changed, false);
+      assert.deepEqual(await snapshot(item), settled);
+      assert.deepEqual(await orderEvents(item), events);
+      assert.deepEqual(await cases(item), []);
+      assert.equal((await evidenceFor(item)).length, 1);
+      await operate(item, { order: 'processing' });
+    });
+
+    // ---- Phase 19 A2: legacy card orders carry only orders.payment_id (no evidence, claim or case).
+    async function legacyCardOrder(org, provider = 'iyzico', paymentId) {
+      const item = await seed('card', org);
+      await admin.query(
+        "update orders set status = 'paid', payment_provider = $2, payment_id = $3 where id = $1",
+        [item.orderId, provider, paymentId]
+      );
+      return item;
+    }
+    const preflight = () => require('../../scripts/preflight-payment-identity').collectPaymentIdentityPreflight({ pool: systemPool });
+    const asLegacy = async (fn) => {
+      // Pre-077 shape: remove claims so migration/backfill and preflight see legacy-only data.
+      await admin.query('alter table payment_identity_claims disable trigger user');
+      try { await admin.query('delete from payment_identity_claims'); } finally {
+        await admin.query('alter table payment_identity_claims enable trigger user');
+      }
+      return fn();
+    };
+
+    finalGate('legacy preflight is read-only, counts only, and separates conflicts from unbacked orders', async () => {
+      const pid = 'legacy-dup-' + crypto.randomUUID();
+      const a = await legacyCardOrder(orgA, 'iyzico', pid);
+      const b = await legacyCardOrder(orgB, 'iyzico', pid);
+      const solo = await legacyCardOrder(orgA, 'iyzico', 'legacy-solo-' + crypto.randomUUID());
+      const unknown = await legacyCardOrder(orgA, null, 'legacy-unknown-' + crypto.randomUUID());
+      const mock = await legacyCardOrder(orgA, 'mock', 'mock-' + crypto.randomUUID());
+      const before = await rows('select count(*)::int as n from payment_evidence');
+      const report = await asLegacy(preflight);
+      assert.ok(report.conflictingPaymentIds >= 1);
+      assert.ok(report.unbackedLegacyOrders >= 3);
+      assert.ok(report.unknownProviderOrders >= 1);
+      assert.equal(report.mockOrdersIgnored >= 1, true);
+      const text = JSON.stringify(report);
+      for (const secret of [pid, orgA, orgB]) assert.ok(!text.includes(secret), 'preflight must not disclose ids or tenants');
+      void a; void b;
+      assert.deepEqual(await rows('select count(*)::int as n from payment_evidence'), before);
+      assert.equal(report.readOnly, true);
+      void solo; void unknown; void mock;
+    });
+
+    finalGate('migration 077 fails closed on conflicting legacy orders.payment_id and never labels legacy orders verified', async () => {
+      const { runMigrations } = require('../../scripts/run-migrations');
+      const { runRollback } = require('../../scripts/rollback-migration');
+      const quiet = { log() {}, warn() {} };
+      const pid = 'legacy-order-' + crypto.randomUUID();
+      const a = await legacyCardOrder(orgA, 'iyzico', pid);
+      const b = await legacyCardOrder(orgB, 'iyzico', pid);
+      await admin.query('alter table payment_identity_claims disable trigger user');
+      try { await admin.query('delete from payment_identity_claims'); } finally {
+        await admin.query('alter table payment_identity_claims enable trigger user');
+      }
+      await runRollback({ pool: migratorPool, target: '077_payment_identity_claims.sql', logger: quiet });
+      const evidenceBefore = (await admin.query('select count(*)::int as n from payment_evidence')).rows[0].n;
+      try {
+        await assert.rejects(runMigrations({ pool: migratorPool, logger: quiet }), (error) => {
+          assert.match(error.message, /077/);
+          for (const secret of [pid, orgA, orgB]) assert.ok(!String(error.message).includes(secret));
+          return true;
+        });
+        assert.equal((await admin.query("select to_regclass('payment_identity_claims') as t")).rows[0].t, null);
+        // Resolve the ambiguity by clearing the duplicate on the second order, then the single owner backfills.
+        await admin.query('update orders set payment_id = null where id = $1', [b.orderId]);
+        await runMigrations({ pool: migratorPool, logger: quiet });
+        const claims = await claimRows(pid);
+        assert.equal(claims.length, 1);
+        assert.deepEqual([claims[0].organization_id, String(claims[0].order_id)], [a.org, String(a.orderId)]);
+        // A claim only reserves the id. It is not payment evidence and must not be reported as verified.
+        assert.equal((await admin.query('select count(*)::int as n from payment_evidence')).rows[0].n, evidenceBefore);
+      } finally {
+        await admin.query('update orders set payment_id = null where id = $1', [b.orderId]);
+        await runMigrations({ pool: migratorPool, logger: quiet });
+      }
+    });
+
+    finalGate('a payment id stored on a legacy order cannot be bound to another order by a new callback', async () => {
+      const pid = 'legacy-live-' + crypto.randomUUID();
+      const legacyOrder = await legacyCardOrder(orgA, 'iyzico', pid);
+      const target = await seed('card');
+      await asLegacy(async () => {});
+      await assertFailClosed(target, await enqueue(target), { paymentId: pid });
+      void legacyOrder;
+    });
+
     finalGate('payment identity claim table forces RLS and keys each provider payment globally', async () => {
       const [flags] = await rows(
         `select relrowsecurity, relforcerowsecurity from pg_class
