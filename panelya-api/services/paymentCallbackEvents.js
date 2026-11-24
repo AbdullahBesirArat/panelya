@@ -4,7 +4,7 @@ const { providerName, retrievePayment, successUrl, failureUrl } = require('./pay
 const { sendOrderStatusEmail } = require('./email');
 const { transitionOrderInventory } = require('./inventoryReservations');
 const { transitionOrderPromotion } = require('./promotionEngine');
-const { amountInKurus, decimalAmount, paymentIdentityMismatch, recordCardEvidence } = require('./paymentEvidence');
+const { amountInKurus, bindPaymentIdentity, decimalAmount, paymentIdentityMismatch, recordCardEvidence } = require('./paymentEvidence');
 
 const TERMINAL_STATUSES = ['paid', 'cancelled'];
 
@@ -332,6 +332,7 @@ async function processPaymentCallbackEvent(req, eventId, deps = {}) {
     if (verifiedPayment) {
       paymentId = firstPresent(verifiedPayment.paymentId);
       if (!paymentId) throw new Error('Dogrulanmis odeme icin saglayici odeme kimligi eksik');
+      await bindPaymentIdentity(client, { order: currentOrder, provider, paymentId });
       const amount = amountInKurus(verifiedPayment.paidPrice);
       const currency = verifiedPayment.currency;
       const validAmount = amount !== null && amount > 0n;

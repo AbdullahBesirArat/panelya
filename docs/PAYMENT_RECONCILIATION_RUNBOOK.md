@@ -24,11 +24,21 @@ Banka API bağlantısı yoktur. Havalenin hesaba geçtiğini banka ekstresinden 
 | `bank_transfer_late` | Bankadaki işlem ve siparişin iptal zamanını karşılaştırın. Sipariş ve rezervasyon durumunu değiştirmeden finans ekibine yönlendirin. |
 | `provider_amount_mismatch` | Sağlayıcı panelinde tutarı, para birimini ve sipariş bağlantısını kontrol edin. Eksik veya farklı alanı gerekçeye yazın ve finans ekibine yönlendirin. |
 
-Kanıt kaydı ve vaka çözümü sipariş durumunu, stok rezervasyonunu veya kuponu değiştirmez. IBAN siparişinde mevcut kanıtla ödeme durumunu `paid` yapmak için sayılan tutarın sipariş toplamına tam eşit olması gerekir. Kanıtsız eski akış sipariş geçmişine `operator_declared_without_evidence` yazar.
+Kanıt kaydı ve vaka çözümü sipariş durumunu, stok rezervasyonunu veya kuponu değiştirmez. IBAN siparişinde mevcut kanıtla ödeme durumunu `paid` yapmak için sayılan tutarın sipariş toplamına tam eşit olması gerekir. Kanıtsız geçiş artık reddedilir: kanıt yoksa veya yalnız `customer_claim` varsa `PAYMENT_EVIDENCE_REQUIRED`, tutar uyuşmazsa `PAYMENT_EVIDENCE_AMOUNT_MISMATCH`, para birimi farklıysa `PAYMENT_EVIDENCE_CURRENCY_MISMATCH`, sayılan kanıtların hiçbirinde 10 karakterlik operatör gerekçesi yoksa `PAYMENT_EVIDENCE_JUSTIFICATION_REQUIRED` (HTTP 409, sipariş/stok/kupon değişmez). Başarılı geçiş sipariş geçmişine `paymentVerification: operator_asserted_unverified` ve kanıt kimliklerini yazar; banka doğrulaması iddia edilmez. Panoda kanıt kaydetme ekranı yoksa operatör `POST /api/payment-reconciliation/orders/:orderId/bank-transfers` uç noktasını kullanır; ekran yapılana kadar pano üzerinden IBAN siparişi `paid` yapılamaz.
 
 İzleyici, açık havale uyuşmazlıklarını `partial_or_duplicate_payment_suspected`, eski havale kanıtlarını `unverified_transfer_evidence_over_age` ve kanıtsız ödenmiş IBAN siparişlerini `iban_paid_without_evidence` ile bildirir. Kartta rezervasyon süresi ve ek süreyi aşan bildirimsiz siparişler `callback_missing_suspected`, sağlayıcı kanıtı olmayan yerel ödemeler `provider_local_state_mismatch` olarak raporlanır. Bulguları ekstre veya sağlayıcı paneliyle inceleyin.
 
 Migration 076’yı API dağıtımından önce uygulayın. Geri alma koşulları [saklama dokümanında](PAYMENT_RECONCILIATION_RETENTION.md) yer alır.
+
+## Açık vaka ve stok tutma
+
+Açık bir mutabakat vakası (örn. `provider_amount_mismatch`, `paid_on_cancelled_order`, havale vakaları) olan sipariş, rezervasyon süresi dolsa bile süre aşımı işlemi tarafından **iptal edilmez ve stoku serbest bırakılmaz** (`reconciliation_open` atlama nedeni, aynı tenant ve sipariş). Vaka çözülünce (`resolved_*`/`dismissed`) sipariş normal süre aşımına tabi olur. Sipariş otomatik yeniden açılmaz, iade otomatik yapılmaz.
+
+Sonuç: vakalar çözülmezse stok kalıcı olarak ayrılı kalır. İzleyicinin `reserved_stock_held_by_open_case` kontrolü, `payment_pending` siparişte aktif rezervasyonu tutan ve `warnHours`'tan eski açık vakaları bildirir (`criticalHours` sonrası kritik). Müdahale: vakayı incelemek, sağlayıcı/banka panelinden kanıtı doğrulamak, vakayı `resolved_accepted`/`resolved_refunded`/`dismissed` ile kapatmak; siparişi iptal etmek operatörün açık kararıdır.
+
+## Sağlayıcı ödeme kimliği bağlama (migration 077)
+
+Doğrulanmış her kart ödemesi, işlenmeden önce `(provider, provider_payment_id)` çiftini tek bir (tenant, sipariş) ile `payment_identity_claims` tablosunda bağlar; ilk bağlayan kazanır, tablo salt eklemelidir. Aynı kimlik başka siparişte (tutar eşleşse de eşleşmese de), başka tenantta veya 075 öncesi bir vakada görülürse işlem `PAYMENT_ID_ORDER_MISMATCH` ile reddedilir: sipariş, stok, kupon değişmez, yeni vaka/kanıt/audit yazılmaz, olay yeniden denenebilir `failed` kalır ve hata metni diğer taraf hakkında bilgi vermez. Bu olay finans operasyonlarına iletilmelidir. Migration 077 mevcut kart kanıtlarını ve `manual` olmayan vakaları geriye dönük bağlar; down migration kayıt varsa reddeder.
 
 ## Alarm ve müdahale sırası
 

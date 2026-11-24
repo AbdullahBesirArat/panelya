@@ -7,9 +7,15 @@ const fingerprints = Symbol('finding fingerprints');
 // Signature of a pre-reconciliation late success: the terminal guard kept the order cancelled
 // although the provider-verified payment succeeded (see paymentCallbackEvents.js).
 const cancelledNote = 'İncelenmeli, kesin tahsilat değil.';
+const heldStockNote = 'Açık vaka nedeniyle stok rezervasyonu tutuluyor; operatör kararı gerekir.';
 const checkNames = [
   'open_cases', 'open_cases_over_age', 'payment_id_order_mismatch', 'failing_callback_retry',
   'stale_processing', 'verified_payment_on_cancelled_without_case', 'payment_id_anomaly',
+  'partial_or_duplicate_payment_suspected', 'unverified_transfer_evidence_over_age',
+  'iban_paid_without_evidence', 'callback_missing_suspected', 'provider_local_state_mismatch',
+  'reserved_stock_held_by_open_case',
+];
+const suspectedNames = [
   'partial_or_duplicate_payment_suspected', 'unverified_transfer_evidence_over_age',
   'iban_paid_without_evidence', 'callback_missing_suspected', 'provider_local_state_mismatch',
 ];
@@ -108,6 +114,18 @@ with settings as (
   union all
   select * from evidence_findings
   union all
+  select 'reserved_stock_held_by_open_case', c.id, c.organization_id, c.order_id, c.callback_event_id,
+    c.status, c.detected_at, c.id
+  from payment_reconciliation_cases c cross join settings s
+  join orders o on o.organization_id = c.organization_id and o.id = c.order_id
+  where c.status = 'open' and (s.org is null or c.organization_id = s.org)
+    and c.detected_at < s.as_of - make_interval(hours => s.warn_hours)
+    and o.status = 'payment_pending'
+    and exists (
+      select 1 from inventory_reservations r
+      where r.organization_id = o.organization_id and r.order_id = o.id and r.status = 'active'
+    )
+  union all
   select 'verified_payment_on_cancelled_without_case', o.id, o.organization_id, o.id, e.id,
     o.status, e.last_processed_at, o.id
   from orders o cross join settings s
@@ -158,7 +176,8 @@ select (select jsonb_agg(checks) from checks) as checks,
 
 function severityFor(name, count, oldest, thresholds) {
   if (!count || name === 'open_cases') return 'ok';
-  if (name === 'payment_id_anomaly' || (name === 'open_cases_over_age' && oldest > thresholds.criticalHours * 60)) {
+  if (name === 'payment_id_anomaly'
+    || (['open_cases_over_age', 'reserved_stock_held_by_open_case'].includes(name) && oldest > thresholds.criticalHours * 60)) {
     return 'critical';
   }
   return 'warning';
@@ -192,7 +211,9 @@ async function collectPaymentReconciliationReport({
       if (ranks[severity] > ranks[overall]) overall = severity;
     }
     checks.verified_payment_on_cancelled_without_case.note = cancelledNote;
-    for (const name of checkNames.slice(-5)) checks[name].note = cancelledNote;
+    for (const name of suspectedNames) checks[name].note = cancelledNote;
+    // Expiry skips orders with an open case, so their stock stays reserved until an operator decides.
+    checks.reserved_stock_held_by_open_case.note = heldStockNote;
     const perOrganization = (data.orgs || []).map(({ organization_id, counts }) => ({
       organizationId: organization_id,
       ...Object.fromEntries(checkNames.map((name) => [

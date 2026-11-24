@@ -165,13 +165,24 @@ async function transitionOrderOperation(client, {
     && ['iban', 'card'].includes(row.payment_method) && row.payment_status !== 'paid') {
     throw operationError('Siparis odeme incelemesi gerektiriyor', 409, 'ORDER_REOPEN_REQUIRES_PAYMENT_REVIEW');
   }
-  let declaredWithoutEvidence = false;
+  let ibanEvidence = null;
   if (row.payment_method === 'iban' && next.payment === 'paid' && changedDomains.includes('payment')) {
-    const totals = await bankEvidenceTotals(client, organizationId, row.id);
-    declaredWithoutEvidence = BigInt(totals.entries) === 0n;
-    if (!declaredWithoutEvidence && amountInKurus(totals.amount) !== amountInKurus(row.total)) {
+    // There is no bank feed: the only basis for paid is counted operator evidence that matches
+    // the order exactly and carries an explicit justification. It stays operator-asserted.
+    const totals = await bankEvidenceTotals(client, organizationId, row.id, row.currency);
+    if (Number(totals.counted) === 0) {
+      throw operationError('Havale kaniti olmadan odeme onaylanamaz', 409, 'PAYMENT_EVIDENCE_REQUIRED');
+    }
+    if (Number(totals.currency_mismatch) > 0) {
+      throw operationError('Havale para birimi siparisle uyusmuyor', 409, 'PAYMENT_EVIDENCE_CURRENCY_MISMATCH');
+    }
+    if (amountInKurus(totals.amount) === null || amountInKurus(totals.amount) !== amountInKurus(row.total)) {
       throw operationError('Havale tutari siparisle uyusmuyor', 409, 'PAYMENT_EVIDENCE_AMOUNT_MISMATCH');
     }
+    if (!totals.justified) {
+      throw operationError('Odeme onayi icin operator gerekcesi zorunlu', 409, 'PAYMENT_EVIDENCE_JUSTIFICATION_REQUIRED');
+    }
+    ibanEvidence = { ids: totals.counted_ids.map(String), count: Number(totals.counted) };
   }
 
   const nextLegacyStatus = changes.order
@@ -197,10 +208,13 @@ async function transitionOrderOperation(client, {
   if (!result.rows[0]) {
     throw operationError('Siparis baska bir kullanici tarafindan guncellendi', 409, 'ORDER_VERSION_CONFLICT');
   }
-  if (declaredWithoutEvidence) {
+  if (ibanEvidence) {
     await appendOrderEvent(client, {
       organizationId, orderId: row.id, actor, eventType: 'payment_verification_recorded',
-      metadata: { paymentVerification: 'operator_declared_without_evidence' },
+      metadata: {
+        paymentVerification: 'operator_asserted_unverified',
+        evidenceIds: ibanEvidence.ids, evidenceCount: ibanEvidence.count,
+      },
     });
   }
   return { order: result.rows[0], previous: row, changed: true, changedDomains };

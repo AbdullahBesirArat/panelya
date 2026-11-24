@@ -52,6 +52,7 @@ test('provider success short by one kuruş cannot mark the order paid', async ()
         return { rows: [{ ...order, status: params[0] }] };
       }
       if (/update payment_callback_events/i.test(sql)) return { rows: [event] };
+      if (/insert into payment_identity_claims/i.test(sql)) return { rows: [{ provider_payment_id: 'p' }] };
       if (/insert into payment_reconciliation_cases/i.test(sql)) return { rows: [{ id: '3' }] };
       return { rows: [] };
     },

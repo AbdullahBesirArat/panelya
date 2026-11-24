@@ -28,14 +28,17 @@ function presentEvidence(row) {
   return { ...row, verification };
 }
 
-async function bankEvidenceTotals(client, organizationId, orderId) {
+async function bankEvidenceTotals(client, organizationId, orderId, currency = null) {
   const { rows: [totals] } = await client.query(
     `select count(*) as entries,
        count(*) filter (where evidence_level <> 'customer_claim') as counted,
-       coalesce(sum(amount) filter (where evidence_level <> 'customer_claim'), 0) as amount
+       coalesce(sum(amount) filter (where evidence_level <> 'customer_claim'), 0) as amount,
+       count(*) filter (where evidence_level <> 'customer_claim' and currency is distinct from $3::text) as currency_mismatch,
+       coalesce(bool_or(char_length(btrim(coalesce(note, ''))) >= 10) filter (where evidence_level <> 'customer_claim'), false) as justified,
+       coalesce(array_agg(id order by id) filter (where evidence_level <> 'customer_claim'), '{}') as counted_ids
      from payment_evidence
      where organization_id = $1 and order_id = $2 and channel = 'bank_transfer'`,
-    [organizationId, orderId]
+    [organizationId, orderId, currency]
   );
   return totals;
 }
@@ -180,7 +183,41 @@ async function recordCardEvidence(client, { order, event, provider, paymentId, a
   return { id: existing.id, replay: true };
 }
 
+// Binds a provider payment id to exactly one (tenant, order). First binder wins; every other
+// binder fails closed with an error that carries no information about the existing owner.
+async function bindPaymentIdentity(client, { order, provider, paymentId }) {
+  const owner = [order.organization_id, order.id];
+  // Legacy rows created before the claim table existed. Visible across tenants only to the
+  // RLS-bypassing system role the callback worker uses; the claim insert below is the tenant-proof guard.
+  const { rows: [foreign] } = await client.query(
+    `select 1 from (
+       select organization_id, order_id from payment_reconciliation_cases
+        where provider = $1 and provider_payment_id = $2
+       union all
+       select organization_id, order_id from payment_evidence
+        where channel = 'card' and provider = $1 and provider_payment_id = $2
+     ) known
+     where not (organization_id = $3 and order_id = $4) limit 1`,
+    [provider, paymentId, ...owner]
+  );
+  if (foreign) throw paymentIdentityMismatch();
+  const { rows: [inserted] } = await client.query(
+    `insert into payment_identity_claims (provider, provider_payment_id, organization_id, order_id)
+     values ($1,$2,$3,$4)
+     on conflict (provider, provider_payment_id) do nothing returning provider_payment_id`,
+    [provider, paymentId, ...owner]
+  );
+  if (inserted) return { replay: false };
+  const { rows: [own] } = await client.query(
+    `select 1 from payment_identity_claims
+      where provider = $1 and provider_payment_id = $2 and organization_id = $3 and order_id = $4`,
+    [provider, paymentId, ...owner]
+  );
+  if (!own) throw paymentIdentityMismatch();
+  return { replay: true };
+}
+
 module.exports = {
-  amountInKurus, bankEvidenceTotals, decimalAmount, paymentIdentityMismatch,
+  amountInKurus, bankEvidenceTotals, bindPaymentIdentity, decimalAmount, paymentIdentityMismatch,
   presentEvidence, recordBankTransferEvidence, recordCardEvidence,
 };

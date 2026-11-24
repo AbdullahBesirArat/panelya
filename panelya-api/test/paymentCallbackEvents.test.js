@@ -604,6 +604,7 @@ test('verified late payment returns a reconciliation case while the order stays 
   deps.retrieve = async () => ({ ...await retrieve(), paidPrice: '20.00', currency: 'TRY' });
   deps.audit = async (_req, entry) => { audits.push(entry); };
   client.query = (sql, params) => {
+    if (sql.includes('payment_identity_claims') && sql.includes('insert')) return { rows: [{ provider_payment_id: 'p' }] };
     if (sql.includes('insert into payment_evidence')) return { rows: [{ id: '41' }] };
     if (sql.includes('insert into payment_reconciliation_cases')) return { rows: [{ id: '42' }] };
     return query(sql, params);

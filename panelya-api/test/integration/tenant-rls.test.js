@@ -138,6 +138,12 @@ if (!ADMIN_URL) {
     try {
       // Cases can reference evidence, and both can reference orders and callbacks.
       await admin.query(`delete from payment_reconciliation_cases ${scope}`, [organizationIds]);
+      await admin.query('alter table payment_identity_claims disable trigger user');
+      try {
+        await admin.query(`delete from payment_identity_claims ${scope}`, [organizationIds]);
+      } finally {
+        await admin.query('alter table payment_identity_claims enable trigger user');
+      }
       await admin.query('alter table payment_evidence disable trigger user');
       try {
         await admin.query(`delete from payment_evidence ${scope}`, [organizationIds]);
@@ -8861,20 +8867,17 @@ const integrationService = require('../../modules/integrations/service');
       assert.equal((await evidence(item)).length, 1);
     });
 
-    // No bank feed exists. The legacy transition must identify the operator declaration.
-    scenario('legacy IBAN payment without evidence records its declaration in the order event', async () => {
+    // No bank feed exists. The legacy transition no longer lets an operator declare payment silently.
+    scenario('legacy IBAN payment without evidence is refused and leaves no declaration', async () => {
       const item = await seed();
-      const result = await asTenant(runtimePool, item.org, (client) => transitionLegacyOrderStatus(client, {
+      const before = await snapshot(item);
+      await assert.rejects(asTenant(runtimePool, item.org, (client) => transitionLegacyOrderStatus(client, {
         organizationId: item.org, orderId: item.orderId, status: 'paid',
-      }));
-      assert.equal(result.order.status, 'paid');
+      })), { status: 409, code: 'PAYMENT_EVIDENCE_REQUIRED' });
+      assert.deepEqual(await snapshot(item), before);
       const events = await rows('select internal_metadata as metadata from order_events where organization_id = $1 and order_id = $2',
         [item.org, item.orderId]);
-      assert.ok(events.some(({ metadata }) =>
-        metadata?.paymentVerification === 'operator_declared_without_evidence'));
-      const report = await monitor(item);
-      assert.ok(report.checks.iban_paid_without_evidence.samples.some(({ orderId }) =>
-        orderId === String(item.orderId)));
+      assert.ok(!events.some(({ metadata }) => metadata?.paymentVerification));
     });
 
     scenario('monitor flags a locally paid non-mock card order with no provider evidence', async () => {
@@ -9052,7 +9055,7 @@ const integrationService = require('../../modules/integrations/service');
         assert.equal(finding.severity, severity);
         const sample = finding.samples.find(({ orderId }) => orderId === String(item.orderId));
         assert.ok(sample);
-        assert.deepEqual(Object.keys(sample).sort(), ['ageMinutes', 'id', 'orderId', 'organizationId']);
+        assert.ok(Object.keys(sample).every((key) => ['ageMinutes', 'eventId', 'id', 'orderId', 'organizationId', 'status'].includes(key)));
         assert.ok(!JSON.stringify(report).includes(item.token));
         assert.deepEqual(await snapshot(item), before);
       });
@@ -9193,6 +9196,56 @@ const integrationService = require('../../modules/integrations/service');
       } finally { await admin.query('alter table payment_identity_claims enable trigger user'); }
       const [claim] = await claimRows(pid);
       assert.deepEqual([claim.organization_id, String(claim.order_id)], [item.org, String(item.orderId)]);
+    });
+
+    finalGate('migration 077 down refuses to discard payment identity claims', async () => {
+      const sql = fs.readFileSync(path.join(__dirname, '../../db/migrations/077_payment_identity_claims.down.sql'), 'utf8');
+      const item = await seed('card');
+      const pid = 'down-' + crypto.randomUUID();
+      await callback(item, await enqueue(item), { paymentId: pid });
+      await admin.query('begin');
+      try {
+        await assert.rejects(admin.query(sql), { code: 'P0001' });
+      } finally {
+        await admin.query('rollback');
+      }
+      assert.equal((await claimRows(pid)).length, 1);
+    });
+
+    finalGate('expiry never releases an order whose lock is held while an open case is being written', async () => {
+      const item = await seed('card');
+      const other = await seed('card', orgB);
+      await due(item);
+      await due(other);
+      const before = await snapshot(item);
+      const holder = await systemPool.connect();
+      try {
+        await holder.query('begin');
+        await holder.query('select id from orders where organization_id = $1 and id = $2 for update', [item.org, item.orderId]);
+        // The expiring batch must skip the locked order instead of waiting or cancelling it.
+        const duringLock = await expire(item, { methods: ['card'] });
+        assert.ok(!duringLock.expired.includes(item.id));
+        await holder.query(
+          `insert into payment_reconciliation_cases
+             (organization_id, provider, provider_payment_id, case_type, order_id, callback_event_id,
+              order_total, order_status_at_detection)
+           values ($1,'iyzico',$2,'provider_amount_mismatch',$3,$4,100,'payment_pending')`,
+          [item.org, 'lock-' + crypto.randomUUID(), item.orderId, (await enqueue(item)).id]
+        );
+        await holder.query('commit');
+      } catch (error) {
+        await holder.query('rollback').catch(() => {});
+        throw error;
+      } finally {
+        holder.release();
+      }
+      const afterCase = await expire(item, { methods: ['card'] });
+      assert.ok(!afterCase.expired.includes(item.id));
+      assert.ok(afterCase.skipped.reconciliation_open >= 1);
+      assert.deepEqual(await snapshot(item), before);
+      // A case of another tenant never blocks this tenant's order.
+      assert.ok((await expire(other, { methods: ['card'] })).expired.includes(other.id));
+      assert.equal(systemPool.waitingCount, 0);
     });
 
     finalGate('payment identity claim table forces RLS and keys each provider payment globally', async () => {
@@ -9407,7 +9460,7 @@ const integrationService = require('../../modules/integrations/service');
     }
   });
 
-  const paymentRollbackTargets = ['076_payment_evidence.sql', '075_payment_reconciliation_cases.sql'];
+  const paymentRollbackTargets = ['077_payment_identity_claims.sql', '076_payment_evidence.sql', '075_payment_reconciliation_cases.sql'];
   const appliedPaymentMigrations = async () => (await admin.query(
     'select filename, checksum from schema_migrations where filename = any($1::text[]) order by filename',
     [paymentRollbackTargets]
@@ -9425,7 +9478,7 @@ const integrationService = require('../../modules/integrations/service');
     return original;
   }
 
-  test('phase16 empty case table can roll back and reapply migrations 075 and 076', async () => {
+  test('phase16 empty case table can roll back and reapply migrations 075, 076 and 077', async () => {
     const original = await rollbackPaymentMigrations();
     assert.equal((await admin.query("select to_regclass('payment_reconciliation_cases') as name")).rows[0].name, null);
     assert.equal((await admin.query("select 1 from pg_constraint where conname = 'payment_callback_events_org_id_key'")).rowCount, 0);

@@ -328,6 +328,10 @@ const dueReservations = `
         or nullif(btrim(o.payment_id), '') is not null then 'payment_state'
       when not coalesce(o.payment_method = any($4::text[]), false) then 'method_disabled'
       when exists (
+        select 1 from payment_reconciliation_cases c
+         where c.organization_id = o.organization_id and c.order_id = o.id and c.status = 'open'
+      ) then 'reconciliation_open'
+      when exists (
         select 1 from payment_callback_events e
          where e.organization_id = o.organization_id
            and e.processing_status <> 'processed'
