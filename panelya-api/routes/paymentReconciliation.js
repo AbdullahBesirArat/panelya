@@ -18,7 +18,7 @@ const columns = `id, organization_id, order_id, callback_event_id, evidence_id, 
 // Cases where a customer may have been charged, or money is unaccounted for, rank above bookkeeping gaps.
 const highPriorityCases = new Set([
   'paid_on_cancelled_order', 'provider_amount_mismatch', 'provider_duplicate_payment',
-  'bank_transfer_overpaid', 'bank_transfer_late',
+  'bank_transfer_overpaid', 'bank_transfer_late', 'bank_transfer_conflict',
 ]);
 const criticalAfterMs = 72 * 3600 * 1000;
 function casePriority(row) {
@@ -28,7 +28,7 @@ function casePriority(row) {
 }
 // Provider payment ids and refund references stay out of the operator list view.
 const caseViewColumns = `id, order_id, case_type, status, detected_at, provider_paid_amount, currency, order_total,
-  order_status_at_detection, resolution_note, resolved_at, refund_evidence_type,
+  order_status_at_detection, resolution_note, resolved_at, resolved_by, resolved_by_admin_id, refund_evidence_type,
   refund_verification as "refundVerification"`;
 async function heldStockOrderIds(client, organizationId, orderIds) {
   if (!orderIds.length) return new Set();
@@ -105,7 +105,8 @@ router.get('/orders/:orderId/evidence', ...operatorRoute(async (req, client, org
   );
   const cases = caseRows.map((row) => ({ ...row, priority: casePriority(row) }));
   const held = await heldStockOrderIds(client, organizationId, [orderId]);
-  const offlineOpen = order.payment_method === 'iban' && ['pending', 'manual_pending'].includes(order.payment_status);
+  const offlineOpen = order.payment_method === 'iban' && order.order_status !== 'cancelled'
+    && ['pending', 'manual_pending'].includes(order.payment_status);
   let blocker = null;
   if (order.payment_method === 'card') blocker = 'CARD_PAYMENT_PROVIDER_CONFIRMATION_ONLY';
   else if (!offlineOpen) blocker = 'PAYMENT_NOT_AWAITING_CONFIRMATION';
@@ -184,7 +185,7 @@ router.post('/:id/resolve', ...operatorRoute(async (req, client, organizationId)
             external_refund_reference = $7, refund_evidence_type = $8, refund_verification = $9,
             resolved_at = now(), updated_at = now()
       where organization_id = $1 and id = $2
-      returning ${columns}`,
+      returning ${caseViewColumns}`,
     [organizationId, id, resolution, trimmedNote, userId ?? null, adminId,
       refunded ? reference : null, refunded ? evidenceType : null, refundVerification]
   );

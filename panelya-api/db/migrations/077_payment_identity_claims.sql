@@ -31,31 +31,68 @@ create policy payment_identity_claims_tenant_policy on payment_identity_claims
   with check (app_rls_bypassed() or organization_id = nullif(current_setting('app.current_organization_id', true), '')::uuid);
 
 -- backfill:begin
--- The migrating role is subject to FORCE ROW LEVEL SECURITY and would see no legacy rows at all,
--- which would make both the guard and the backfill silently vacuous. Lift FORCE for the duration of
--- this transaction only (the owner then bypasses RLS) and restore it before the end marker.
-alter table payment_evidence no force row level security;
-alter table payment_reconciliation_cases no force row level security;
-alter table orders no force row level security;
+-- The migrating role is subject to FORCE ROW LEVEL SECURITY, so it only sees rows of the tenant named
+-- in app.current_organization_id. Iterate the tenants instead of lifting FORCE: ALTER TABLE ... NO FORCE
+-- takes ACCESS EXCLUSIVE locks and would stall every order read/write of still-running old instances.
+-- A clean result is only meaningful if this role can actually see every tenant's rows. Refuse to
+-- continue (instead of silently reporting "no conflicts") when visibility cannot be verified: the
+-- tenant list itself must be unrestricted and each scanned table must use the tenant-context policy
+-- this scan relies on.
+do $$
+declare scanned text;
+begin
+  if (select relforcerowsecurity from pg_class where oid = 'organizations'::regclass) then
+    raise exception 'Cannot apply migration 077: tenant visibility cannot be verified (tenant list is row-restricted)'
+      using errcode = 'P0001';
+  end if;
+  for scanned in select unnest(array['payment_evidence', 'payment_reconciliation_cases', 'orders']) loop
+    if not exists (
+      select 1 from pg_policies p
+       where p.schemaname = 'public' and p.tablename = scanned
+         and coalesce(p.qual, '') like '%app.current_organization_id%'
+    ) then
+      raise exception 'Cannot apply migration 077: tenant visibility cannot be verified (unrecognised row policy)'
+        using errcode = 'P0001';
+    end if;
+  end loop;
+end $$;
+
+create temporary table payment_identity_known (
+  source text not null, provider text not null, provider_payment_id text not null,
+  organization_id uuid not null, order_id bigint not null, created_at timestamptz not null
+) on commit drop;
+
+do $$
+declare tenant uuid;
+begin
+  for tenant in select id from organizations loop
+    perform set_config('app.current_organization_id', tenant::text, true);
+    insert into payment_identity_known
+      select 'evidence', provider, provider_payment_id, organization_id, order_id, created_at
+        from payment_evidence
+       where channel = 'card' and nullif(btrim(provider_payment_id), '') is not null;
+    insert into payment_identity_known
+      select 'case', provider, provider_payment_id, organization_id, order_id, created_at
+        from payment_reconciliation_cases
+       where provider <> 'manual' and nullif(btrim(provider_payment_id), '') is not null;
+    insert into payment_identity_known
+      select 'order', payment_provider, payment_id, organization_id, id, created_at
+        from orders
+       where payment_provider = 'iyzico' and nullif(btrim(payment_id), '') is not null
+         and payment_id not like 'mock-%';
+  end loop;
+  perform set_config('app.current_organization_id', '', true);
+end $$;
+
 -- Fail closed on ambiguous legacy ownership: one provider payment id must belong to exactly one
--- (tenant, order) across payment_evidence, payment_reconciliation_cases and legacy orders.payment_id
--- (provider iyzico only; the id then only RESERVES the identity, it is never treated as verified evidence). The message carries
--- no payment id or tenant data; the whole migration (table, claims, schema_migrations row) rolls back.
+-- (tenant, order) across evidence, cases and legacy orders.payment_id (iyzico only; the id then only
+-- RESERVES the identity, it is never treated as verified evidence). The message carries no payment id
+-- or tenant data; the whole migration (table, claims, schema_migrations row) rolls back.
 do $$
 begin
   if exists (
-    select 1 from (
-      select provider, provider_payment_id, organization_id, order_id
-        from payment_evidence where channel = 'card' and nullif(btrim(provider_payment_id), '') is not null
-      union all
-      select provider, provider_payment_id, organization_id, order_id
-        from payment_reconciliation_cases where provider <> 'manual' and nullif(btrim(provider_payment_id), '') is not null
-      union all
-      select payment_provider, payment_id, organization_id, id
-        from orders where payment_provider = 'iyzico' and nullif(btrim(payment_id), '') is not null
-          and payment_id not like 'mock-%'
-    ) known
-    group by provider, provider_payment_id
+    select 1 from payment_identity_known
+     group by provider, provider_payment_id
     having count(distinct (organization_id, order_id)) > 1
   ) then
     raise exception 'Cannot apply migration 077: conflicting legacy payment identity ownership exists; resolve it before migrating'
@@ -65,24 +102,14 @@ end $$;
 
 insert into payment_identity_claims (provider, provider_payment_id, organization_id, order_id, created_at)
 select distinct on (provider, provider_payment_id) provider, provider_payment_id, organization_id, order_id, created_at
-  from (
-    select provider, provider_payment_id, organization_id, order_id, created_at
-      from payment_evidence where channel = 'card' and nullif(btrim(provider_payment_id), '') is not null
-    union all
-    select provider, provider_payment_id, organization_id, order_id, created_at
-      from payment_reconciliation_cases where provider <> 'manual' and nullif(btrim(provider_payment_id), '') is not null
-    union all
-    select payment_provider, payment_id, organization_id, id, created_at
-      from orders where payment_provider = 'iyzico' and nullif(btrim(payment_id), '') is not null
-        and payment_id not like 'mock-%'
-  ) known
+  from payment_identity_known
  order by provider, provider_payment_id, created_at, order_id
 on conflict (provider, provider_payment_id) do nothing;
-
-alter table payment_evidence force row level security;
-alter table payment_reconciliation_cases force row level security;
-alter table orders force row level security;
 -- backfill:end
+
+-- Lookup used by every verified-payment callback for legacy orders.payment_id values.
+create index idx_orders_payment_provider_payment_id on orders (payment_provider, payment_id)
+  where payment_id is not null;
 
 alter table payment_identity_claims force row level security;
 

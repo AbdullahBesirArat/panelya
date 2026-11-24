@@ -1,5 +1,7 @@
 "use client";
 
+import { OrderPaymentPanel } from "./order-payment-panel";
+import { ReconciliationCasesDialog } from "./reconciliation-cases-dialog";
 import type { FormEvent } from "react";
 import { useCallback, useMemo, useState } from "react";
 import {
@@ -192,6 +194,7 @@ export function OrdersSection({
     assignedTo,
     tagId,
   }), [search, orderStatus, paymentStatus, fulfillmentStatus, assignedTo, tagId]);
+  const [casesOpen, setCasesOpen] = useState(false);
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [visibleColumns, setVisibleColumns] = useState<Set<OptionalColumn>>(
@@ -367,6 +370,7 @@ export function OrdersSection({
 
   return (
     <>
+      {casesOpen && canManage && <ReconciliationCasesDialog organizationSlug={organizationSlug} onClose={() => setCasesOpen(false)} onOpenOrder={setSelectedOrderId} />}
       <MetricGrid
         metrics={[
           {
@@ -396,6 +400,8 @@ export function OrdersSection({
         title="Sipariş operasyonları"
         description="Ayrık sipariş, ödeme ve fulfillment durumları"
         actions={
+          <div className="flex gap-2">
+          {canManage && <Button variant="outline" onClick={() => setCasesOpen(true)}>Mutabakat vakaları</Button>}
           <details className="relative">
             <summary className="focus-ring cursor-pointer rounded-lg border border-line px-3 py-2 text-sm font-semibold">
               Kolonlar
@@ -416,6 +422,7 @@ export function OrdersSection({
               ))}
             </div>
           </details>
+          </div>
         }
       >
         <div className="grid gap-2 border-b border-line pb-4 md:grid-cols-3 xl:grid-cols-6">
@@ -965,7 +972,7 @@ function OrderDetailModal({
                           {domain}
                         </span>
                         {order.valid_transitions[domain].length ? (
-                          order.valid_transitions[domain].map((status) => (
+                          order.valid_transitions[domain].map((status) => domain === "payment" && status === "paid" ? (order.payment_method === "iban" ? <span key={status} className="text-sm text-zinc-600">Ödeme onayı için ödeme kanıtları panelini kullanın.</span> : null) : (
                             <Button
                               disabled={transitionMutation.isPending}
                               key={status}
@@ -996,6 +1003,7 @@ function OrderDetailModal({
                   <InlineError message={transitionMutation.error.message} />
                 ) : null}
               </section>
+              <OrderPaymentPanel key={order.id} order={order} organizationSlug={organizationSlug} canManage={canManage} />
               <section className="grid gap-4 md:grid-cols-2">
                 <div className="rounded-lg border border-line p-4">
                   <h3 className="font-bold">Müşteri ve adres snapshot</h3>

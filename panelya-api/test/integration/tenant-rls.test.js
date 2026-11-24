@@ -7601,7 +7601,9 @@ const integrationService = require('../../modules/integrations/service');
         await assert.rejects(admin.query('update payment_reconciliation_cases set resolution_note = $2 where id = $1',
           [id, 'Changed after resolution']), /immutable/i);
         if (index === 0) {
-          assert.equal(result.body.case.external_refund_reference, refund.externalReference);
+          // The refund reference stays in the database for audit; operators only get the masked case view back.
+          assert.equal(result.body.case.external_refund_reference, undefined);
+          assert.ok(!JSON.stringify(result.body).includes(refund.externalReference));
           assert.equal(result.body.case.refundVerification, 'operator_asserted_unverified');
         }
       }
@@ -8620,6 +8622,7 @@ const integrationService = require('../../modules/integrations/service');
         assert.ok(!foreign.text.includes(item.reference));
         assert.equal((await call(item, orgB, {
           amount: '100.00', currency: 'TRY', reference: 'foreign-' + item.reference, level: 'operator_recorded',
+          note: 'Foreign tenant attempt note',
         })).status, 404);
       });
       await assert.rejects(submit(item, {}, orgB), { status: 404 });
@@ -8965,11 +8968,6 @@ const integrationService = require('../../modules/integrations/service');
       ['customer claim only', (item) => submit(item, { level: 'customer_claim' }), 'REQUIRED'],
       ['one kurus short', (item) => submit(item, { amount: '99.99' }), 'AMOUNT_MISMATCH'],
       ['one kurus over', (item) => submit(item, { amount: '100.01' }), 'AMOUNT_MISMATCH'],
-      ['short operator note', (item) => submit(item, { note: '123456789' }), 'JUSTIFICATION_REQUIRED'],
-      ['justification on customer claim only', async (item) => {
-        await submit(item, { note: '' });
-        await submit(item, { level: 'customer_claim', reference: item.reference + '-claim' });
-      }, 'JUSTIFICATION_REQUIRED'],
       ['legacy evidence in a different currency', async (item) => {
         await admin.query(
           `insert into payment_evidence
@@ -8996,7 +8994,7 @@ const integrationService = require('../../modules/integrations/service');
 
     finalGate('exact justified IBAN transfers emit only operator-asserted unverified metadata', async () => {
       const item = await seed();
-      await submit(item, { amount: '99.99', note: '' });
+      await submit(item, { amount: '99.99', note: 'First part of the transfer' });
       await submit(item, {
         amount: '0.01', reference: item.reference + '-second',
         level: 'operator_asserted_verified', note: '1234567890',
@@ -9809,6 +9807,183 @@ const integrationService = require('../../modules/integrations/service');
         // Resolving never touches the order, stock or payment state.
         assert.equal((await snapshot(item)).orders.status, 'payment_pending');
       });
+    });
+
+    // ---- Phase 19 final acceptance: justification at the source, migration 077 visibility and lock behaviour.
+    const noteRule = `check (channel <> 'bank_transfer' or evidence_level = 'customer_claim'
+      or (note is not null and char_length(btrim(note)) between 10 and 2000))`;
+    // Pre-constraint shaped rows only exist in the test: they prove the approval gate still defends itself.
+    async function insertLegacyEvidence(item, { note, level = 'operator_recorded', amount = '100.00', reference }) {
+      await admin.query('alter table payment_evidence drop constraint if exists payment_evidence_bank_note_required');
+      try {
+        await admin.query(
+          `insert into payment_evidence
+             (organization_id, order_id, channel, evidence_level, amount, currency, reference, reference_key, received_at, note)
+           values ($1,$2,'bank_transfer',$3,$4,'TRY',$5,$5,now(),$6)`,
+          [item.org, item.orderId, level, amount, reference ?? item.reference, note]
+        );
+      } finally {
+        await admin.query(`alter table payment_evidence add constraint payment_evidence_bank_note_required ${noteRule} not valid`);
+      }
+    }
+
+    for (const [name, overrides] of [
+      ['no note at all', { note: undefined }],
+      ['empty note', { note: '' }],
+      ['whitespace note', { note: '          ' }],
+      ['nine character note', { note: '123456789' }],
+      ['asserted level without note', { level: 'operator_asserted_verified', note: '' }],
+    ]) {
+      finalGate('bank evidence needs a justification at the source: ' + name, async () => {
+        const item = await seed('iban');
+        const before = await snapshot(item);
+        const auditsBefore = await auditCount(item);
+        await assert.rejects(submit(item, overrides), { status: 400 });
+        assert.deepEqual(await evidence(item), []);
+        assert.deepEqual(await cases(item), []);
+        assert.equal(await auditCount(item), auditsBefore);
+        assert.deepEqual(await snapshot(item), before);
+        await withOperatorApi(async (api) => {
+          const res = await api('owner', item.org, 'POST', '/orders/' + item.orderId + '/bank-transfers', {
+            amount: '100.00', currency: 'TRY', reference: item.reference, level: overrides.level || 'operator_recorded',
+            ...(overrides.note === undefined ? {} : { note: overrides.note }),
+          });
+          assert.equal(res.status, 400);
+        });
+        assert.deepEqual(await evidence(item), []);
+      });
+    }
+
+    finalGate('a customer claim stays valid without a note, and a 10 character note is accepted', async () => {
+      const item = await seed('iban');
+      await submit(item, { level: 'customer_claim', note: undefined, reference: item.reference + '-claim' });
+      await submit(item, { note: '1234567890' });
+      assert.equal((await evidence(item)).length, 2);
+    });
+
+    finalGate('the database itself refuses unjustified counted bank evidence', async () => {
+      const item = await seed('iban');
+      for (const [level, note] of [['operator_recorded', null], ['operator_recorded', 'short'], ['operator_recorded', '         '],
+        ['operator_asserted_verified', null]]) {
+        await assert.rejects(admin.query(
+          `insert into payment_evidence
+             (organization_id, order_id, channel, evidence_level, amount, currency, reference, reference_key, received_at, note)
+           values ($1,$2,'bank_transfer',$3,10,'TRY',$4,$4,now(),$5)`,
+          [item.org, item.orderId, level, item.reference + level + String(note), note]
+        ), { code: '23514' });
+      }
+      await admin.query(
+        `insert into payment_evidence
+           (organization_id, order_id, channel, evidence_level, amount, currency, reference, reference_key, received_at)
+         values ($1,$2,'bank_transfer','customer_claim',10,'TRY',$3,$3,now())`, [item.org, item.orderId, item.reference + 'claim']
+      );
+      assert.equal((await evidence(item)).length, 1);
+    });
+
+    for (const [name, legacyRows, code] of [
+      ['a short note on legacy evidence', [{ note: '123456789' }], 'JUSTIFICATION_REQUIRED'],
+      ['a note only on a customer claim', [{ note: '' }, { level: 'customer_claim', note: 'Claim has a long note', suffix: '-claim' }], 'JUSTIFICATION_REQUIRED'],
+    ]) {
+      finalGate('approval gate still defends against ' + name, async () => {
+        const item = await seed('iban');
+        for (const row of legacyRows) await insertLegacyEvidence(item, { ...row, reference: item.reference + (row.suffix || '') });
+        const before = await snapshot(item);
+        await assert.rejects(markPaid(item), { status: 409, code: 'PAYMENT_EVIDENCE_' + code });
+        assert.deepEqual(await snapshot(item), before);
+      });
+    }
+
+    // ---- Migration 077: tenant scan completeness, fail-closed visibility and lock behaviour.
+    async function withoutClaims(run) {
+      const { runRollback } = require('../../scripts/rollback-migration');
+      await admin.query('alter table payment_identity_claims disable trigger user');
+      try { await admin.query('delete from payment_identity_claims'); } finally {
+        await admin.query('alter table payment_identity_claims enable trigger user');
+      }
+      await runRollback({ pool: migratorPool, target: '077_payment_identity_claims.sql', logger: { log() {}, warn() {} } });
+      try { await run(); } finally {
+        await require('../../scripts/run-migrations').runMigrations({ pool: migratorPool, logger: { log() {}, warn() {} } });
+      }
+    }
+    const migrate = () => require('../../scripts/run-migrations').runMigrations({ pool: migratorPool, logger: { log() {}, warn() {} } });
+    const claimsTable = async () => (await admin.query("select to_regclass('payment_identity_claims') as t")).rows[0].t;
+
+    finalGate('migration 077 scans every tenant: a conflict between two late-created tenants is found', async () => {
+      const created = [];
+      for (const label of ['late-one', 'late-two']) {
+        const [{ id }] = await rows("insert into organizations (name, slug) values ($1,$2) returning id", ['P19 ' + label, label + '-' + Date.now()]);
+        created.push({ id });
+      }
+      const pid = 'scan-all-' + crypto.randomUUID();
+      const orders = [];
+      for (const { id } of created) {
+        const [{ id: orderId }] = await rows(
+          `insert into orders (organization_id, order_code, total, status, payment_method, payment_provider, payment_id, currency)
+           values ($1,$2,100,'paid','card','iyzico',$3,'TRY') returning id`, [id, 'LATE-' + crypto.randomUUID().slice(0, 8), pid]
+        );
+        orders.push({ org: id, orderId });
+      }
+      await withoutClaims(async () => {
+        await assert.rejects(migrate(), /077.*conflicting legacy payment identity ownership/s);
+        assert.equal(await claimsTable(), null);
+        await admin.query('update orders set payment_id = null where id = $1', [orders[1].orderId]);
+        await migrate();
+        const claim = (await claimRows(pid))[0];
+        assert.deepEqual([claim.organization_id, String(claim.order_id)], [orders[0].org, String(orders[0].orderId)]);
+      });
+      await admin.query('update orders set payment_id = null where id = any($1::bigint[])', [orders.map(({ orderId }) => orderId)]);
+    });
+
+    finalGate('migration 077 refuses to report a clean result when tenant visibility cannot be verified', async () => {
+      await withoutClaims(async () => {
+        await admin.query('alter table organizations force row level security');
+        try {
+          await assert.rejects(migrate(), /077.*tenant visibility cannot be verified/s);
+          assert.equal(await claimsTable(), null);
+        } finally { await admin.query('alter table organizations no force row level security'); }
+        const [{ policyname: name, qual }] = await rows(
+          "select policyname, qual from pg_policies where schemaname = 'public' and tablename = 'payment_evidence'"
+        );
+        await admin.query(`alter policy ${name} on payment_evidence using (true)`);
+        try {
+          await assert.rejects(migrate(), /077.*tenant visibility cannot be verified/s);
+          assert.equal(await claimsTable(), null);
+        } finally {
+          assert.ok(qual.includes('app.current_organization_id'));
+          await admin.query(
+            `alter policy ${name} on payment_evidence using (app_rls_bypassed() or organization_id = nullif(current_setting('app.current_organization_id', true), '')::uuid)`
+          );
+        }
+      });
+    });
+
+    finalGate('migration 077 leaves no ACCESS EXCLUSIVE footprint on orders and yields to concurrent writers within its lock timeout', async () => {
+      const sql = fs.readFileSync(path.join(__dirname, '../../db/migrations/077_payment_identity_claims.sql'), 'utf8');
+      assert.ok(!/alter table orders\b/i.test(sql), 'must not alter orders');
+      assert.ok(!/no force row level security/i.test(sql), 'must not lift FORCE RLS');
+      const item = await seed('card');
+      const hold = new (require('pg').Client)({ connectionString: process.env.INTEGRATION_ADMIN_URL });
+      await hold.connect();
+      try {
+        await withoutClaims(async () => {
+          await hold.query('begin');
+          await hold.query('update orders set updated_at = now() where id = $1', [item.orderId]);
+          const started = Date.now();
+          // The index build needs a SHARE lock on orders: an open writer must make the migration fail
+          // within the bounded lock timeout, atomically, rather than queue behind it forever.
+          await assert.rejects(migrate(), { code: '55P03' });
+          assert.ok(Date.now() - started < 30000, 'bounded by lock_timeout');
+          assert.equal(await claimsTable(), null);
+          assert.equal((await admin.query(
+            "select count(*)::int as n from schema_migrations where filename = '077_payment_identity_claims.sql'")).rows[0].n, 0);
+          await hold.query('commit');
+          await migrate();
+          assert.notEqual(await claimsTable(), null);
+        });
+      } finally {
+        await hold.query('rollback').catch(() => {});
+        await hold.end();
+      }
     });
 
     finalGate('payment identity claim table forces RLS and keys each provider payment globally', async () => {

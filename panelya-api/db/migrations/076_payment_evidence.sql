@@ -30,7 +30,10 @@ create table payment_evidence (
       and nullif(btrim(provider_payment_id), '') is not null and callback_event_id is not null
       and reference is null and reference_key is null)
   ),
-  check (evidence_level <> 'operator_asserted_verified'
+  -- Evidence is append-only, so an unjustified counted record could never be corrected later.
+  -- Every bank record except a customer claim therefore carries an operator justification at write time.
+  constraint payment_evidence_bank_note_required check (channel <> 'bank_transfer'
+    or evidence_level = 'customer_claim'
     or (note is not null and char_length(btrim(note)) between 10 and 2000))
 );
 

@@ -75,6 +75,11 @@ export const queryKeys = {
     list: (organizationSlug: string, search: string) =>
       ["customers", organizationSlug, search] as const,
   },
+  paymentOperations: {
+    all: (org: string) => ["payment-operations", org] as const,
+    evidence: (org: string, id: string) => ["payment-operations", org, "evidence", id] as const,
+    cases: (org: string, status: string, cursor?: string) => ["payment-operations", org, "cases", status, cursor ?? ""] as const,
+  },
   orders: {
     all: (organizationSlug: string) => ["orders", organizationSlug] as const,
     list: (organizationSlug: string, filters: string) =>

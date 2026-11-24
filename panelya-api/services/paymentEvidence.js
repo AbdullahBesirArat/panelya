@@ -86,7 +86,7 @@ async function recordBankTransferEvidence(client, {
     || typeof currency !== 'string' || !/^[A-Z]{3}$/.test(currency)
     || !referenceKey || cleanReference.length > 200 || cleanReference.includes('\0')
     || !bankLevels.includes(level) || noteLength > 2000 || cleanNote.includes('\0')
-    || (level === 'operator_asserted_verified' && noteLength < 10)
+    || (level !== 'customer_claim' && noteLength < 10)
     || receivedAt === null || !Number.isFinite(date.getTime())) {
     throw httpError(400, 'Gecersiz havale kaniti');
   }

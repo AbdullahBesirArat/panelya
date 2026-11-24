@@ -8,5 +8,6 @@ begin
   end if;
 end $$;
 
+drop index if exists idx_orders_payment_provider_payment_id;
 drop table payment_identity_claims;
 drop function reject_payment_identity_claim_mutation();

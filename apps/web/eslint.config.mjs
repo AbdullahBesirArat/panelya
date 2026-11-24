@@ -10,5 +10,7 @@ export default defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // CommonJS Playwright specs that run inside the root E2E harness, not part of the Next bundle.
+    "e2e/**",
   ]),
 ]);
