@@ -333,29 +333,40 @@ async function processPaymentCallbackEvent(req, eventId, deps = {}) {
       paymentId = firstPresent(verifiedPayment.paymentId);
       if (!paymentId) throw new Error('Dogrulanmis odeme icin saglayici odeme kimligi eksik');
       await bindPaymentIdentity(client, { order: currentOrder, provider, paymentId });
-      const amount = amountInKurus(verifiedPayment.paidPrice);
+      // iyzico reports the merchant amount as `price` and the charged amount (which includes any
+      // installment commission) as `paidPrice`. The order total is compared with the merchant amount;
+      // without `price` only a single-installment paidPrice is an acceptable stand-in. The charge must
+      // never be below the merchant amount. Anything ambiguous fails closed into a case.
+      const paid = amountInKurus(verifiedPayment.paidPrice);
+      const merchantPrice = amountInKurus(verifiedPayment.price);
+      const installments = Number(verifiedPayment.installment || 1);
+      const amount = merchantPrice ?? (installments <= 1 ? paid : null);
       const currency = verifiedPayment.currency;
-      const validAmount = amount !== null && amount > 0n;
+      const validAmount = amount !== null && amount > 0n && paid !== null && paid >= amount;
       const validCurrency = typeof currency === 'string' && /^[A-Z]{3}$/.test(currency);
       const matches = validAmount && amount === amountInKurus(currentOrder.total)
         && validCurrency && currency === currentOrder.currency;
       const late = currentStatus === 'cancelled';
+      const settled = ['paid', 'processing', 'shipped', 'delivered'].includes(currentStatus);
       const evidence = matches
         ? await recordCardEvidence(client, {
           order: currentOrder, event, provider, paymentId, amount: decimalAmount(amount), currency,
         })
         : null;
-      if (!matches || late) {
+      // A different successful payment on an order that is already paid is a duplicate capture.
+      const duplicate = matches && settled && !evidence.replay;
+      if (!matches || late || duplicate) {
         const reconciliationCase = await recordLatePayment(client, req, audit, currentOrder, event, {
           provider, paymentId, token: payload.token,
-          amount: validAmount ? decimalAmount(amount) : null,
+          amount: paid !== null ? decimalAmount(paid) : null,
           currency: validCurrency ? currency : null,
-          caseType: matches ? 'paid_on_cancelled_order' : 'provider_amount_mismatch',
+          caseType: !matches ? 'provider_amount_mismatch'
+            : duplicate ? 'provider_duplicate_payment' : 'paid_on_cancelled_order',
           evidenceId: evidence?.id ?? null,
         });
         const reconciliationCaseId = reconciliationCase.id;
         let order = currentOrder;
-        if (matches && !reconciliationCase.existing) {
+        if (matches && late && !reconciliationCase.existing) {
           // Retain the legacy late-payment metadata without running stock or promotion transitions.
           order = await updateCallbackOrder(client, currentOrder, currentStatus, paymentId,
             `Final durum korunuyor: ${currentStatus}`);
@@ -363,19 +374,19 @@ async function processPaymentCallbackEvent(req, eventId, deps = {}) {
         const processed = await finalizeEvent(client, event.id, {
           processing_status: 'processed',
           processed_order_id: currentOrder.id,
-          result_status: matches ? currentStatus : 'provider_amount_mismatch',
+          result_status: !matches ? 'provider_amount_mismatch' : currentStatus,
           last_error: `reconciliation_case:${reconciliationCaseId}`,
           last_processed_at: new Date().toISOString(),
           next_retry_at: null,
         }, organizationId);
         await client.query('commit');
         return {
-          ...processed, reconciliationCaseId, order, ok: false,
-          redirectUrl: buildFailureUrl(req, currentOrder.order_code),
+          ...processed, reconciliationCaseId, order, ok: duplicate,
+          redirectUrl: duplicate ? buildSuccessUrl(req, currentOrder.order_code) : buildFailureUrl(req, currentOrder.order_code),
           ...(reconciliationCase.existing && { idempotentReplay: true }),
         };
       }
-      if (evidence.replay && currentStatus === 'paid') {
+      if (evidence.replay && settled) {
         const processed = await finalizeEvent(client, event.id, {
           processing_status: 'processed',
           processed_order_id: currentOrder.id,

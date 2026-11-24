@@ -1,5 +1,8 @@
 -- A provider payment id is bound to exactly one (tenant, order) across every verified-payment
 -- branch (paid, late, amount mismatch). First binder wins; append-only; no provider secrets.
+-- Bound the wait for the locks below so a busy old instance makes the deploy fail fast and safely.
+set local lock_timeout = '10s';
+
 create table payment_identity_claims (
   provider text not null check (nullif(btrim(provider), '') is not null),
   provider_payment_id text not null check (nullif(btrim(provider_payment_id), '') is not null),
@@ -23,12 +26,16 @@ create trigger payment_identity_claims_no_truncate before truncate on payment_id
   for each statement execute function reject_payment_identity_claim_mutation();
 
 alter table payment_identity_claims enable row level security;
-alter table payment_identity_claims force row level security;
 create policy payment_identity_claims_tenant_policy on payment_identity_claims
   using (app_rls_bypassed() or organization_id = nullif(current_setting('app.current_organization_id', true), '')::uuid)
   with check (app_rls_bypassed() or organization_id = nullif(current_setting('app.current_organization_id', true), '')::uuid);
 
 -- backfill:begin
+-- The migrating role is subject to FORCE ROW LEVEL SECURITY and would see no legacy rows at all,
+-- which would make both the guard and the backfill silently vacuous. Lift FORCE for the duration of
+-- this transaction only (the owner then bypasses RLS) and restore it before the end marker.
+alter table payment_evidence no force row level security;
+alter table payment_reconciliation_cases no force row level security;
 -- Fail closed on ambiguous legacy ownership: one provider payment id must belong to exactly one
 -- (tenant, order) across payment_evidence and payment_reconciliation_cases. The message carries
 -- no payment id or tenant data; the whole migration (table, claims, schema_migrations row) rolls back.
@@ -37,10 +44,10 @@ begin
   if exists (
     select 1 from (
       select provider, provider_payment_id, organization_id, order_id
-        from payment_evidence where channel = 'card'
+        from payment_evidence where channel = 'card' and nullif(btrim(provider_payment_id), '') is not null
       union all
       select provider, provider_payment_id, organization_id, order_id
-        from payment_reconciliation_cases where provider <> 'manual'
+        from payment_reconciliation_cases where provider <> 'manual' and nullif(btrim(provider_payment_id), '') is not null
     ) known
     group by provider, provider_payment_id
     having count(distinct (organization_id, order_id)) > 1
@@ -54,14 +61,19 @@ insert into payment_identity_claims (provider, provider_payment_id, organization
 select distinct on (provider, provider_payment_id) provider, provider_payment_id, organization_id, order_id, created_at
   from (
     select provider, provider_payment_id, organization_id, order_id, created_at
-      from payment_evidence where channel = 'card'
+      from payment_evidence where channel = 'card' and nullif(btrim(provider_payment_id), '') is not null
     union all
     select provider, provider_payment_id, organization_id, order_id, created_at
-      from payment_reconciliation_cases where provider <> 'manual'
+      from payment_reconciliation_cases where provider <> 'manual' and nullif(btrim(provider_payment_id), '') is not null
   ) known
  order by provider, provider_payment_id, created_at, order_id
 on conflict (provider, provider_payment_id) do nothing;
+
+alter table payment_evidence force row level security;
+alter table payment_reconciliation_cases force row level security;
 -- backfill:end
+
+alter table payment_identity_claims force row level security;
 
 do $$
 declare role_name text;

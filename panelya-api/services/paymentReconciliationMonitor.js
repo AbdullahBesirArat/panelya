@@ -110,7 +110,7 @@ with settings as (
     c.status, c.detected_at, c.id
   from payment_reconciliation_cases c cross join settings s
   where c.status = 'open' and (s.org is null or c.organization_id = s.org)
-    and c.case_type in ('bank_transfer_underpaid', 'bank_transfer_overpaid', 'bank_transfer_multiple', 'bank_transfer_conflict')
+    and c.case_type in ('bank_transfer_underpaid', 'bank_transfer_overpaid', 'bank_transfer_multiple', 'bank_transfer_conflict', 'provider_duplicate_payment')
   union all
   select * from evidence_findings
   union all

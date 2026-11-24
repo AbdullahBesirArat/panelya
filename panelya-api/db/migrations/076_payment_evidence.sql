@@ -58,12 +58,12 @@ create policy payment_evidence_tenant_policy on payment_evidence
 alter table payment_reconciliation_cases
   drop constraint payment_reconciliation_cases_case_type_check,
   add constraint payment_reconciliation_cases_case_type_check check (case_type in (
-    'paid_on_cancelled_order', 'provider_amount_mismatch', 'bank_transfer_underpaid', 'bank_transfer_overpaid',
+    'paid_on_cancelled_order', 'provider_amount_mismatch', 'provider_duplicate_payment', 'bank_transfer_underpaid', 'bank_transfer_overpaid',
     'bank_transfer_multiple', 'bank_transfer_conflict', 'bank_transfer_late'
   )),
   alter column callback_event_id drop not null,
   add constraint payment_reconciliation_callback_required check (
-    (case_type in ('paid_on_cancelled_order', 'provider_amount_mismatch')) = (callback_event_id is not null)
+    (case_type in ('paid_on_cancelled_order', 'provider_amount_mismatch', 'provider_duplicate_payment')) = (callback_event_id is not null)
   ),
   add column evidence_id bigint,
   add foreign key (organization_id, order_id, evidence_id)

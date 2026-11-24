@@ -40,6 +40,12 @@ Sonuç: vakalar çözülmezse stok kalıcı olarak ayrılı kalır. İzleyicinin
 
 Doğrulanmış her kart ödemesi, işlenmeden önce `(provider, provider_payment_id)` çiftini tek bir (tenant, sipariş) ile `payment_identity_claims` tablosunda bağlar; ilk bağlayan kazanır, tablo salt eklemelidir. Aynı kimlik başka siparişte (tutar eşleşse de eşleşmese de), başka tenantta veya 075 öncesi bir vakada görülürse işlem `PAYMENT_ID_ORDER_MISMATCH` ile reddedilir: sipariş, stok, kupon değişmez, yeni vaka/kanıt/audit yazılmaz, olay yeniden denenebilir `failed` kalır ve hata metni diğer taraf hakkında bilgi vermez. Bu olay finans operasyonlarına iletilmelidir. Migration 077 mevcut kart kanıtlarını ve `manual` olmayan vakaları geriye dönük bağlar; down migration kayıt varsa reddeder.
 
+**Çakışma varsa 077 uygulanmaz (fail-closed).** Aynı `(provider, provider_payment_id)` birden fazla `(tenant, sipariş)` çiftine aitse migration `Cannot apply migration 077: conflicting legacy payment identity ownership exists` hatasıyla durur; tablo, claim ve `schema_migrations` kaydı dahil tamamı geri alınır, hata metni ödeme kimliği veya tenant içermez. Migration, başlangıç komutunun parçası olarak sağlıklı hâle gelmeden önce çalıştığından yeni instance sağlıklı olmaz ve Railway eski dağıtımı çalışır bırakır (trafik kesilmez, dağıtım ilerlemez). Müdahale: salt okunur bir sorguyla çakışan kimlikleri finans operasyonlarıyla birlikte inceleyin, doğru sahibi belirleyin, kayıtlar saklama kuralları (bkz. retention) gereği silinmeden ilgili vakaları çözün veya veri düzeltmesini ayrı onayla yapın, sonra yeniden dağıtın. Migration checksum'ını elle değiştirmeyin. Rolling dağıtımda eski kod 077 uygulandıktan sonra bir süre çalışırsa claim yazmaz; yeni kod claim olmayan eski vaka/kanıtları da (sistem rolüyle çapraz tenant) kontrol ettiği için bu pencerede çakışan kimlik reddedilir, ama eski instance'ın o pencerede yazdığı yeni kimlikler ilk yeni-kod callback'inde bağlanır.
+
+## Ödenmemiş siparişin işleme alınması
+
+IBAN/kart siparişi ödeme durumu `paid`, `partially_refunded` veya `refunded` değilken `confirmed`, `processing`, `ready_to_ship`, `shipped`, `delivered` durumlarına (sipariş alanı) veya `processing`, `ready_to_ship`, `shipped`, `delivered` (fulfillment alanı) geçirilemez: HTTP 409 `ORDER_PAYMENT_REQUIRED`. Tüm uç noktalar (`PUT /orders/:id/status`, `POST /orders/:id/transitions`, toplu durum, `v1`, kargo, iade) aynı `transitionOrderOperation` fonksiyonundan geçer; shipment oluşturma ayrıca `ORDER_NOT_PAID` ister. `payment_pending` sipariş oluşturma ve rezervasyon akışı değişmedi. IBAN/kart dışı yöntemler (ör. kapıda ödeme) etkilenmez.
+
 ## Alarm ve müdahale sırası
 
 P1 olay sorumlusunu hemen bilgilendirin. P2 bulgularını aynı vardiyada inceleyin. P3 bulgularını mutabakat kuyruğunda izleyin. Birden çok alarm varsa önce kapsamı ve tenant etkisini belirleyin, ardından sağlayıcı panelinde sipariş bazında doğrulama yapın.
@@ -86,3 +92,13 @@ node panelya-api/scripts/check-payment-reconciliation.js --format json --state-f
 | `PAYMENT_RECON_ALERT_COOLDOWN_MINUTES` | `--alert-cooldown-minutes` | 360 dakika, 1–10080 |
 
 Yaş eşikleri kesin olarak aşıldığında alarm oluşur. Başarısız deneme sayısı eşiğe ulaştığında kontrol bulgu üretir. State dosyası yalnızca SHA-256 parmak izi, alarm zamanı ve seviye saklar. Eksik veya bozuk JSON boş state sayılır. Seviye yükselirse bekleme süresi dolmadan alarm çıkar. Çözülen bulgu bir sonraki başarılı koşuda state’ten düşer. State dosyası belirtilmezse veya `--no-dedup` verilirse her koşuda mevcut alarmlar üretilir.
+
+## Kart ödemesi: taksit, çift tahsilat ve elle onay
+
+- **Tutar karşılaştırması:** sağlayıcının `price` değeri (satıcı tutarı) sipariş toplamıyla karşılaştırılır; `paidPrice` taksit komisyonunu içerebilir ve `price` değerinden küçük olamaz. `price` yoksa yalnız tek taksitli ödemede `paidPrice` kabul edilir; belirsiz her durum `provider_amount_mismatch` vakasına gider, sipariş ödenmiş sayılmaz.
+- **Çift tahsilat:** zaten ödenmiş (`paid`/`processing`/`shipped`/`delivered`) bir siparişte farklı bir ödeme kimliğiyle ikinci başarılı ödeme gelirse `provider_duplicate_payment` vakası açılır, `orders.payment_id` ilk ödemeyle kalır, stok/sipariş değişmez; izleyici bunu `partial_or_duplicate_payment_suspected` altında bildirir. İkinci tahsilatın iadesi operatörün sağlayıcı panelinden yapacağı bir karardır; sistem otomatik iade yapmaz.
+- **Elle onay yok:** kart siparişi, aynı siparişe ait `provider_verified` kanıt olmadan operatör tarafından `paid` yapılamaz (`PAYMENT_EVIDENCE_REQUIRED`); kartta ödemeyi yalnız sağlayıcı doğrulamalı callback kurar.
+- **Migration 077 kilit süresi:** `lock_timeout = 10s`; eski instance kilit tutuyorsa migration güvenle hata verir ve yeniden denenir. Boş `provider_payment_id` taşıyan eski satırlar claim'e alınmaz.
+- **Çalışma alanı temizliği:** mutabakat vakası, ödeme kanıtı veya kimlik claim'i olan çalışma alanı temizlenmez/yeniden tohumlanmaz (ilgili tablolar salt eklemelidir); arşivleme kanıtı korur.
+- **Bilinen açık:** `PAYMENT_ID_ORDER_MISMATCH` ile başarısız olan callback olayı 15 dakikada bir sınırsız yeniden denenir; sonlandırma (park) durumu henüz yoktur.
+

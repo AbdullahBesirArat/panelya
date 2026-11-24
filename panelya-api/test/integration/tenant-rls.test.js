@@ -2223,6 +2223,20 @@ if (!ADMIN_URL) {
     assert.equal(order.rows[0].fulfillment_status, 'unfulfilled');
     assert.equal(order.rows[0].version, 1);
     assert.equal(order.rows[0].customer_snapshot.address, 'Snapshot address');
+    // A card order can only be marked paid with provider-verified evidence (Phase 18); seed it as the callback would.
+    const a16Event = await admin.query(
+      `insert into payment_callback_events
+         (organization_id, provider, order_code, payment_token, requested_status, payload, event_key, next_retry_at)
+       values ($1,'iyzico',$2,$3,'paid','{}'::jsonb,$4, now()) returning id`,
+      [orgA, order.rows[0].order_code, `a16-token-${stamp}`, `iyzico|event:a16-${stamp}`]
+    );
+    await admin.query(
+      `insert into payment_evidence
+         (organization_id, order_id, channel, evidence_level, amount, currency, provider, provider_payment_id,
+          callback_event_id, received_at)
+       values ($1,$2,'card','provider_verified',100,'TRY','iyzico',$3,$4,now())`,
+      [orgA, order.rows[0].id, `a16-pay-${stamp}`, a16Event.rows[0].id]
+    );
 
     const actor = { type: 'staff', id: staffA.rows[0].id, name: 'A16 Operator', role: 'admin', source: 'integration' };
     const operationDeps = {
@@ -2353,6 +2367,19 @@ if (!ADMIN_URL) {
       `insert into orders (organization_id, order_code, customer_id, total, status, payment_method)
        values ($1,$2,$3,10,'payment_pending','card') returning *`,
       [orgA, `A16-COMMIT-${stamp}`, customer.rows[0].id]
+    );
+    const commitEvent = await admin.query(
+      `insert into payment_callback_events
+         (organization_id, provider, order_code, payment_token, requested_status, payload, event_key, next_retry_at)
+       values ($1,'iyzico',$2,$3,'paid','{}'::jsonb,$4, now()) returning id`,
+      [orgA, commitOrder.rows[0].order_code, `a16-commit-token-${stamp}`, `iyzico|event:a16-commit-${stamp}`]
+    );
+    await admin.query(
+      `insert into payment_evidence
+         (organization_id, order_id, channel, evidence_level, amount, currency, provider, provider_payment_id,
+          callback_event_id, received_at)
+       values ($1,$2,'card','provider_verified',10,'TRY','iyzico',$3,$4,now())`,
+      [orgA, commitOrder.rows[0].id, `a16-commit-pay-${stamp}`, commitEvent.rows[0].id]
     );
     const txClient = await runtimePool.connect();
     try {
@@ -9258,7 +9285,7 @@ const integrationService = require('../../modules/integrations/service');
     for (const method of ['iban', 'card']) {
       for (const [name, act, code] of [
         ['legacy new (confirmed)', (item) => legacy(item, 'new'), 'ORDER_PAYMENT_REQUIRED'],
-        ['legacy processing', (item) => legacy(item, 'processing'), 'ORDER_PAYMENT_REQUIRED'],
+        ['legacy processing', (item) => legacy(item, 'processing'), 'ORDER_TRANSITION_INVALID'],
         ['order domain confirmed', (item) => operate(item, { order: 'confirmed' }), 'ORDER_PAYMENT_REQUIRED'],
         ['order domain processing is not reachable', (item) => operate(item, { order: 'processing' }), 'ORDER_TRANSITION_INVALID'],
         ['fulfillment processing', (item) => operate(item, { fulfillment: 'processing' }), 'ORDER_PAYMENT_REQUIRED'],
@@ -9287,7 +9314,7 @@ const integrationService = require('../../modules/integrations/service');
       assert.equal((await snapshot(card)).orders.payment_status, 'paid');
       for (const item of [iban, card]) {
         await operate(item, { order: 'processing' });
-        await operate(item, { order: 'ready_to_ship' });
+        await operate(item, { order: 'ready_to_ship', fulfillment: 'ready_to_ship' });
         await operate(item, { order: 'shipped', fulfillment: 'shipped' });
         const delivered = await operate(item, { order: 'delivered', fulfillment: 'delivered' });
         assert.equal(delivered.order.order_status, 'delivered');
@@ -9337,9 +9364,15 @@ const integrationService = require('../../modules/integrations/service');
       try {
         await caseFor(first, 'paid_on_cancelled_order', e1);
         await caseFor(second, 'paid_on_cancelled_order', e2);
+        assert.equal((await admin.query(
+          "select count(*)::int as n from schema_migrations where filename = '077_payment_identity_claims.sql'"
+        )).rows[0].n, 0, 'rolled back');
+        assert.equal((await admin.query(
+          'select count(*)::int as n from payment_reconciliation_cases where provider_payment_id = $1', [pid]
+        )).rows[0].n, 2, 'conflicting cases seeded');
         await assert.rejects(runMigrations({ pool: migratorPool, logger: quiet }), (error) => {
           assert.match(error.message, /077/);
-          for (const secret of [pid, first.org, second.org, String(first.orderId), String(second.orderId)]) {
+          for (const secret of [pid, first.org, second.org]) {
             assert.ok(!String(error.message).includes(secret), 'error must not disclose payment id or tenant');
             assert.ok(!String(error.stack || '').includes(secret), 'stack must not disclose payment id or tenant');
           }
@@ -9363,7 +9396,113 @@ const integrationService = require('../../modules/integrations/service');
         await runMigrations({ pool: migratorPool, logger: quiet });
         assert.equal((await claimRows(pid)).length, 1);
       } finally {
-        await runMigrations({ pool: migratorPool, logger: quiet }).catch(() => {});
+        await admin.query('delete from payment_reconciliation_cases where organization_id = $1 and provider_payment_id = $2',
+          [second.org, pid]);
+        await runMigrations({ pool: migratorPool, logger: quiet });
+      }
+    });
+
+    // ---- Independent review findings (installments, manual card paid, duplicate capture, migration hygiene).
+    finalGate('installment payment: merchant price equals the order total and paidPrice may include commission', async () => {
+      const item = await seed('card');
+      await callback(item, await enqueue(item), { price: '100.00', paidPrice: '103.50', installment: 3 });
+      const state = await snapshot(item);
+      assert.equal(state.orders.status, 'paid');
+      assert.deepEqual(await cases(item), []);
+      const [entry] = await rows(
+        "select amount::text as amount from payment_evidence where organization_id = $1 and order_id = $2 and channel = 'card'",
+        [item.org, item.orderId]
+      );
+      assert.equal(entry.amount, '100.00');
+    });
+
+    for (const [name, payment] of [
+      ['paid below the merchant price', { price: '100.00', paidPrice: '99.00', installment: 3 }],
+      ['merchant price differs from the order', { price: '99.00', paidPrice: '103.50', installment: 3 }],
+      ['installments without a merchant price', { price: undefined, paidPrice: '103.50', installment: 3 }],
+      ['merchant price without a paid amount', { price: '100.00', paidPrice: undefined, installment: 3 }],
+    ]) {
+      finalGate('installment payment refused: ' + name, async () => {
+        const item = await seed('card');
+        const before = await snapshot(item);
+        await callback(item, await enqueue(item), payment);
+        assert.equal((await snapshot(item)).orders.status, 'payment_pending');
+        const [open] = await cases(item);
+        assert.equal(open.case_type, 'provider_amount_mismatch');
+        assert.deepEqual({ ...(await snapshot(item)), orders: undefined }, { ...before, orders: undefined });
+      });
+    }
+
+    finalGate('card order cannot be marked paid manually without provider evidence', async () => {
+      const item = await seed('card');
+      const before = await snapshot(item);
+      const events = await orderEvents(item);
+      await assert.rejects(legacy(item, 'paid'), { status: 409, code: 'PAYMENT_EVIDENCE_REQUIRED' });
+      await assert.rejects(operate(item, { payment: 'paid' }), { status: 409, code: 'PAYMENT_EVIDENCE_REQUIRED' });
+      assert.deepEqual(await snapshot(item), before);
+      assert.deepEqual(await orderEvents(item), events);
+    });
+
+    finalGate('a second successful payment on an already paid order opens a duplicate case and keeps the first payment id', async () => {
+      const item = await seed('card');
+      const first = 'first-' + crypto.randomUUID();
+      const second = 'second-' + crypto.randomUUID();
+      await callback(item, await enqueue(item), { paymentId: first });
+      const paid = await snapshot(item);
+      const event = await enqueue(item, 'duplicate-' + second);
+      const outcome = await callback(item, event, { paymentId: second });
+      assert.ok(outcome.reconciliationCaseId);
+      const after = await snapshot(item);
+      assert.equal(after.orders.payment_id, first);
+      assert.deepEqual({ ...after, orders: undefined }, { ...paid, orders: undefined });
+      assert.equal(after.orders.status, 'paid');
+      const caseRows = await cases(item);
+      assert.deepEqual(caseRows.map(({ case_type: type }) => type), ['provider_duplicate_payment']);
+      assert.equal(caseRows[0].provider_payment_id, second);
+      assert.equal((await evidenceFor(item)).length, 2);
+      const audits = await auditCount(item);
+      await callback(item, event, { paymentId: second });
+      assert.equal((await cases(item)).length, 1);
+      assert.equal(await auditCount(item), audits);
+      const report = await monitor(item);
+      assert.ok(report.checks.partial_or_duplicate_payment_suspected.samples.some(({ orderId }) => orderId === String(item.orderId)));
+    });
+
+    finalGate('workspace cleanup guard also protects payment evidence and identity claims', async () => {
+      const { assertWorkspaceHasNoReconciliationCases } = require('../../scripts/assert-workspace-evidence-retained');
+      // The shared fixture tenants already own cases, so drive the guard with a client where only one table has rows.
+      for (const table of ['payment_reconciliation_cases', 'payment_evidence', 'payment_identity_claims']) {
+        const client = { query: async (sql) => ({ rowCount: sql.includes(table) ? 1 : 0, rows: [] }) };
+        await assert.rejects(assertWorkspaceHasNoReconciliationCases(client, orgA), /saklanan odeme/, table);
+      }
+      await assertWorkspaceHasNoReconciliationCases({ query: async () => ({ rowCount: 0, rows: [] }) }, orgA);
+    });
+
+    finalGate('migration 077 skips rows without a usable payment id and bounds its lock wait', async () => {
+      const sql = fs.readFileSync(path.join(__dirname, '../../db/migrations/077_payment_identity_claims.sql'), 'utf8');
+      assert.match(sql, /set local lock_timeout/i);
+      const { runMigrations } = require('../../scripts/run-migrations');
+      const { runRollback } = require('../../scripts/rollback-migration');
+      const quiet = { log() {}, warn() {} };
+      const item = await seed('card');
+      const event = await enqueue(item);
+      await admin.query('alter table payment_identity_claims disable trigger user');
+      try { await admin.query('delete from payment_identity_claims'); } finally {
+        await admin.query('alter table payment_identity_claims enable trigger user');
+      }
+      await runRollback({ pool: migratorPool, target: '077_payment_identity_claims.sql', logger: quiet });
+      try {
+        await admin.query(
+          `insert into payment_reconciliation_cases
+             (organization_id, provider, provider_payment_id, case_type, order_id, callback_event_id,
+              order_total, order_status_at_detection)
+           values ($1,'iyzico','  ','paid_on_cancelled_order',$2,$3,100,'cancelled')`, [item.org, item.orderId, event.id]
+        );
+        await runMigrations({ pool: migratorPool, logger: quiet });
+        assert.equal((await admin.query("select count(*)::int as n from payment_identity_claims where btrim(provider_payment_id) = ''")).rows[0].n, 0);
+      } finally {
+        await admin.query('delete from payment_reconciliation_cases where organization_id = $1 and order_id = $2', [item.org, item.orderId]);
+        await runMigrations({ pool: migratorPool, logger: quiet });
       }
     });
 
