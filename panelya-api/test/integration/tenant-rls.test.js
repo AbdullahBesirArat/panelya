@@ -9248,6 +9248,125 @@ const integrationService = require('../../modules/integrations/service');
       assert.equal(systemPool.waitingCount, 0);
     });
 
+    // ---- Release blocker 2: unpaid IBAN/card orders cannot enter fulfilment (single choke point:
+    // transitionOrderOperation, used by PUT status, POST transitions, bulk-status, v1, shipping, returns).
+    const operate = (item, changes, org = item.org) => asTenant(runtimePool, org, (client) =>
+      transitionOrderOperation(client, { organizationId: org, orderId: item.orderId, changes, actor: { type: 'system', source: 'test' } })
+    );
+    const legacy = (item, status, org = item.org) => asTenant(runtimePool, org, (client) =>
+      transitionLegacyOrderStatus(client, { organizationId: org, orderId: item.orderId, status }));
+    for (const method of ['iban', 'card']) {
+      for (const [name, act, code] of [
+        ['legacy new (confirmed)', (item) => legacy(item, 'new'), 'ORDER_PAYMENT_REQUIRED'],
+        ['legacy processing', (item) => legacy(item, 'processing'), 'ORDER_PAYMENT_REQUIRED'],
+        ['order domain confirmed', (item) => operate(item, { order: 'confirmed' }), 'ORDER_PAYMENT_REQUIRED'],
+        ['order domain processing is not reachable', (item) => operate(item, { order: 'processing' }), 'ORDER_TRANSITION_INVALID'],
+        ['fulfillment processing', (item) => operate(item, { fulfillment: 'processing' }), 'ORDER_PAYMENT_REQUIRED'],
+        ['fulfillment ready_to_ship', (item) => operate(item, { fulfillment: 'ready_to_ship' }), 'ORDER_PAYMENT_REQUIRED'],
+        ['legacy shipped (indirect)', (item) => legacy(item, 'shipped'), 'ORDER_TRANSITION_INVALID'],
+        ['legacy delivered (indirect)', (item) => legacy(item, 'delivered'), 'ORDER_TRANSITION_INVALID'],
+        ['confirmed plus fulfillment processing in one change', (item) => operate(item, { order: 'confirmed', fulfillment: 'processing' }), 'ORDER_PAYMENT_REQUIRED'],
+      ]) {
+        finalGate('unpaid ' + method + ' order refuses ' + name + ' without touching stock, coupon or events', async () => {
+          const item = await seed(method);
+          const before = await snapshot(item);
+          const events = await orderEvents(item);
+          await assert.rejects(act(item), { status: 409, code });
+          assert.deepEqual(await snapshot(item), before);
+          assert.deepEqual(await orderEvents(item), events);
+        });
+      }
+    }
+
+    finalGate('paid IBAN and card orders keep their valid fulfilment path', async () => {
+      const iban = await seed('iban');
+      await submit(iban);
+      await legacy(iban, 'paid');
+      const card = await seed('card');
+      await callback(card, await enqueue(card));
+      assert.equal((await snapshot(card)).orders.payment_status, 'paid');
+      for (const item of [iban, card]) {
+        await operate(item, { order: 'processing' });
+        await operate(item, { order: 'ready_to_ship' });
+        await operate(item, { order: 'shipped', fulfillment: 'shipped' });
+        const delivered = await operate(item, { order: 'delivered', fulfillment: 'delivered' });
+        assert.equal(delivered.order.order_status, 'delivered');
+      }
+    });
+
+    finalGate('unpaid order transitions are tenant scoped', async () => {
+      const item = await seed('iban');
+      const before = await snapshot(item);
+      await assert.rejects(operate(item, { order: 'confirmed' }, orgB), { code: 'ORDER_NOT_FOUND' });
+      assert.deepEqual(await snapshot(item), before);
+    });
+
+    finalGate('concurrent payment and processing requests never leave a processing order unpaid', async () => {
+      const item = await seed('iban');
+      await submit(item);
+      const results = await Promise.allSettled([legacy(item, 'paid'), legacy(item, 'processing')]);
+      assert.equal(results[0].status, 'fulfilled');
+      const final = (await snapshot(item)).orders;
+      assert.equal(final.payment_status, 'paid');
+      if (results[1].status === 'rejected') assert.equal(results[1].reason.status, 409);
+      assert.equal(systemPool.waitingCount, 0);
+    });
+
+    // ---- Release blocker 1: migration 077 must fail closed on conflicting legacy ownership.
+    finalGate('migration 077 refuses conflicting legacy ownership atomically and backfills single owners idempotently', async () => {
+      const { runMigrations } = require('../../scripts/run-migrations');
+      const { runRollback } = require('../../scripts/rollback-migration');
+      const quiet = { log() {}, warn() {} };
+      const first = await seed('card');
+      const second = await seed('card', orgB);
+      const pid = 'legacy-owner-' + crypto.randomUUID();
+      const caseFor = async (item, type, event) => admin.query(
+        `insert into payment_reconciliation_cases
+           (organization_id, provider, provider_payment_id, case_type, order_id, callback_event_id,
+            order_total, order_status_at_detection)
+         values ($1,'iyzico',$2,$3,$4,$5,100,'cancelled')`, [item.org, pid, type, item.orderId, event.id]
+      );
+      const e1 = await enqueue(first);
+      const e2 = await enqueue(second);
+      // Return the database to its pre-077 shape, with legacy rows that no claim row ever guarded.
+      await admin.query('alter table payment_identity_claims disable trigger user');
+      try { await admin.query('delete from payment_identity_claims'); } finally {
+        await admin.query('alter table payment_identity_claims enable trigger user');
+      }
+      await runRollback({ pool: migratorPool, target: '077_payment_identity_claims.sql', logger: quiet });
+      try {
+        await caseFor(first, 'paid_on_cancelled_order', e1);
+        await caseFor(second, 'paid_on_cancelled_order', e2);
+        await assert.rejects(runMigrations({ pool: migratorPool, logger: quiet }), (error) => {
+          assert.match(error.message, /077/);
+          for (const secret of [pid, first.org, second.org, String(first.orderId), String(second.orderId)]) {
+            assert.ok(!String(error.message).includes(secret), 'error must not disclose payment id or tenant');
+            assert.ok(!String(error.stack || '').includes(secret), 'stack must not disclose payment id or tenant');
+          }
+          return true;
+        });
+        assert.equal((await admin.query("select to_regclass('payment_identity_claims') as t")).rows[0].t, null);
+        assert.equal((await admin.query(
+          "select count(*)::int as n from schema_migrations where filename = '077_payment_identity_claims.sql'"
+        )).rows[0].n, 0);
+        assert.equal((await admin.query(
+          "select count(*)::int as n from pg_proc where proname = 'reject_payment_identity_claim_mutation'"
+        )).rows[0].n, 0);
+        // Resolve the ambiguity (disposable DB: remove the foreign owner), then a single owner backfills.
+        await admin.query('delete from payment_reconciliation_cases where organization_id = $1 and provider_payment_id = $2',
+          [second.org, pid]);
+        await caseFor(first, 'provider_amount_mismatch', e1); // same owner, second case type: not a conflict
+        await runMigrations({ pool: migratorPool, logger: quiet });
+        const claims = await claimRows(pid);
+        assert.equal(claims.length, 1);
+        assert.deepEqual([claims[0].organization_id, String(claims[0].order_id)], [first.org, String(first.orderId)]);
+        await runMigrations({ pool: migratorPool, logger: quiet });
+        assert.equal((await claimRows(pid)).length, 1);
+      } finally {
+        await runMigrations({ pool: migratorPool, logger: quiet }).catch(() => {});
+      }
+    });
+
     finalGate('payment identity claim table forces RLS and keys each provider payment globally', async () => {
       const [flags] = await rows(
         `select relrowsecurity, relforcerowsecurity from pg_class

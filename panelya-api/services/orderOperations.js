@@ -39,6 +39,10 @@ const FULFILLMENT_TRANSITIONS = Object.freeze({
   cancelled: ['unfulfilled'],
 });
 
+const PAID_FAMILY = Object.freeze(['paid', 'partially_refunded', 'refunded']);
+const FULFILMENT_ORDER_STATES = Object.freeze(['confirmed', 'processing', 'ready_to_ship', 'shipped', 'delivered']);
+const FULFILMENT_STATES = Object.freeze(['processing', 'ready_to_ship', 'shipped', 'delivered']);
+
 const TRANSITIONS = Object.freeze({
   order: ORDER_TRANSITIONS,
   payment: PAYMENT_TRANSITIONS,
@@ -164,6 +168,14 @@ async function transitionOrderOperation(client, {
   if (row.order_status === 'cancelled' && next.order === 'confirmed'
     && ['iban', 'card'].includes(row.payment_method) && row.payment_status !== 'paid') {
     throw operationError('Siparis odeme incelemesi gerektiriyor', 409, 'ORDER_REOPEN_REQUIRES_PAYMENT_REVIEW');
+  }
+  // Unpaid IBAN/card orders must not enter fulfilment: confirming one also takes it out of the expiry
+  // path (stock held indefinitely) and processing/shipping would ship goods nobody has paid for.
+  // Every endpoint (status, transitions, bulk, v1, shipping, returns) funnels through this function.
+  if (['iban', 'card'].includes(row.payment_method) && !PAID_FAMILY.includes(next.payment)
+    && ((changedDomains.includes('order') && FULFILMENT_ORDER_STATES.includes(next.order))
+      || (changedDomains.includes('fulfillment') && FULFILMENT_STATES.includes(next.fulfillment)))) {
+    throw operationError('Odeme dogrulanmadan siparis isleme alinamaz', 409, 'ORDER_PAYMENT_REQUIRED');
   }
   let ibanEvidence = null;
   if (row.payment_method === 'iban' && next.payment === 'paid' && changedDomains.includes('payment')) {

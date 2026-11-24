@@ -29,6 +29,27 @@ create policy payment_identity_claims_tenant_policy on payment_identity_claims
   with check (app_rls_bypassed() or organization_id = nullif(current_setting('app.current_organization_id', true), '')::uuid);
 
 -- backfill:begin
+-- Fail closed on ambiguous legacy ownership: one provider payment id must belong to exactly one
+-- (tenant, order) across payment_evidence and payment_reconciliation_cases. The message carries
+-- no payment id or tenant data; the whole migration (table, claims, schema_migrations row) rolls back.
+do $$
+begin
+  if exists (
+    select 1 from (
+      select provider, provider_payment_id, organization_id, order_id
+        from payment_evidence where channel = 'card'
+      union all
+      select provider, provider_payment_id, organization_id, order_id
+        from payment_reconciliation_cases where provider <> 'manual'
+    ) known
+    group by provider, provider_payment_id
+    having count(distinct (organization_id, order_id)) > 1
+  ) then
+    raise exception 'Cannot apply migration 077: conflicting legacy payment identity ownership exists; resolve it before migrating'
+      using errcode = 'P0001';
+  end if;
+end $$;
+
 insert into payment_identity_claims (provider, provider_payment_id, organization_id, order_id, created_at)
 select distinct on (provider, provider_payment_id) provider, provider_payment_id, organization_id, order_id, created_at
   from (
